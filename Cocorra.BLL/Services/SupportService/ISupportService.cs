@@ -25,5 +25,6 @@ namespace Cocorra.BLL.Services.SupportService
         Task<Response<List<PendingChatDto>>> GetPendingChatsAsync(int pageNumber, int pageSize);
         Task<Response<List<SupportChatDetailsDto>>> GetAdminActiveChatsAsync(string adminId, int pageNumber, int pageSize);
         Task<Response<List<SupportChatDetailsDto>>> GetUserChatHistoryAsync(string userId, int pageNumber, int pageSize);
+        Task<Response<SupportChatDetailsDto>> GetUserOpenChatAsync(string userId);
     }
 }

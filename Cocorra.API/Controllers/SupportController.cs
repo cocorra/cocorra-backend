@@ -198,5 +198,16 @@ namespace Cocorra.API.Controllers
             var result = await _supportService.GetUserChatHistoryAsync(userIdString, pageNumber, pageSize);
             return StatusCode((int)result.StatusCode, result);
         }
+
+        [Authorize]
+        [HttpGet(Router.SupportRouting.MyChat)]
+        public async Task<IActionResult> GetMyChat()
+        {
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdString)) return Unauthorized();
+
+            var result = await _supportService.GetUserOpenChatAsync(userIdString);
+            return StatusCode((int)result.StatusCode, result);
+        }
     }
 }

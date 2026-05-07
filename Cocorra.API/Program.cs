@@ -29,6 +29,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using System.Security.Claims;
 
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
@@ -157,11 +158,6 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole<Guid>>(op =>
     op.Password.RequireNonAlphanumeric = true;
     op.Password.RequireDigit = true;
     op.Password.RequiredLength = 8;
-
-    // LOCKOUT: Disable auto-lockout for new users. Bans are managed exclusively
-    // through AdminService.ChangeUserStatusAsync, which explicitly enables lockout
-    // per-user when banning. This prevents Identity from ghost-locking users
-    // after failed password attempts.
     op.Lockout.AllowedForNewUsers = false;
     op.Lockout.MaxFailedAccessAttempts = 5;
     op.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
@@ -207,6 +203,20 @@ builder.Services.AddAuthentication(options =>
                 context.Token = accessToken;
             }
             return Task.CompletedTask;
+        },
+        OnTokenValidated = async context =>
+        {
+            var userManager = context.HttpContext.RequestServices.GetRequiredService<UserManager<ApplicationUser>>();
+            var userId = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (!string.IsNullOrEmpty(userId))
+            {
+                var user = await userManager.FindByIdAsync(userId);
+                if (user != null && await userManager.IsLockedOutAsync(user))
+                {
+                    context.Fail("User is locked out.");
+                }
+            }
         }
     };
 });

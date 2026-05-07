@@ -186,6 +186,12 @@ namespace Cocorra.BLL.Services.SupportService
                         report.ReportedUserId.Value,
                         "Your account has been temporarily suspended for 24 hours.");
 
+                    if (!string.IsNullOrEmpty(muteUser?.FcmToken))
+                    {
+                        var data = new Dictionary<string, string> { { "type", "account_locked" } };
+                        try { await _pushService.SendPushNotificationAsync(muteUser.FcmToken, "Account Locked", "Your account has been temporarily suspended for 24 hours.", data); } catch { }
+                    }
+
                     report.Status = "Resolved";
                     break;
 
@@ -203,6 +209,12 @@ namespace Cocorra.BLL.Services.SupportService
                     await _realTimeNotifier.ForceLogoutAsync(
                         report.ReportedUserId.Value,
                         "Your account has been permanently banned.");
+
+                    if (!string.IsNullOrEmpty(banUser?.FcmToken))
+                    {
+                        var data = new Dictionary<string, string> { { "type", "account_locked" } };
+                        try { await _pushService.SendPushNotificationAsync(banUser.FcmToken, "Account Locked", "Your account has been permanently banned.", data); } catch { }
+                    }
 
                     report.Status = "Resolved";
                     break;
@@ -414,6 +426,14 @@ namespace Cocorra.BLL.Services.SupportService
                 totalCount,
                 totalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
             });
+        }
+
+        public async Task<Response<SupportChatDetailsDto>> GetUserOpenChatAsync(string userId)
+        {
+            var chat = await _supportRepo.GetUserOpenChatAsync(userId);
+            if (chat == null) return NotFound<SupportChatDetailsDto>("No active support chat found.");
+
+            return Success(MapToDetailsDto(chat));
         }
 
         private SupportChatDetailsDto MapToDetailsDto(SupportChat chat)

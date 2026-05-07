@@ -76,6 +76,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string AdminReports = Prefix + "/admin/reports"; // GET
             public const string AdminUpdateReportStatus = Prefix + "/admin/reports/{id:guid}/status"; // PUT
             public const string AdminTakeReportAction = Prefix + "/admin/reports/{id:guid}/action"; // POST
+            public const string MyChat = Prefix + "/chat/my-chat"; // GET
         }
 
         public static class BlockRouting
