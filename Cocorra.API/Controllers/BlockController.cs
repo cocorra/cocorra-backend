@@ -20,7 +20,7 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpPost(Router.BlockRouting.Block)]
-        public async Task<IActionResult> BlockUser(Guid targetId)
+        public async Task<IActionResult> BlockUser(string target)
         {
             var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out Guid currentUserId))
@@ -28,7 +28,7 @@ namespace Cocorra.API.Controllers
                 return Unauthorized();
             }
 
-            var result = await _blockService.BlockUserAsync(currentUserId, targetId);
+            var result = await _blockService.BlockUserAsync(currentUserId, target);
 
             if (result.Succeeded)
                 return Ok(result);
@@ -36,7 +36,7 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpDelete(Router.BlockRouting.Unblock)]
-        public async Task<IActionResult> UnblockUser(Guid targetId)
+        public async Task<IActionResult> UnblockUser(string target)
         {
             var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out Guid currentUserId))
@@ -44,7 +44,7 @@ namespace Cocorra.API.Controllers
                 return Unauthorized();
             }
 
-            var result = await _blockService.UnblockUserAsync(currentUserId, targetId);
+            var result = await _blockService.UnblockUserAsync(currentUserId, target);
 
             if (result.Succeeded)
                 return Ok(result);

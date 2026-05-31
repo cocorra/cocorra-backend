@@ -24,6 +24,7 @@ namespace Cocorra.DAL.Data
         public DbSet<UserBlock> UserBlocks { get; set; }
         public DbSet<SupportChat> SupportChats { get; set; }
         public DbSet<SupportMessage> SupportMessages { get; set; }
+        public DbSet<BlockedDevices> BlockedDevices { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -170,13 +171,31 @@ namespace Cocorra.DAL.Data
                 .HasOne(ub => ub.Blocker)
                 .WithMany()
                 .HasForeignKey(ub => ub.BlockerId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.NoAction);
 
             builder.Entity<UserBlock>()
                 .HasOne(ub => ub.Blocked)
                 .WithMany()
                 .HasForeignKey(ub => ub.BlockedId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            builder.Entity<UserBlock>()
+                .HasOne(ub => ub.BlockedDevice)
+                .WithMany(bd => bd.UserBlocks)
+                .HasForeignKey(ub => ub.BlockedDeviceId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // ============================================================
+            // 8. Blocked Devices
+            // ============================================================
+            builder.Entity<BlockedDevices>()
+                .HasOne(bd => bd.ApplicationUser)
+                .WithMany(u => u.BlockedDevices)
+                .HasForeignKey(bd => bd.ApplicationUserId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            builder.Entity<BlockedDevices>()
+                .HasIndex(bd => bd.DeviceId);
 
             // ============================================================
             // 7. Support Chat Indexes

@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Cocorra.DAL.Repository.UserRepository;
+using Cocorra.DAL.Repository.BlockedDevicesRepository;
 
 namespace Cocorra.BLL.Services.AdminService
 {
@@ -23,9 +24,11 @@ namespace Cocorra.BLL.Services.AdminService
         private readonly string _baseUrl;
         private readonly IUserRepository _userRepository;
         private readonly IPushNotificationService _pushService;
+        private readonly IBlockedDevicesRepository _blockedDevicesRepository;
 
-        public AdminService(UserManager<ApplicationUser> userManager, IUploadVoice uploadVoice, IConfiguration configuration, IEmailService emailService, IUserRepository userRepository, IPushNotificationService pushService)
+        public AdminService(UserManager<ApplicationUser> userManager, IUploadVoice uploadVoice, IConfiguration configuration, IEmailService emailService, IUserRepository userRepository, IPushNotificationService pushService , IBlockedDevicesRepository blockedDevicesRepository)
         {
+            _blockedDevicesRepository = blockedDevicesRepository;
             _userManager = userManager;
             _uploadVoice = uploadVoice;
             _baseUrl = configuration["AppSettings:BaseUrl"]?.TrimEnd('/') ?? "";
@@ -228,6 +231,53 @@ namespace Cocorra.BLL.Services.AdminService
             };
 
             return Success(stats);
+        }
+
+        public async Task<Response<string>> BlockDeviceAndEmailAsync(BlockDeviceAndEmailDto model)
+        {
+            var user = await _userManager.FindByEmailAsync(model.Email);
+            if (user == null)
+            {
+                return NotFound<string>("User not found with the provided email.");
+            }
+
+            // 1. Change user status to Banned and lockout
+            user.Status = UserStatus.Banned;
+            await _userManager.SetLockoutEnabledAsync(user, true);
+            await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
+            
+            // SECURITY: Invalidate refresh token to prevent session resurrection.
+            user.RefreshToken = null;
+            user.RefreshTokenExpiryTime = DateTime.UtcNow;
+
+            await _userManager.UpdateAsync(user);
+
+            // 2. Add device to BlockedDevices table
+            var existingDevice = await _blockedDevicesRepository.GetByDeviceIdAsync(model.DeviceId);
+            if (existingDevice != null)
+            {
+                if (!existingDevice.IsBlocked)
+                {
+                    existingDevice.IsBlocked = true;
+                    await _blockedDevicesRepository.UpdateBlockedDeviceAsync(existingDevice);
+                }
+            }
+            else
+            {
+                var blockedDevice = new Cocorra.DAL.Models.BlockedDevices
+                {
+                    DeviceId = model.DeviceId,
+                    DeviceName = model.DeviceName,
+                    DeviceModel = model.DeviceModel,
+                    DeviceType = model.DeviceType,
+                    DeviceOs = model.DeviceOs,
+                    IsBlocked = true,
+                    ApplicationUserId = user.Id
+                };
+                await _blockedDevicesRepository.AddBlockedDeviceAsync(blockedDevice);
+            }
+
+            return Success("User email and device have been permanently blocked.");
         }
     }
 }

@@ -33,14 +33,25 @@ using System.Security.Claims;
 
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
+using Cocorra.DAL.Repository.BlockedDevicesRepository;
+using Cocorra.BLL.Services.BlockedDevicesService;
+using Cocorra.API.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Initialize Firebase Admin SDK
-FirebaseApp.Create(new AppOptions
+var firebaseConfigPath = Path.Combine(builder.Environment.ContentRootPath, "firebase-config.json");
+if (File.Exists(firebaseConfigPath))
 {
-    Credential = GoogleCredential.FromFile("firebase-config.json")
-});
+    FirebaseApp.Create(new AppOptions
+    {
+        Credential = GoogleCredential.FromFile(firebaseConfigPath)
+    });
+}
+else
+{
+    Console.WriteLine("Warning: firebase-config.json not found. Firebase Admin SDK initialization skipped.");
+}
 
 var jwtSettings = builder.Configuration.GetSection("JWTSetting");
 
@@ -100,6 +111,8 @@ builder.Services.AddSignalR(options =>
     options.MaximumReceiveMessageSize = 32 * 1024; // 32KB max per message
     options.StreamBufferCapacity = 10;
 });
+builder.Services.AddScoped<IBlockedDevicesRepository, BlockedDevicesRepository>();
+builder.Services.AddScoped<IBlockedDevicesService, BlockedDevicesService>();
 builder.Services.AddScoped<IUploadVoice, UploadVoice>();
 builder.Services.AddScoped<IRoomRepository, RoomRepository>();
 builder.Services.AddScoped<IRoomService, RoomService>();
@@ -120,7 +133,9 @@ builder.Services.AddScoped<ISupportService, SupportService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IOTPService, OTPService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.UserBlockRepository.IUserBlockRepository, Cocorra.DAL.Repository.UserBlockRepository.UserBlockRepository>();
+builder.Services.AddScoped<Cocorra.DAL.Repository.BlockedDevicesRepository.IBlockedDevicesRepository, Cocorra.DAL.Repository.BlockedDevicesRepository.BlockedDevicesRepository>();
 builder.Services.AddScoped<Cocorra.BLL.Services.BlockService.IBlockService, Cocorra.BLL.Services.BlockService.BlockService>();
+builder.Services.AddScoped<Cocorra.BLL.Services.BlockedDevicesService.IBlockedDevicesService, Cocorra.BLL.Services.BlockedDevicesService.BlockedDevicesService>();
 builder.Services.AddScoped(typeof(IGenericRepositoryAsync<>), typeof(GenericRepositoryAsync<>));
 builder.Services.AddMediatR(cfg =>
 {
@@ -326,6 +341,7 @@ app.UseCors("CorsPolicy");
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseDeviceBlocking();
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>

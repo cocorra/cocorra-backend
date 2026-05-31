@@ -11,5 +11,6 @@ namespace Cocorra.BLL.Services.AdminService
         Task<Response<UserDto>> GetUserByIdAsync(Guid userId);
         Task<Response<DashboardStatsDto>> GetDashboardStatsAsync();
         Task<Response<string>> ChangeUserStatusAsync(Guid userId, UserStatus newStatus);
+        Task<Response<string>> BlockDeviceAndEmailAsync(BlockDeviceAndEmailDto model);
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Cocorra.API.Hubs;
 using Cocorra.BLL.Services.AdminService;
@@ -47,11 +48,14 @@ namespace Cocorra.API.Controllers
 
         [HttpPut(Router.AdminRouting.ChangeStatus)]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> ChangeStatus(
-            [FromRoute] Guid id,
-            [FromBody] ChangeStatusDto model
-        )
+        public async Task<IActionResult> ChangeStatus([FromRoute] Guid id,[FromBody] ChangeStatusDto model)
         {
+            var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (adminId == id.ToString())
+            {
+                return BadRequest(new { succeeded = false, message = "You cannot change your own status." });
+            }
+
             var result = await _adminService.ChangeUserStatusAsync(id, model.NewStatus);
             if (!result.Succeeded)
                 return BadRequest(result);
@@ -81,6 +85,23 @@ namespace Cocorra.API.Controllers
         public async Task<IActionResult> GetDashboardStats()
         {
             var result = await _adminService.GetDashboardStatsAsync();
+            return Ok(result);
+        }
+
+        [HttpPost(Router.AdminRouting.Prefix + "/BlockDeviceAndEmail")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> BlockDeviceAndEmail([FromBody] BlockDeviceAndEmailDto model)
+        {
+            var adminEmail = User.FindFirstValue(ClaimTypes.Email);
+            if (string.Equals(adminEmail, model.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { succeeded = false, message = "You cannot perform this action on yourself." });
+            }
+
+            var result = await _adminService.BlockDeviceAndEmailAsync(model);
+            if (!result.Succeeded)
+                return BadRequest(result);
+
             return Ok(result);
         }
     }

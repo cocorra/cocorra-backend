@@ -82,8 +82,8 @@ namespace Cocorra.DAL.AppMetaData
         public static class BlockRouting
         {
             public const string Prefix = Rule + "Users";
-            public const string Block = Prefix + "/block/{targetId:guid}"; // POST
-            public const string Unblock = Prefix + "/unblock/{targetId:guid}"; // DELETE
+            public const string Block = Prefix + "/block/{target}"; // POST
+            public const string Unblock = Prefix + "/unblock/{target}"; // DELETE
         }
     }
 }

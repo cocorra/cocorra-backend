@@ -7,7 +7,7 @@ namespace Cocorra.DAL.Repository.UserBlockRepository
 {
     public interface IUserBlockRepository : IGenericRepositoryAsync<UserBlock>
     {
-        Task BlockUserAsync(Guid blockerId, Guid blockedId);
+        Task BlockUserAsync(Guid blockerId, Guid blockedId );
         Task UnblockUserAsync(Guid blockerId, Guid blockedId);
         Task<bool> IsBlockedAsync(Guid userId1, Guid userId2);
     }

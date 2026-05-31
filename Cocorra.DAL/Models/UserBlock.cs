@@ -14,5 +14,10 @@ namespace Cocorra.DAL.Models
         public Guid BlockedId { get; set; }
         [ForeignKey(nameof(BlockedId))]
         public virtual ApplicationUser? Blocked { get; set; }
+
+        public Guid? BlockedDeviceId { get; set; }
+        [ForeignKey(nameof(BlockedDeviceId))]
+        public virtual BlockedDevices? BlockedDevice { get; set; }
+
     }
 }
