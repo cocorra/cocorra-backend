@@ -1,74 +1,105 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Options;
+using Amazon.S3;
+using Amazon.S3.Model;
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace Cocorra.BLL.Services.Upload
 {
     public class UploadVoice : IUploadVoice
     {
         private readonly IWebHostEnvironment _env;
-
+        private readonly IAmazonS3 _s3Client;
+        private readonly Cocorra.BLL.Services.UploadService.MinioSettings _settings;
         private readonly string[] _allowedExtensions = { ".mp3", ".wav", ".m4a", ".ogg", ".aac" };
-
-       
         private const long _maxFileSize = 3 * 1024 * 1024;
 
-        public UploadVoice(IWebHostEnvironment env)
+        public UploadVoice(IWebHostEnvironment env, IAmazonS3 s3Client, IOptions<Cocorra.BLL.Services.UploadService.MinioSettings> settings)
         {
             _env = env;
+            _s3Client = s3Client;
+            _settings = settings.Value;
         }
 
         public async Task<string> SaveVoice(IFormFile voiceFile)
         {
             try
             {
-                if (voiceFile == null || voiceFile.Length == 0)
-                {
-                    return "Error:NoFile";
-                }
-
-                if (voiceFile.Length > _maxFileSize)
-                {
-                    return "Error:FileTooLarge"; 
-                }
+                if (voiceFile == null || voiceFile.Length == 0) return "Error:NoFile";
+                if (voiceFile.Length > _maxFileSize) return "Error:FileTooLarge"; 
 
                 string extension = Path.GetExtension(voiceFile.FileName).ToLower();
-                if (!_allowedExtensions.Contains(extension))
-                {
-                    return "Error:InvalidExtension"; 
-                }
+                if (!_allowedExtensions.Contains(extension)) return "Error:InvalidExtension"; 
 
-                
-                if (!voiceFile.ContentType.StartsWith("audio/"))
-                {
-                    return "Error:InvalidFileType";
-                }
-                
+                if (!voiceFile.ContentType.StartsWith("audio/")) return "Error:InvalidFileType";
                 if (!IsValidVoiceSignature(voiceFile)) return "Error:FakeVoice";
 
-                string contentPath = string.IsNullOrWhiteSpace(_env.WebRootPath)
-                    ? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")
-                    : _env.WebRootPath;
-                string path = Path.Combine(contentPath, "Uploads", "Voices");
-
-                if (!Directory.Exists(path))
-                {
-                    Directory.CreateDirectory(path);
-                }
-
                 string fileName = Guid.NewGuid().ToString() + extension;
-                string fullPath = Path.Combine(path, fileName);
+                var objectKey = $"Uploads/Voices/{fileName}";
 
-                using (var stream = new FileStream(fullPath, FileMode.Create))
+                using var newMemoryStream = new MemoryStream();
+                await voiceFile.CopyToAsync(newMemoryStream);
+                newMemoryStream.Position = 0; // Reset position before upload
+
+                var putRequest = new PutObjectRequest
                 {
-                    await voiceFile.CopyToAsync(stream);
-                }
+                    BucketName = _settings.BucketName,
+                    Key = objectKey,
+                    InputStream = newMemoryStream,
+                    ContentType = voiceFile.ContentType,
+                    DisablePayloadSigning = true // Improves performance with MinIO
+                };
 
-                return Path.Combine("Uploads", "Voices", fileName).Replace("\\", "/");
+                await _s3Client.PutObjectAsync(putRequest);
+
+                // Return full URL
+                return $"{_settings.PublicUrl}/{_settings.BucketName}/{objectKey}";
             }
             catch (Exception)
             {
                 return "Error:ServerException";
             }
+        }
+
+        public void DeleteVoice(string? voicePath)
+        {
+            if (string.IsNullOrEmpty(voicePath)) return;
+
+            try
+            {
+                if (voicePath.StartsWith("http"))
+                {
+                    // Parse object key from full URL
+                    var uri = new Uri(voicePath);
+                    var objectKey = uri.AbsolutePath.Replace($"/{_settings.BucketName}/", "").TrimStart('/');
+                    
+                    var deleteRequest = new DeleteObjectRequest
+                    {
+                        BucketName = _settings.BucketName,
+                        Key = objectKey
+                    };
+
+                    _s3Client.DeleteObjectAsync(deleteRequest).GetAwaiter().GetResult();
+                }
+                else
+                {
+                    string contentPath = string.IsNullOrWhiteSpace(_env.WebRootPath)
+                        ? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")
+                        : _env.WebRootPath;
+
+                    var fullPath = Path.Combine(contentPath, voicePath.Replace("/", "\\"));
+                    if (File.Exists(fullPath))
+                    {
+                        File.Delete(fullPath);
+                    }
+                }
+            }
+            catch { }
         }
 
         private bool IsValidVoiceSignature(IFormFile file)
@@ -83,7 +114,6 @@ namespace Cocorra.BLL.Services.Upload
                     
                     if (bytesRead < 2) return false;
 
-                    // MP3, WAV, OGG, raw AAC — fixed-length prefix signatures
                     var signatures = new List<byte[]>
                     {
                         new byte[] { 0x49, 0x44, 0x33 }, // MP3 (ID3)
@@ -99,8 +129,6 @@ namespace Cocorra.BLL.Services.Upload
                     if (signatures.Any(sig => headerBytes.Take(sig.Length).SequenceEqual(sig)))
                         return true;
 
-                    // M4A / AAC-in-MP4 container: the "ftyp" marker sits at offset 4
-                    // regardless of the box size byte at offset 0-3 (varies by encoder).
                     if (bytesRead >= 8)
                     {
                         byte[] ftypMarker = { 0x66, 0x74, 0x79, 0x70 }; // "ftyp"
@@ -115,25 +143,6 @@ namespace Cocorra.BLL.Services.Upload
             {
                 return false;
             }
-        }
-
-        public void DeleteVoice(string? voicePath)
-        {
-            if (string.IsNullOrEmpty(voicePath)) return;
-
-            try
-            {
-                string contentPath = string.IsNullOrWhiteSpace(_env.WebRootPath)
-                    ? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")
-                    : _env.WebRootPath;
-
-                var fullPath = Path.Combine(contentPath, voicePath.Replace("/", "\\"));
-                if (File.Exists(fullPath))
-                {
-                    File.Delete(fullPath);
-                }
-            }
-            catch { }
         }
     }
 }

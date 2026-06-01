@@ -41,6 +41,13 @@ namespace Cocorra.BLL.Services.AdminService
         {
             if (string.IsNullOrWhiteSpace(relativePath))
                 return null;
+                
+            if (relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || 
+                relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return relativePath;
+            }
+            
             return $"{_baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
         }
 

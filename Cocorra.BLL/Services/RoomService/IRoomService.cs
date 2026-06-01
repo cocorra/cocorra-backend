@@ -8,7 +8,7 @@ namespace Cocorra.BLL.Services.RoomService;
 public interface IRoomService
 {
     Task<Response<Guid>> CreateRoomAsync(CreateRoomDto dto, Guid hostId, IFormFile? roomImage = null);
-    Task<Response<bool>> JoinRoomAsync(Guid roomId, Guid userId);
+    Task<Response<JoinRoomResultDto>> JoinRoomAsync(Guid roomId, Guid userId);
     Task<Response<bool>> ApproveUserAsync(Guid roomId, Guid targetUserId, Guid hostId);
     Task<Response<RoomStateDto>> GetRoomStateAsync(Guid roomId, Guid currentUserId);
     Task<Response<IEnumerable<RoomSummaryDto>>> GetRoomsFeedAsync(Guid currentUserId, RoomCategory? categoryId = null, int pageNumber = 1, int pageSize = 20);

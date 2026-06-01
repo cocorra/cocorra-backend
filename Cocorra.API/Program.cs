@@ -32,10 +32,13 @@ using System.Text;
 using System.Security.Claims;
 
 using FirebaseAdmin;
-using Google.Apis.Auth.OAuth2;
 using Cocorra.DAL.Repository.BlockedDevicesRepository;
 using Cocorra.BLL.Services.BlockedDevicesService;
+using Cocorra.BLL.Services.LiveKit;
+using Cocorra.BLL.Services.UploadService;
 using Cocorra.API.Middleware;
+using Amazon.S3;
+using Google.Apis.Auth.OAuth2;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -144,9 +147,27 @@ builder.Services.AddMediatR(cfg =>
 });
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RealTimeNotifier.IRealTimeNotifier, Cocorra.API.Services.SignalRNotifier>();
+builder.Services.Configure<LiveKitSettings>(builder.Configuration.GetSection("LiveKit"));
+builder.Services.AddScoped<ILiveKitService, LiveKitService>();
 #endregion
 
+#region Add Minio
+builder.Services.Configure<MinioSettings>(builder.Configuration.GetSection("Minio"));
+builder.Services.AddSingleton<IAmazonS3>(sp =>
+{
+    var minioSettings = builder.Configuration.GetSection("Minio").Get<MinioSettings>();
+    var credentials = new Amazon.Runtime.BasicAWSCredentials(minioSettings.AccessKey, minioSettings.SecretKey);
+    
+    var config = new Amazon.S3.AmazonS3Config
+    {
+        ServiceURL = minioSettings.Endpoint,
+        ForcePathStyle = true, // مهم جداً لـ MinIO ليعمل بشكل صحيح كبديل لـ AWS
+        UseHttp = true // استخدم https إذا كنت قد أعددت SSL لـ MinIO
+    };
 
+    return new Amazon.S3.AmazonS3Client(credentials, config);
+});
+#endregion
 
 #region AddDbContext
 builder.Services.AddDbContext<AppDbContext>(options =>

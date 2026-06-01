@@ -1,4 +1,5 @@
 using Cocorra.BLL.Events;
+using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.DTOS.RoomDto;
 using Cocorra.DAL.Enums;
@@ -9,6 +10,7 @@ using MediatR;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Cocorra.BLL.Services.NotificationService;
 using Microsoft.AspNetCore.Identity;
 
@@ -22,6 +24,8 @@ public class RoomService : ResponseHandler, IRoomService
     private readonly string _baseUrl;
     private readonly IPushNotificationService _pushService;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ILiveKitService _liveKitService;
+    private readonly LiveKitSettings _liveKitSettings;
 
     private static readonly HashSet<int> AllowedDurations = new() { 2, 3 };
 
@@ -31,7 +35,9 @@ public class RoomService : ResponseHandler, IRoomService
         IUploadImage uploadImage, 
         IConfiguration configuration,
         IPushNotificationService pushService,
-        UserManager<ApplicationUser> userManager)
+        UserManager<ApplicationUser> userManager,
+        ILiveKitService liveKitService,
+        IOptions<LiveKitSettings> liveKitSettings)
     {
         _roomRepo = roomRepo;
         _mediator = mediator;
@@ -39,12 +45,21 @@ public class RoomService : ResponseHandler, IRoomService
         _baseUrl = configuration["AppSettings:BaseUrl"]?.TrimEnd('/') ?? "";
         _pushService = pushService;
         _userManager = userManager;
+        _liveKitService = liveKitService;
+        _liveKitSettings = liveKitSettings.Value;
     }
 
     private string? BuildFullUrl(string? relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
             return null;
+            
+        if (relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || 
+            relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return relativePath;
+        }
+        
         return $"{_baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
     }
 
@@ -132,18 +147,18 @@ public class RoomService : ResponseHandler, IRoomService
         return Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
     }
 
-    public async Task<Response<bool>> JoinRoomAsync(Guid roomId, Guid userId)
+    public async Task<Response<JoinRoomResultDto>> JoinRoomAsync(Guid roomId, Guid userId)
     {
         var room = await _roomRepo.GetByIdAsync(roomId);
-        if (room == null) return NotFound<bool>("Room not found.");
+        if (room == null) return NotFound<JoinRoomResultDto>("Room not found.");
 
         if (room.Status == RoomStatus.Scheduled)
         {
-            return BadRequest<bool>("This room has not started yet. You can set a reminder instead.");
+            return BadRequest<JoinRoomResultDto>("This room has not started yet. You can set a reminder instead.");
         }
         if (room.Status == RoomStatus.Ended || room.Status == RoomStatus.Cancelled)
         {
-            return BadRequest<bool>("This room is no longer available.");
+            return BadRequest<JoinRoomResultDto>("This room is no longer available.");
         }
 
         var allParticipants = await _roomRepo.GetRoomParticipantsAsync(roomId);
@@ -151,13 +166,25 @@ public class RoomService : ResponseHandler, IRoomService
 
         var existingParticipant = allParticipants.FirstOrDefault(p => p.UserId == userId);
 
+        // Helper to resolve display name for token generation
+        string ResolveName(RoomParticipant p) =>
+            ((p.User?.FirstName ?? "") + " " + (p.User?.LastName ?? "")).Trim();
+
         if (existingParticipant != null)
         {
-            if (existingParticipant.Status == ParticipantStatus.Active) return Success(true);
-            if (existingParticipant.Status == ParticipantStatus.Kicked) return BadRequest<bool>("You are banned from this room.");
+            if (existingParticipant.Status == ParticipantStatus.Active)
+            {
+                var name = ResolveName(existingParticipant);
+                var token = _liveKitService.GenerateToken(roomId, userId, name);
+                return Success(new JoinRoomResultDto
+                {
+                    LiveKitToken = token,
+                    LiveKitServerUrl = _liveKitSettings.ServerUrl
+                });
+            }
+            if (existingParticipant.Status == ParticipantStatus.Kicked) return BadRequest<JoinRoomResultDto>("You are banned from this room.");
 
-            
-            if (activeCount >= room.TotalCapacity) return BadRequest<bool>("Room is full.");
+            if (activeCount >= room.TotalCapacity) return BadRequest<JoinRoomResultDto>("Room is full.");
 
             existingParticipant.Status = room.IsPrivate ? ParticipantStatus.PendingApproval : ParticipantStatus.Active;
             existingParticipant.JoinedAt = DateTime.UtcNow;
@@ -166,12 +193,26 @@ public class RoomService : ResponseHandler, IRoomService
 
             await _roomRepo.UpdateParticipantAsync(existingParticipant);
             await _roomRepo.SaveChangesAsync();
-            return Success(room.IsPrivate ? false : true, room.IsPrivate ? "Request sent." : "Rejoined successfully.");
+
+            if (room.IsPrivate)
+            {
+                return Success(new JoinRoomResultDto(), message: "Request sent.");
+            }
+            else
+            {
+                var name = ResolveName(existingParticipant);
+                var token = _liveKitService.GenerateToken(roomId, userId, name);
+                return Success(new JoinRoomResultDto
+                {
+                    LiveKitToken = token,
+                    LiveKitServerUrl = _liveKitSettings.ServerUrl
+                }, message: "Rejoined successfully.");
+            }
         }
 
         if (activeCount >= room.TotalCapacity)
         {
-            return BadRequest<bool>("Room is full.");
+            return BadRequest<JoinRoomResultDto>("Room is full.");
         }
 
         var newParticipant = new RoomParticipant
@@ -209,7 +250,22 @@ public class RoomService : ResponseHandler, IRoomService
         await _roomRepo.AddParticipantAsync(newParticipant);
         await _roomRepo.SaveChangesAsync();
 
-        return Success(room.IsPrivate ? false : true, room.IsPrivate ? "Request sent, waiting for approval." : "Joined successfully.");
+        if (room.IsPrivate)
+        {
+            return Success(new JoinRoomResultDto(), message: "Request sent, waiting for approval.");
+        }
+        else
+        {
+            // Fetch the user info for the display name
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            var displayName = ((user?.FirstName ?? "") + " " + (user?.LastName ?? "")).Trim();
+            var token = _liveKitService.GenerateToken(roomId, userId, displayName);
+            return Success(new JoinRoomResultDto
+            {
+                LiveKitToken = token,
+                LiveKitServerUrl = _liveKitSettings.ServerUrl
+            }, message: "Joined successfully.");
+        }
     }
     public async Task<Response<bool>> ApproveUserAsync(Guid roomId, Guid targetUserId, Guid hostId)
     {
@@ -266,6 +322,10 @@ public class RoomService : ResponseHandler, IRoomService
         var participants = await _roomRepo.GetRoomParticipantsAsync(roomId);
         var activeParticipants = participants.Where(p => p.Status == ParticipantStatus.Active).ToList();
 
+        // Generate a fresh LiveKit token for the requesting user
+        var currentName = ((currentParticipant.User?.FirstName ?? "") + " " + (currentParticipant.User?.LastName ?? "")).Trim();
+        var liveKitToken = _liveKitService.GenerateToken(roomId, currentUserId, currentName);
+
         var roomState = new RoomStateDto
         {
             RoomId = room.Id,
@@ -284,7 +344,9 @@ public class RoomService : ResponseHandler, IRoomService
                 IsMuted = p.IsMuted,
                 IsHandRaised = p.IsHandRaised,
                 JoinedAt = p.JoinedAt
-            }).ToList()
+            }).ToList(),
+            LiveKitToken = liveKitToken,
+            LiveKitServerUrl = _liveKitSettings.ServerUrl
         };
 
         return Success(roomState);

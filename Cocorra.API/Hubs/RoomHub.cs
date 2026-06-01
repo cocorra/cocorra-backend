@@ -1,9 +1,11 @@
 using Cocorra.BLL.Services.ChatService;
+using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Repository.RoomRepository;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Security.Claims;
 
@@ -15,15 +17,19 @@ namespace Cocorra.API.Hubs
         private readonly IRoomRepository _roomRepo;
         private readonly IRoomService _roomService;
         private readonly IChatService _chatService;
+        private readonly ILiveKitService _liveKitService;
+        private readonly LiveKitSettings _liveKitSettings;
 
         // Thread-safe mapping: ConnectionId → (UserId, RoomId)
         private static readonly ConcurrentDictionary<string, (Guid UserId, Guid RoomId)> _connections = new();
 
-        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService)
+        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings)
         {
             _roomRepo = roomRepo;
             _roomService = roomService;
             _chatService = chatService;
+            _liveKitService = liveKitService;
+            _liveKitSettings = liveKitSettings.Value;
         }
 
         public override async Task OnConnectedAsync()
@@ -179,6 +185,15 @@ namespace Cocorra.API.Hubs
                 UserId = userId,
                 Name = participant.User?.FirstName + " " + participant.User?.LastName,
                 IsOnStage = participant.IsOnStage
+            });
+
+            // Send LiveKit token to the joining user so they can connect to the media server
+            var displayName = ((participant.User?.FirstName ?? "") + " " + (participant.User?.LastName ?? "")).Trim();
+            var liveKitToken = _liveKitService.GenerateToken(roomGuid, userId, displayName);
+            await Clients.Caller.SendAsync("LiveKitToken", new
+            {
+                Token = liveKitToken,
+                ServerUrl = _liveKitSettings.ServerUrl
             });
         }
 

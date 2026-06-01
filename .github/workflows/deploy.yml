@@ -1,0 +1,47 @@
+name: Deploy Cocorra API to Production
+
+on:
+  push:
+    branches:
+      - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. سحب الكود من الريبو إلى سيرفرات جيت هاب
+      - name: Checkout the code
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
+
+      # 2. نسخ الملفات بأمان من جيت هاب إلى السيرفر الخاص بك
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@a6e43c3aaf4e8e6b0b15bf34e19d71118f6b1ca7 # master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          source: "."
+          target: "/root/cocorra-app"
+
+      # 3. الدخول للسيرفر وتشغيل الكونتينر
+      - name: Build and start Docker containers
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          script: |
+            cd /root/cocorra-app
+            
+            # إيقاف الكونتينر القديم (إن وجد)
+            docker compose down
+            
+            # بناء وتشغيل الكونتينر الجديد
+            echo "Starting Docker build and deployment..."
+            docker compose up --build -d
+            
+            # تنظيف الصور القديمة لتوفير المساحة
+            docker image prune -f

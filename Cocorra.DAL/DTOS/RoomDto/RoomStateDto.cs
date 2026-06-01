@@ -15,4 +15,14 @@ public class RoomStateDto
     public RoomCategory Category { get; set; }
     public string CategoryName { get; set; } = string.Empty;
     public List<ParticipantStateDto> Participants { get; set; } = new List<ParticipantStateDto>();
+
+    /// <summary>
+    /// LiveKit JWT token for the requesting user to connect to the media server.
+    /// </summary>
+    public string? LiveKitToken { get; set; }
+
+    /// <summary>
+    /// The LiveKit server WebSocket URL.
+    /// </summary>
+    public string? LiveKitServerUrl { get; set; }
 }

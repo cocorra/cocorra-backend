@@ -1,0 +1,34 @@
+services:
+  cocorra-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cocorra-api
+    restart: unless-stopped
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      # Override connection string via environment variable if needed:
+      # - ConnectionStrings__DefaultConnection=Server=YOUR_DB_HOST;Database=CocorraDb;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;MultipleActiveResultSets=True;
+    volumes:
+      # Persist user-uploaded files (images, voice recordings)
+      - cocorra-uploads:/app/wwwroot/Uploads
+      # Mount Firebase config (place firebase-config.json next to docker-compose.yml)
+      - ./firebase-config.json:/app/firebase-config.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  cocorra-uploads:
+    driver: local
