@@ -13,7 +13,11 @@ jobs:
       # 1. سحب الكود من الريبو إلى سيرفرات جيت هاب
       - name: Checkout the code
         uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
-
+      - name: Generate appsettings.Production.json
+        run: |
+          cat << 'EOF' > Cocorra.API/appsettings.Production.json
+          ${{ secrets.APPSETTINGS_JSON }}
+          EOF
       # 2. نسخ الملفات بأمان من جيت هاب إلى السيرفر الخاص بك
       - name: Copy files to VPS
         uses: appleboy/scp-action@a6e43c3aaf4e8e6b0b15bf34e19d71118f6b1ca7 # master
