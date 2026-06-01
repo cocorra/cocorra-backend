@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cocorra.BLL", "Cocorra.BLL\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cocorra.API", "Cocorra.API\Cocorra.API.csproj", "{3390EA04-61EF-415D-897B-61FEDF740F59}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cocorra.Tests", "Cocorra.Tests\Cocorra.Tests.csproj", "{6AC2C8F0-9873-46D2-8297-1467A3BF591B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{3390EA04-61EF-415D-897B-61FEDF740F59}.Release|x64.Build.0 = Release|Any CPU
 		{3390EA04-61EF-415D-897B-61FEDF740F59}.Release|x86.ActiveCfg = Release|Any CPU
 		{3390EA04-61EF-415D-897B-61FEDF740F59}.Release|x86.Build.0 = Release|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Debug|x64.Build.0 = Debug|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Debug|x86.Build.0 = Debug|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Release|x64.ActiveCfg = Release|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Release|x64.Build.0 = Release|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Release|x86.ActiveCfg = Release|Any CPU
+		{6AC2C8F0-9873-46D2-8297-1467A3BF591B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,0 +1,34 @@
+**/.git
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/publish
+**/.gitignore
+**/*.user
+**/*.suo
+**/Thumbs.db
+**/.DS_Store
+**/node_modules
+
+# Docker files themselves
+**/Dockerfile
+**/docker-compose.yml
+**/.dockerignore
+
+# Documentation and non-essential files
+**/*.md
+**/*.pdf
+**/*.png
+**/*.mp3
+**/voice_rooms_schema.pdf
+**/database-script.sql
+**/index.html
+**/login.html
+**/*.publishSettings
+
+# Firebase config (mounted at runtime, not baked into image)
+**/firebase-config.json
+
+# Uploaded user content (mounted as volume)
+**/wwwroot/Uploads/

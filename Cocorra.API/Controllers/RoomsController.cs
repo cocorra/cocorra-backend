@@ -1,3 +1,4 @@
+using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS.RoomDto;
@@ -5,6 +6,7 @@ using Cocorra.DAL.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -16,10 +18,14 @@ namespace Cocorra.API.Controllers
     public class RoomsController : ControllerBase
     {
         private readonly IRoomService _roomService;
+        private readonly ILiveKitService _liveKitService;
+        private readonly LiveKitSettings _liveKitSettings;
 
-        public RoomsController(IRoomService roomService)
+        public RoomsController(IRoomService roomService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings)
         {
             _roomService = roomService;
+            _liveKitService = liveKitService;
+            _liveKitSettings = liveKitSettings.Value;
         }
 
         [HttpPost(Router.RoomRouting.Create)]
@@ -129,6 +135,29 @@ namespace Cocorra.API.Controllers
             var result = await _roomService.EndRoomAsync(roomId, hostId);
             return StatusCode((int)result.StatusCode, result);
         }
+
+        [HttpGet(Router.RoomRouting.Token)]
+        public async Task<IActionResult> GetLiveKitToken([FromRoute] Guid roomId)
+        {
+            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!Guid.TryParse(userIdString, out Guid userId)) return Unauthorized();
+
+            // Delegate to GetRoomStateAsync which already validates participation & generates a token
+            var result = await _roomService.GetRoomStateAsync(roomId, userId);
+            if (!result.Succeeded)
+                return StatusCode((int)result.StatusCode, result);
+
+            return Ok(new
+            {
+                Succeeded = true,
+                Data = new
+                {
+                    LiveKitToken = result.Data!.LiveKitToken,
+                    LiveKitServerUrl = result.Data.LiveKitServerUrl
+                }
+            });
+        }
+
 
         [Authorize(Roles = "Admin")]
         [HttpGet(Router.RoomRouting.AdminHistory)]
