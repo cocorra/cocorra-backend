@@ -51,8 +51,7 @@ namespace Cocorra.BLL.Services.Upload
                     BucketName = _settings.BucketName,
                     Key = objectKey,
                     InputStream = newMemoryStream,
-                    ContentType = voiceFile.ContentType,
-                    DisablePayloadSigning = true // Improves performance with MinIO
+                    ContentType = voiceFile.ContentType
                 };
 
                 await _s3Client.PutObjectAsync(putRequest);
@@ -60,8 +59,10 @@ namespace Cocorra.BLL.Services.Upload
                 // Return full URL
                 return $"{_settings.PublicUrl}/{_settings.BucketName}/{objectKey}";
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                System.IO.File.WriteAllText("minio-error.txt", ex.ToString());
+                Console.WriteLine($"MinIO Upload Error: {ex}");
                 return "Error:ServerException";
             }
         }

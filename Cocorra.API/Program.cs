@@ -290,7 +290,7 @@ builder.Services.AddRateLimiter(options =>
             factory: partition => new FixedWindowRateLimiterOptions
             {
                 AutoReplenishment = true,
-                PermitLimit = 100, // max 100 requests per minute per IP
+                PermitLimit = 10000, // max 10000 requests per minute per IP (Increased for Load Testing)
                 QueueLimit = 0,
                 Window = TimeSpan.FromMinutes(1)
             }));
