@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Cocorra.DAL.Models;
 using Cocorra.BLL.Services.BlockedDevicesService;
 using Cocorra.DAL.DTOS.BlockedDevicesDto;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.BlockService
 {
@@ -14,11 +15,14 @@ namespace Cocorra.BLL.Services.BlockService
         private readonly IUserBlockRepository _blockRepo;
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IBlockedDevicesService _blockedDevicesService; 
-        public BlockService(IUserBlockRepository blockRepo, UserManager<ApplicationUser> userManager,IBlockedDevicesService blockedDevicesService)
+        private readonly IEventTracker _eventTracker;
+
+        public BlockService(IUserBlockRepository blockRepo, UserManager<ApplicationUser> userManager, IBlockedDevicesService blockedDevicesService, IEventTracker eventTracker)
         {
             _blockRepo = blockRepo;
             _userManager = userManager;
             _blockedDevicesService = blockedDevicesService;
+            _eventTracker = eventTracker;
         }
 
         public async Task<Response<string>> BlockUserAsync(Guid currentUserId, string target)
@@ -46,6 +50,8 @@ namespace Cocorra.BLL.Services.BlockService
                 return NotFound<string>("Target user not found.");
 
             await _blockRepo.BlockUserAsync(currentUserId, targetUser.Id);  
+
+            _eventTracker.Track(EventTypes.UserBlocked, currentUserId, new { blockedUserId = targetUser.Id });
 
             // 3. الطرد الفوري (تدمير الـ RefreshToken لطرده من التطبيق فوراً)
             targetUser.RefreshToken = null;

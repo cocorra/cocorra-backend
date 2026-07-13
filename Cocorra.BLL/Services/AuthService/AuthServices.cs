@@ -20,6 +20,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.AuthServices
 {
@@ -33,6 +34,7 @@ namespace Cocorra.BLL.Services.AuthServices
         private readonly IEmailService _emailService;
         private readonly IUploadImage _uploadImage;
         private readonly IRoomRepository _roomRepository;
+        private readonly IEventTracker _eventTracker;
 
         public AuthServices(
             UserManager<ApplicationUser> userManager,
@@ -42,7 +44,8 @@ namespace Cocorra.BLL.Services.AuthServices
             IEmailService emailService,
             IUploadImage uploadImage,
             AppDbContext context,
-            IRoomRepository roomRepository)
+            IRoomRepository roomRepository,
+            IEventTracker eventTracker)
         {
             _uploadImage = uploadImage;
             _context = context;
@@ -52,6 +55,7 @@ namespace Cocorra.BLL.Services.AuthServices
             _emailService = emailService;
             _configuration = configuration;
             _roomRepository = roomRepository;
+            _eventTracker = eventTracker;
         }
 
         public async Task<Response<object>> RegisterAsync(RegisterDto dto)
@@ -121,6 +125,9 @@ namespace Cocorra.BLL.Services.AuthServices
                     user.RefreshToken = restrictedRefreshToken;
                     user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
                     await _userManager.UpdateAsync(user);
+
+                    _eventTracker.Track(EventTypes.UserRegistered, user.Id);
+                    _eventTracker.Track(EventTypes.VoiceVerificationSubmitted, user.Id);
 
                     var restrictedAuth = new AuthModel
                     {
@@ -241,7 +248,10 @@ namespace Cocorra.BLL.Services.AuthServices
             var result = await _userManager.UpdateAsync(user);
 
             if (result.Succeeded)
+            {
+                _eventTracker.Track(EventTypes.MbtiSubmitted, userId, new { mbti = dto.MBTI });
                 return Success("MBTI updated successfully.");
+            }
 
             return BadRequest<string>("Failed to update MBTI.");
         }
@@ -478,6 +488,8 @@ namespace Cocorra.BLL.Services.AuthServices
             if (!result.Succeeded)
                 return BadRequest<string>("Failed to update voice verification.");
 
+            _eventTracker.Track(EventTypes.VoiceVerificationSubmitted, user.Id);
+
             return Success("Voice re-recorded successfully. Your account is now pending review.");
         }
 
@@ -537,6 +549,7 @@ namespace Cocorra.BLL.Services.AuthServices
 
             try
             {
+                _eventTracker.Track(EventTypes.AccountDeleted, userId, new { reason = "User requested deletion" });
                 var result = await _userManager.DeleteAsync(user);
 
                 if (!result.Succeeded)

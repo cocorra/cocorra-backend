@@ -11,5 +11,10 @@ namespace Cocorra.API.Middleware
         {
             return builder.UseMiddleware<DeviceBlockingMiddleware>();
         }
+
+        public static IApplicationBuilder UseSessionTracking(this IApplicationBuilder builder)
+        {
+            return builder.UseMiddleware<SessionTrackingMiddleware>();
+        }
     }
 }

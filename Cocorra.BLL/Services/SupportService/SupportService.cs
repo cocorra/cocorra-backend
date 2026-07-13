@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore;
 using Cocorra.DAL.Repository.SupportRepository;
 using Microsoft.AspNetCore.Identity;
 using Cocorra.BLL.Services.NotificationService;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.SupportService
 {
@@ -26,6 +27,7 @@ namespace Cocorra.BLL.Services.SupportService
         private readonly INotificationRepository _notificationRepo;
         private readonly IRealTimeNotifier _realTimeNotifier;
         private readonly IPushNotificationService _pushService;
+        private readonly IEventTracker _eventTracker;
 
         public SupportService(
             ISupportRepository supportRepo,
@@ -33,7 +35,8 @@ namespace Cocorra.BLL.Services.SupportService
             UserManager<ApplicationUser> userManager,
             INotificationRepository notificationRepo,
             IRealTimeNotifier realTimeNotifier,
-            IPushNotificationService pushService)
+            IPushNotificationService pushService,
+            IEventTracker eventTracker)
         {
             _supportRepo = supportRepo;
             _uploadImage = uploadImage;
@@ -41,6 +44,7 @@ namespace Cocorra.BLL.Services.SupportService
             _notificationRepo = notificationRepo;
             _realTimeNotifier = realTimeNotifier;
             _pushService = pushService;
+            _eventTracker = eventTracker;
         }
 
         public async Task<Response<string>> SubmitTicketAsync(Guid? userId, SubmitSupportTicketDto dto)
@@ -89,6 +93,8 @@ namespace Cocorra.BLL.Services.SupportService
             };
 
             await _supportRepo.AddReportAsync(report);
+
+            _eventTracker.Track(EventTypes.UserReported, reporterId, new { reportedUserId = dto.ReportedUserId, reportedRoomId = dto.ReportedRoomId, category = dto.Category.ToString(), description = dto.Description });
 
             return Success("Report submitted successfully.");
         }

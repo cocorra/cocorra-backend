@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using static Cocorra.BLL.Services.Events.ChatEvents;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.ChatService
 {
@@ -21,14 +22,16 @@ namespace Cocorra.BLL.Services.ChatService
         private readonly IPushNotificationService _pushService;
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IMediator _mediator; 
+        private readonly IEventTracker _eventTracker;
 
-        public ChatService(IUserBlockRepository blockRepo, IMessageRepository messageRepo, IPushNotificationService pushService, UserManager<ApplicationUser> userManager, IMediator mediator)
+        public ChatService(IUserBlockRepository blockRepo, IMessageRepository messageRepo, IPushNotificationService pushService, UserManager<ApplicationUser> userManager, IMediator mediator, IEventTracker eventTracker)
         {
             _blockRepo = blockRepo;
             _messageRepo = messageRepo;
             _pushService = pushService;
             _userManager = userManager;
             _mediator = mediator;
+            _eventTracker = eventTracker;
         }
 
         public async Task<Response<IEnumerable<MessageDto>>> GetChatHistoryAsync(Guid currentUserId, Guid friendId, int pageNumber, int pageSize)
@@ -74,6 +77,8 @@ namespace Cocorra.BLL.Services.ChatService
             };
 
             await _messageRepo.AddAsync(message);
+
+            _eventTracker.Track(EventTypes.MessageSent, senderId, new { receiverId });
 
             var dto = new MessageDto
             {

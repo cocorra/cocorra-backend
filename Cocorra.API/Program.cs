@@ -33,10 +33,14 @@ using System.Security.Claims;
 
 using FirebaseAdmin;
 using Cocorra.DAL.Repository.BlockedDevicesRepository;
+using Cocorra.BLL.Services.AnalyticsService;
 using Cocorra.BLL.Services.BlockedDevicesService;
 using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.UploadService;
 using Cocorra.API.Middleware;
+using Cocorra.DAL.Repository.AnalyticsRepository;
+using Cocorra.BLL.Services.EventTracking;
+using Cocorra.DAL.Models;
 using Amazon.S3;
 using Google.Apis.Auth.OAuth2;
 
@@ -149,6 +153,25 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RealTimeNotifier.IRealTimeNotifier, Cocorra.API.Services.SignalRNotifier>();
 builder.Services.Configure<LiveKitSettings>(builder.Configuration.GetSection("LiveKit"));
 builder.Services.AddScoped<ILiveKitService, LiveKitService>();
+
+// Analytics — Data-Driven Decisions
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<IAnalyticsRepository, AnalyticsRepository>();
+builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
+
+// Event tracking backbone
+// Fail fast if the IP-hash salt is missing: without it, IP pseudonymization would
+// silently fall back to a public value and become reversible (see USER_TRACKING_PLAN §4).
+if (string.IsNullOrWhiteSpace(builder.Configuration["Analytics:IpHashSalt"]))
+    throw new InvalidOperationException(
+        "Analytics:IpHashSalt is not configured. Set a secret salt (env var or secrets store) before starting.");
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(System.Threading.Channels.Channel.CreateBounded<UserEvent>(
+    new System.Threading.Channels.BoundedChannelOptions(10_000) { FullMode = System.Threading.Channels.BoundedChannelFullMode.DropWrite }));
+builder.Services.AddSingleton<IEventTracker, EventTracker>();
+builder.Services.AddHostedService<EventFlushService>();
+builder.Services.AddHostedService<EventCleanupService>();
 #endregion
 
 #region Add Minio
@@ -290,7 +313,7 @@ builder.Services.AddRateLimiter(options =>
             factory: partition => new FixedWindowRateLimiterOptions
             {
                 AutoReplenishment = true,
-                PermitLimit = 10000, // max 10000 requests per minute per IP (Increased for Load Testing)
+                PermitLimit = 100000, // max 100000 requests per minute per IP (Increased for Heavy Load Testing)
                 QueueLimit = 0,
                 Window = TimeSpan.FromMinutes(1)
             }));
@@ -362,6 +385,7 @@ app.UseCors("CorsPolicy");
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseSessionTracking();
 app.UseDeviceBlocking();
 
 app.UseSwagger();

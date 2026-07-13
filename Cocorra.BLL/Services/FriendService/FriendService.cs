@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.FriendService
 {
@@ -20,13 +21,15 @@ namespace Cocorra.BLL.Services.FriendService
         private readonly INotificationRepository _notificationRepo;
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IPushNotificationService _pushService; 
+        private readonly IEventTracker _eventTracker;
 
-        public FriendService(IFriendRepository friendRepo, INotificationRepository notificationRepo, UserManager<ApplicationUser> userManager, IPushNotificationService pushService)
+        public FriendService(IFriendRepository friendRepo, INotificationRepository notificationRepo, UserManager<ApplicationUser> userManager, IPushNotificationService pushService, IEventTracker eventTracker)
         {
             _friendRepo = friendRepo;
             _notificationRepo = notificationRepo;
             _userManager = userManager;
             _pushService = pushService;
+            _eventTracker = eventTracker;
         }
 
         public async Task<Response<UserSearchDto>> SearchUserByIdAsync(Guid currentUserId, Guid targetUserId)
@@ -116,6 +119,8 @@ namespace Cocorra.BLL.Services.FriendService
 
                 transaction.Commit();
 
+                _eventTracker.Track(EventTypes.FriendRequestSent, currentUserId, new { targetUserId });
+
                 try 
                 {
                     if (!string.IsNullOrEmpty(targetUser?.FcmToken))
@@ -165,6 +170,8 @@ namespace Cocorra.BLL.Services.FriendService
                     };
                     await _notificationRepo.AddAsync(notification);
                     transaction.Commit();
+
+                    _eventTracker.Track(EventTypes.FriendRequestAccepted, currentUserId, new { senderId });
 
                     try 
                     { 

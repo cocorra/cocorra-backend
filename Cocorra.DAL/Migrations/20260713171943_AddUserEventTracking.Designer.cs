@@ -4,6 +4,7 @@ using Cocorra.DAL.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Cocorra.DAL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260713171943_AddUserEventTracking")]
+    partial class AddUserEventTracking
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -701,9 +704,6 @@ namespace Cocorra.DAL.Migrations
                     b.Property<string>("PropertiesJson")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid?>("RoomId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid?>("SessionId")
                         .HasColumnType("uniqueidentifier");
 
@@ -719,8 +719,6 @@ namespace Cocorra.DAL.Migrations
                     b.HasIndex("EventType", "OccurredAtUtc");
 
                     b.HasIndex("UserId", "OccurredAtUtc");
-
-                    b.HasIndex("RoomId", "EventType", "OccurredAtUtc");
 
                     b.ToTable("UserEvents");
                 });
