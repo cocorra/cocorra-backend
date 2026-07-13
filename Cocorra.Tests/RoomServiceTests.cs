@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Moq;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.Tests;
 
@@ -21,6 +22,7 @@ public class RoomServiceTests
     private readonly Mock<IMediator> _mediatorMock = new();
     private readonly Mock<IUploadImage> _uploadImageMock = new();
     private readonly Mock<IPushNotificationService> _pushServiceMock = new();
+    private readonly Mock<IEventTracker> _eventTrackerMock = new();
     private readonly Mock<ILiveKitService> _liveKitServiceMock = new();
     private readonly LiveKitSettings _liveKitSettings = new()
     {
@@ -47,7 +49,8 @@ public class RoomServiceTests
             _pushServiceMock.Object,
             userManager.Object,
             _liveKitServiceMock.Object,
-            Options.Create(_liveKitSettings)
+            Options.Create(_liveKitSettings),
+            _eventTrackerMock.Object
         );
     }
 

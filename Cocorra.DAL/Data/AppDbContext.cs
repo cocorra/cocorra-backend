@@ -25,6 +25,7 @@ namespace Cocorra.DAL.Data
         public DbSet<SupportChat> SupportChats { get; set; }
         public DbSet<SupportMessage> SupportMessages { get; set; }
         public DbSet<BlockedDevices> BlockedDevices { get; set; }
+        public DbSet<UserEvent> UserEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -198,6 +199,29 @@ namespace Cocorra.DAL.Data
                 .HasIndex(bd => bd.DeviceId);
 
             // ============================================================
+            // Analytics Indexes — support fast time-windowed aggregate queries
+            // ============================================================
+
+            // User growth: filter/bucket by registration date
+            builder.Entity<ApplicationUser>()
+                .HasIndex(u => u.CreatedAt)
+                .HasDatabaseName("IX_Users_CreatedAt");
+
+            // Report insights: filter by report creation date
+            builder.Entity<Report>()
+                .HasIndex(r => r.CreatedAt)
+                .HasDatabaseName("IX_Reports_CreatedAt");
+
+            // Participation analytics: filter by join date and sort by spoken time
+            builder.Entity<RoomParticipant>()
+                .HasIndex(p => p.JoinedAt)
+                .HasDatabaseName("IX_RoomParticipants_JoinedAt");
+
+            builder.Entity<RoomParticipant>()
+                .HasIndex(p => p.TotalSpokenSeconds)
+                .HasDatabaseName("IX_RoomParticipants_TotalSpokenSeconds");
+
+            // ============================================================
             // 7. Support Chat Indexes
             // ============================================================
 
@@ -220,7 +244,25 @@ namespace Cocorra.DAL.Data
             builder.Entity<SupportMessage>()
                 .HasIndex(m => new { m.SupportChatId, m.IsFromAdmin })
                 .HasDatabaseName("IX_SupportMessages_ChatId_IsFromAdmin");
-        }   
+
+            // ============================================================
+            // 9. User Events Tracking Config
+            // ============================================================
+            builder.Entity<UserEvent>(e =>
+            {
+                // Indexes for filtering
+                e.HasIndex(x => new { x.EventType, x.OccurredAtUtc });
+                e.HasIndex(x => new { x.UserId, x.OccurredAtUtc });
+                // Room-scoped analytics (most-active-room, empty-room rate, …)
+                e.HasIndex(x => new { x.RoomId, x.EventType, x.OccurredAtUtc });
+
+                // SetNull on User deletion to keep anonymous event stats
+                e.HasOne(x => x.User)
+                 .WithMany()
+                 .HasForeignKey(x => x.UserId)
+                 .OnDelete(DeleteBehavior.SetNull);
+            });
+        }
 
     }
 }

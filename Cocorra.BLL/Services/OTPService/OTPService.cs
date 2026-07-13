@@ -8,6 +8,7 @@ using Cocorra.BLL.Base;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.OTPService
 {
@@ -16,11 +17,14 @@ namespace Cocorra.BLL.Services.OTPService
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IEmailService _emailService;
         private readonly IConfiguration _configuration;
-        public OTPService(IConfiguration configuration, UserManager<ApplicationUser> userManager, IEmailService emailService,IHttpContextAccessor httpContextAccessor)
+        private readonly IEventTracker _eventTracker;
+
+        public OTPService(IConfiguration configuration, UserManager<ApplicationUser> userManager, IEmailService emailService, IHttpContextAccessor httpContextAccessor, IEventTracker eventTracker)
         {
             _configuration = configuration;
             _emailService = emailService;
             _userManager = userManager;
+            _eventTracker = eventTracker;
         }
 
         public async Task<Response<string>> ResendOtpAsync(string email)
@@ -60,6 +64,8 @@ namespace Cocorra.BLL.Services.OTPService
 
             user.EmailConfirmed = true;
             await _userManager.UpdateAsync(user);
+
+            _eventTracker.Track(EventTypes.EmailConfirmed, user.Id);
 
             return Success("Email confirmed successfully");
         }

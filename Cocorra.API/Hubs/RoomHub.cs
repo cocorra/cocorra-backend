@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Security.Claims;
+using Cocorra.BLL.Services.EventTracking;
+using Cocorra.DAL.Models;
 
 namespace Cocorra.API.Hubs
 {
@@ -19,17 +21,19 @@ namespace Cocorra.API.Hubs
         private readonly IChatService _chatService;
         private readonly ILiveKitService _liveKitService;
         private readonly LiveKitSettings _liveKitSettings;
+        private readonly IEventTracker _eventTracker;
 
         // Thread-safe mapping: ConnectionId → (UserId, RoomId)
         private static readonly ConcurrentDictionary<string, (Guid UserId, Guid RoomId)> _connections = new();
 
-        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings)
+        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker)
         {
             _roomRepo = roomRepo;
             _roomService = roomService;
             _chatService = chatService;
             _liveKitService = liveKitService;
             _liveKitSettings = liveKitSettings.Value;
+            _eventTracker = eventTracker;
         }
 
         public override async Task OnConnectedAsync()
@@ -43,6 +47,7 @@ namespace Cocorra.API.Hubs
             {
                 try
                 {
+                    _eventTracker.Track(EventTypes.RoomLeft, mapping.UserId, new { roomId = mapping.RoomId });
                     // Check if this user is the host — if so, end the room entirely
                     var room = await _roomRepo.GetByIdAsync(mapping.RoomId);
                     if (room != null && room.HostId == mapping.UserId && room.Status == RoomStatus.Live)
@@ -180,6 +185,8 @@ namespace Cocorra.API.Hubs
 
             await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
 
+            _eventTracker.Track(EventTypes.RoomJoined, userId, new { roomId = roomGuid });
+
             await Clients.Group(roomId).SendAsync("UserJoined", new
             {
                 UserId = userId,
@@ -203,6 +210,8 @@ namespace Cocorra.API.Hubs
             var roomGuid = ParseGuidSafe(roomId, "Room ID");
 
             await _roomService.LeaveRoomCleanupAsync(roomGuid, userId);
+
+            _eventTracker.Track(EventTypes.RoomLeft, userId, new { roomId = roomGuid });
 
             _connections.TryRemove(Context.ConnectionId, out _);
 
@@ -349,6 +358,7 @@ namespace Cocorra.API.Hubs
             if (muteStatus == false && participant.IsMuted == true)
             {
                 participant.LastUnmutedAt = DateTime.UtcNow;
+                _eventTracker.Track(EventTypes.MicActivated, userId, new { roomId = roomGuid });
             }
             else if (muteStatus == true && participant.IsMuted == false)
             {

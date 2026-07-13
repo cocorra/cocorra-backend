@@ -86,5 +86,21 @@ namespace Cocorra.DAL.AppMetaData
             public const string Block = Prefix + "/block/{target}"; // POST
             public const string Unblock = Prefix + "/unblock/{target}"; // DELETE
         }
+
+        public static class AnalyticsRouting
+        {
+            public const string Prefix = Rule + "Analytics";
+            public const string Summary       = Prefix + "/Summary";         // GET ?from=&to=
+            public const string UserGrowth    = Prefix + "/Users/Growth";    // GET ?granularity=&from=&to=&limit=
+            public const string Rooms         = Prefix + "/Rooms";           // GET ?from=&to=&limit=
+            public const string Participation = Prefix + "/Participation";   // GET ?from=&to=&limit=
+            public const string Reports       = Prefix + "/Reports";         // GET ?from=&to=&limit=
+            public const string Funnel        = Prefix + "/Funnel";          // GET ?steps=&from=&to=
+            public const string Retention     = Prefix + "/Retention";       // GET ?cohortEvent=&activeEvent=&from=&to=
+            public const string ActiveRooms   = Prefix + "/Rooms/Active";    // GET ?from=&to=&limit=
+            public const string PeakHours     = Prefix + "/PeakHours";       // GET ?from=&to=
+            public const string VoiceDropOff  = Prefix + "/VoiceVerification/DropOff"; // GET ?from=&to=
+            public const string ActiveVsPassive = Prefix + "/Participation/ActiveVsPassive"; // GET ?from=&to=
+        }
     }
 }

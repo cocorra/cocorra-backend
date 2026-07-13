@@ -13,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Cocorra.BLL.Services.NotificationService;
 using Microsoft.AspNetCore.Identity;
+using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.RoomService;
 
@@ -26,6 +27,7 @@ public class RoomService : ResponseHandler, IRoomService
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ILiveKitService _liveKitService;
     private readonly LiveKitSettings _liveKitSettings;
+    private readonly IEventTracker _eventTracker;
 
     private static readonly HashSet<int> AllowedDurations = new() { 2, 3 };
 
@@ -37,7 +39,8 @@ public class RoomService : ResponseHandler, IRoomService
         IPushNotificationService pushService,
         UserManager<ApplicationUser> userManager,
         ILiveKitService liveKitService,
-        IOptions<LiveKitSettings> liveKitSettings)
+        IOptions<LiveKitSettings> liveKitSettings,
+        IEventTracker eventTracker)
     {
         _roomRepo = roomRepo;
         _mediator = mediator;
@@ -47,6 +50,7 @@ public class RoomService : ResponseHandler, IRoomService
         _userManager = userManager;
         _liveKitService = liveKitService;
         _liveKitSettings = liveKitSettings.Value;
+        _eventTracker = eventTracker;
     }
 
     private string? BuildFullUrl(string? relativePath)
@@ -134,6 +138,7 @@ public class RoomService : ResponseHandler, IRoomService
             }
 
             await _roomRepo.AddAsync(room);
+            _eventTracker.Track(EventTypes.RoomCreated, hostId, new { roomId = room.Id, category = room.Category.ToString(), isPrivate = room.IsPrivate });
             return Success(room.Id);
         }
         catch (Exception ex)
@@ -196,6 +201,7 @@ public class RoomService : ResponseHandler, IRoomService
 
             if (room.IsPrivate)
             {
+                _eventTracker.Track(EventTypes.RoomJoinRequested, userId, new { roomId });
                 return Success(new JoinRoomResultDto(), message: "Request sent.");
             }
             else
@@ -252,6 +258,7 @@ public class RoomService : ResponseHandler, IRoomService
 
         if (room.IsPrivate)
         {
+            _eventTracker.Track(EventTypes.RoomJoinRequested, userId, new { roomId });
             return Success(new JoinRoomResultDto(), message: "Request sent, waiting for approval.");
         }
         else
@@ -304,6 +311,7 @@ public class RoomService : ResponseHandler, IRoomService
             try { await _pushService.SendPushNotificationAsync(approvedUser.FcmToken, notification.Title, notification.Message, data); } catch { }
         }
 
+        _eventTracker.Track(EventTypes.RoomJoinApproved, hostId, new { roomId, approvedUserId = targetUserId });
         await _roomRepo.SaveChangesAsync();
         await _mediator.Publish(new UserApprovedToJoinRoomEvent(targetUserId, roomId));
         return Success(true, "User approved successfully.");
@@ -532,6 +540,17 @@ public class RoomService : ResponseHandler, IRoomService
         }
 
         await _roomRepo.SaveChangesAsync();
+
+        _eventTracker.Track(EventTypes.RoomEnded, hostId, new { roomId, durationHours = (DateTime.UtcNow - room.StartDate).TotalHours, participantCount = participants.Count });
+
+        foreach (var p in participants)
+        {
+            if (p.TotalSpokenSeconds > 0)
+            {
+                _eventTracker.Track(EventTypes.SpeakingTimeLogged, p.UserId, new { roomId, spokenSeconds = p.TotalSpokenSeconds });
+            }
+        }
+
         return Success("Room has been ended successfully.");
     }
 

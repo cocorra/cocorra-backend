@@ -13,6 +13,8 @@ using System.Collections.Generic;
 using System.IO;
 using Cocorra.DAL.Repository.UserRepository;
 using Cocorra.DAL.Repository.BlockedDevicesRepository;
+using Cocorra.BLL.Services.EventTracking;
+using Cocorra.DAL.Data;
 
 namespace Cocorra.BLL.Services.AdminService
 {
@@ -25,8 +27,19 @@ namespace Cocorra.BLL.Services.AdminService
         private readonly IUserRepository _userRepository;
         private readonly IPushNotificationService _pushService;
         private readonly IBlockedDevicesRepository _blockedDevicesRepository;
+        private readonly IEventTracker _eventTracker;
+        private readonly AppDbContext _context;
 
-        public AdminService(UserManager<ApplicationUser> userManager, IUploadVoice uploadVoice, IConfiguration configuration, IEmailService emailService, IUserRepository userRepository, IPushNotificationService pushService , IBlockedDevicesRepository blockedDevicesRepository)
+        public AdminService(
+            UserManager<ApplicationUser> userManager, 
+            IUploadVoice uploadVoice, 
+            IConfiguration configuration, 
+            IEmailService emailService, 
+            IUserRepository userRepository, 
+            IPushNotificationService pushService, 
+            IBlockedDevicesRepository blockedDevicesRepository,
+            IEventTracker eventTracker,
+            AppDbContext context)
         {
             _blockedDevicesRepository = blockedDevicesRepository;
             _userManager = userManager;
@@ -35,6 +48,8 @@ namespace Cocorra.BLL.Services.AdminService
             _emailService = emailService;
             _userRepository = userRepository;
             _pushService = pushService;
+            _eventTracker = eventTracker;
+            _context = context;
         }
 
         private string? BuildFullUrl(string? relativePath)
@@ -126,6 +141,17 @@ namespace Cocorra.BLL.Services.AdminService
 
             if (result.Succeeded)
             {
+                _eventTracker.Track(EventTypes.VoiceVerificationResult, user.Id, new { status = newStatus.ToString() });
+
+                if (newStatus == UserStatus.Active)
+                {
+                    var alreadyActivated = await _context.UserEvents.AnyAsync(e => e.UserId == user.Id && e.EventType == EventTypes.ActivationCompleted);
+                    if (!alreadyActivated)
+                    {
+                        _eventTracker.Track(EventTypes.ActivationCompleted, user.Id);
+                    }
+                }
+
                 try
                 {
                     await SendVerificationEmailAsync(user, newStatus);
