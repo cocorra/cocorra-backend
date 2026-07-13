@@ -303,22 +303,6 @@ builder.Services.AddAuthorization(options =>
 });
 #endregion
 
-#region Rate Limiting & Exception Handling
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? httpContext.Request.Headers.Host.ToString(),
-            factory: partition => new FixedWindowRateLimiterOptions
-            {
-                AutoReplenishment = true,
-                PermitLimit = 100000, // max 100000 requests per minute per IP (Increased for Heavy Load Testing)
-                QueueLimit = 0,
-                Window = TimeSpan.FromMinutes(1)
-            }));
-});
-#endregion
 
 
 
