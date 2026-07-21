@@ -28,7 +28,7 @@ public class LiveKitServiceTests
         var userId = Guid.NewGuid();
 
         // Act
-        var token = service.GenerateToken(roomId, userId, "Test User");
+        var token = service.GenerateToken(roomId, userId, "Test User", true);
 
         // Assert
         Assert.False(string.IsNullOrWhiteSpace(token));
@@ -43,7 +43,7 @@ public class LiveKitServiceTests
         var userId = Guid.NewGuid();
 
         // Act
-        var token = service.GenerateToken(roomId, userId, "Test User");
+        var token = service.GenerateToken(roomId, userId, "Test User", true);
 
         // Assert — JWT has 3 dot-separated segments
         var segments = token.Split('.');
@@ -60,7 +60,7 @@ public class LiveKitServiceTests
         var displayName = "Kareem Ahmed";
 
         // Act
-        var token = service.GenerateToken(roomId, userId, displayName);
+        var token = service.GenerateToken(roomId, userId, displayName, true);
 
         // Assert — decode and check the 'sub' claim (identity)
         var handler = new JwtSecurityTokenHandler();
@@ -77,7 +77,7 @@ public class LiveKitServiceTests
         var userId = Guid.NewGuid();
 
         // Act
-        var token = service.GenerateToken(roomId, userId, "Test User");
+        var token = service.GenerateToken(roomId, userId, "Test User", true);
 
         // Assert — the 'video' claim should contain the room name
         var handler = new JwtSecurityTokenHandler();
@@ -95,7 +95,7 @@ public class LiveKitServiceTests
         var service = CreateService();
 
         // Act
-        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Test");
+        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Test", true);
 
         // Assert
         var handler = new JwtSecurityTokenHandler();
@@ -111,7 +111,7 @@ public class LiveKitServiceTests
         var service = CreateService();
 
         // Act
-        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Test");
+        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Test", true);
 
         // Assert — TTL should be ~4 hours (within 5-minute tolerance)
         var handler = new JwtSecurityTokenHandler();
@@ -131,8 +131,8 @@ public class LiveKitServiceTests
         var user2 = Guid.NewGuid();
 
         // Act
-        var token1 = service.GenerateToken(roomId, user1, "User One");
-        var token2 = service.GenerateToken(roomId, user2, "User Two");
+        var token1 = service.GenerateToken(roomId, user1, "User One", true);
+        var token2 = service.GenerateToken(roomId, user2, "User Two", true);
 
         // Assert
         Assert.NotEqual(token1, token2);
@@ -147,8 +147,8 @@ public class LiveKitServiceTests
         var userId = Guid.NewGuid();
 
         // Act
-        var token1 = service.GenerateToken(roomId, userId, "Same User");
-        var token2 = service.GenerateToken(roomId, userId, "Same User");
+        var token1 = service.GenerateToken(roomId, userId, "Same User", true);
+        var token2 = service.GenerateToken(roomId, userId, "Same User", true);
 
         // Assert — both tokens should target the same room
         var handler = new JwtSecurityTokenHandler();
@@ -165,12 +165,44 @@ public class LiveKitServiceTests
         var service = CreateService();
 
         // Act
-        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Test");
+        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Test", true);
 
         // Assert — LiveKit SDK uses ApiKey as the issuer
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.ReadJwtToken(token);
 
         Assert.Equal(_settings.ApiKey, jwt.Issuer);
+    }
+
+    [Fact]
+    public void GenerateToken_CanPublishTrue_GrantsPublishInVideoClaim()
+    {
+        // Arrange
+        var service = CreateService();
+
+        // Act
+        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Host", true);
+
+        // Assert
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(token);
+        var videoClaim = jwt.Claims.First(c => c.Type == "video");
+        Assert.Contains("\"canPublish\":true", videoClaim.Value);
+    }
+
+    [Fact]
+    public void GenerateToken_CanPublishFalse_DeniesPublishInVideoClaim()
+    {
+        // Arrange
+        var service = CreateService();
+
+        // Act
+        var token = service.GenerateToken(Guid.NewGuid(), Guid.NewGuid(), "Audience", false);
+
+        // Assert
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(token);
+        var videoClaim = jwt.Claims.First(c => c.Type == "video");
+        Assert.Contains("\"canPublish\":false", videoClaim.Value);
     }
 }

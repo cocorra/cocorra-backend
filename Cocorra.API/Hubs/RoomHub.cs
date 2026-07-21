@@ -196,7 +196,8 @@ namespace Cocorra.API.Hubs
 
             // Send LiveKit token to the joining user so they can connect to the media server
             var displayName = ((participant.User?.FirstName ?? "") + " " + (participant.User?.LastName ?? "")).Trim();
-            var liveKitToken = _liveKitService.GenerateToken(roomGuid, userId, displayName);
+            var canPublish = room.HostId == userId || participant.IsOnStage;
+            var liveKitToken = _liveKitService.GenerateToken(roomGuid, userId, displayName, canPublish);
             await Clients.Caller.SendAsync("LiveKitToken", new
             {
                 Token = liveKitToken,

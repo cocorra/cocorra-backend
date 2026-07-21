@@ -152,7 +152,7 @@ public class RoomServiceTests
         _roomRepoMock.Setup(r => r.GetRoomParticipantsAsync(roomId))
             .ReturnsAsync(new List<RoomParticipant> { participant });
         _liveKitServiceMock
-            .Setup(l => l.GenerateToken(roomId, userId, "Ali Hassan"))
+            .Setup(l => l.GenerateToken(roomId, userId, "Ali Hassan", false))
             .Returns("mock-jwt-token");
         var service = CreateService();
 
@@ -260,7 +260,7 @@ public class RoomServiceTests
         _roomRepoMock.Setup(r => r.GetRoomParticipantsAsync(roomId))
             .ReturnsAsync(new List<RoomParticipant> { participant });
         _liveKitServiceMock
-            .Setup(l => l.GenerateToken(roomId, userId, "Test User"))
+            .Setup(l => l.GenerateToken(roomId, userId, "Test User", false))
             .Returns("state-jwt-token");
         var service = CreateService();
 
