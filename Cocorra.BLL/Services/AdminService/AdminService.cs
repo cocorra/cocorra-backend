@@ -170,6 +170,64 @@ namespace Cocorra.BLL.Services.AdminService
             return BadRequest<string>("Failed to change status");
         }
 
+        // Hard cap so a single request can't fan out into thousands of UserManager
+        // updates + emails + push notifications and starve the thread pool.
+        private const int MaxBulkStatusBatch = 200;
+
+        public async Task<Response<BulkChangeStatusResultDto>> BulkChangeUserStatusAsync(BulkChangeStatusDto model, Guid adminId)
+        {
+            if (model?.UserIds == null || model.UserIds.Count == 0)
+                return BadRequest<BulkChangeStatusResultDto>("At least one user id is required.");
+
+            if (!Enum.IsDefined(typeof(UserStatus), model.NewStatus))
+                return BadRequest<BulkChangeStatusResultDto>("Invalid status value.");
+
+            // De-duplicate ids so a repeated id isn't processed twice.
+            var distinctIds = model.UserIds.Distinct().ToList();
+
+            if (distinctIds.Count > MaxBulkStatusBatch)
+                return BadRequest<BulkChangeStatusResultDto>(
+                    $"Too many users in one request. Maximum is {MaxBulkStatusBatch}.");
+
+            var result = new BulkChangeStatusResultDto { TotalRequested = distinctIds.Count };
+
+            foreach (var userId in distinctIds)
+            {
+                // Guard: an admin cannot change their own status, even in bulk.
+                if (userId == adminId)
+                {
+                    result.Results.Add(new BulkItemResultDto
+                    {
+                        UserId = userId,
+                        Succeeded = false,
+                        Message = "You cannot change your own status."
+                    });
+                    continue;
+                }
+
+                // Reuse the single-user path so all side effects (lockout, token
+                // invalidation, voice cleanup, email, push, event tracking) apply.
+                var single = await ChangeUserStatusAsync(userId, model.NewStatus);
+                result.Results.Add(new BulkItemResultDto
+                {
+                    UserId = userId,
+                    Succeeded = single.Succeeded,
+                    Message = single.Message
+                });
+            }
+
+            result.SucceededCount = result.Results.Count(r => r.Succeeded);
+            result.FailedCount = result.Results.Count(r => !r.Succeeded);
+
+            var message = result.FailedCount == 0
+                ? $"All {result.SucceededCount} user(s) updated to {model.NewStatus}."
+                : $"{result.SucceededCount} succeeded, {result.FailedCount} failed.";
+
+            // The batch endpoint itself executed successfully even on partial failure;
+            // the caller inspects per-item Results. Always 200 here.
+            return Success(result, message: message);
+        }
+
         private async Task SendVerificationEmailAsync(ApplicationUser user, UserStatus newStatus)
         {
             if (string.IsNullOrEmpty(user.Email)) return;
@@ -211,14 +269,11 @@ namespace Cocorra.BLL.Services.AdminService
             }
         }
 
-        public async Task<Response<IEnumerable<UserDto>>> GetAllUsersAsync(string? search, int page = 1, int pageSize = 10)
+        public async Task<PagedResponse<UserDto>> GetAllUsersAsync(string? search, int page = 1, int pageSize = 10)
         {
             var (totalCount, users) = await _userRepository.GetPaginatedUsersWithRolesAsync(search, page, pageSize, _baseUrl);
 
-            var response = Success(users);
-            response.Meta = new { TotalCount = totalCount, CurrentPage = page, PageSize = pageSize };
-
-            return response;
+            return Paginated(users, totalCount, page, pageSize);
         }
 
         public async Task<Response<UserDto>> GetUserByIdAsync(Guid userId)
