@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Cocorra.API.Hubs;
@@ -76,6 +77,42 @@ namespace Cocorra.API.Controllers
                         .SendAsync("ForceDisconnect", new { Reason = reason });
                 }
                 RoomHub.PurgeUserConnections(id);
+            }
+
+            return Ok(result);
+        }
+
+        [HttpPut(Router.AdminRouting.BulkChangeStatus)]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> BulkChangeStatus([FromBody] BulkChangeStatusDto model)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var adminId);
+
+            var result = await _adminService.BulkChangeUserStatusAsync(model, adminId);
+            if (!result.Succeeded)
+                return BadRequest(result);
+
+            // SECURITY: mirror the single-user endpoint — force-abort SignalR
+            // connections for every user that was successfully banned or rejected.
+            if (model.NewStatus == UserStatus.Banned || model.NewStatus == UserStatus.Rejected)
+            {
+                var reason = model.NewStatus == UserStatus.Banned
+                    ? "Your account has been banned."
+                    : "Your account has been rejected.";
+
+                foreach (var item in result.Data!.Results.Where(r => r.Succeeded))
+                {
+                    var connectionIds = RoomHub.GetConnectionsForUser(item.UserId);
+                    foreach (var connId in connectionIds)
+                    {
+                        await _roomHubContext.Clients.Client(connId)
+                            .SendAsync("ForceDisconnect", new { Reason = reason });
+                    }
+                    RoomHub.PurgeUserConnections(item.UserId);
+                }
             }
 
             return Ok(result);

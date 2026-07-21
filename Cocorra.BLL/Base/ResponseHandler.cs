@@ -103,6 +103,16 @@ namespace Cocorra.BLL.Base
             };
         }
 
+        public PagedResponse<T> Paginated<T>(
+            IEnumerable<T> data,
+            int totalCount,
+            int currentPage,
+            int pageSize,
+            string message = "Operation Successful")
+        {
+            return new PagedResponse<T>(data, totalCount, currentPage, pageSize, message);
+        }
+
         public Response<T> Created<T>(T entity, object? meta = null, string message = "Created Successfully")
         {
             return new Response<T>()

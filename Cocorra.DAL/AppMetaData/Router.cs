@@ -33,6 +33,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string Update = Prefix + "/User/{id}";           // PUT
             public const string Delete = Prefix + "/User/{id}";           // DELETE           
             public const string ChangeStatus = Prefix + "/User/ChangeStatus/{id}"; // PUT
+            public const string BulkChangeStatus = Prefix + "/Users/BulkChangeStatus"; // PUT
 
             public const string ResetPassword = Prefix + "/ResetPassword/{id}"; // POST
             public const string Stats = Prefix + "/Dashboard/Stats";      // GET

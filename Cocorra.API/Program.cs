@@ -62,7 +62,15 @@ else
 
 var jwtSettings = builder.Configuration.GetSection("JWTSetting");
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Serialize/deserialize all enums as their string names (e.g. "Banned")
+        // instead of magic integers. Reading still accepts numeric values too,
+        // so this is backward-compatible for any legacy clients.
+        options.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
