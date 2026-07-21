@@ -13,7 +13,7 @@ public class LiveKitService : ILiveKitService
     }
 
     /// <inheritdoc />
-    public string GenerateToken(Guid roomId, Guid userId, string participantName)
+    public string GenerateToken(Guid roomId, Guid userId, string participantName, bool canPublish)
     {
         var token = new AccessToken(_settings.ApiKey, _settings.ApiSecret)
             .WithIdentity(userId.ToString())
@@ -21,7 +21,9 @@ public class LiveKitService : ILiveKitService
             .WithGrants(new VideoGrants
             {
                 RoomJoin = true,
-                Room = roomId.ToString()
+                Room = roomId.ToString(),
+                CanPublish = canPublish,
+                CanSubscribe = true
             })
             .WithTtl(TimeSpan.FromHours(4)); // Covers max 3h room + 1h buffer
 

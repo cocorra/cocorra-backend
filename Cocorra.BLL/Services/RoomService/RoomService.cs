@@ -175,12 +175,17 @@ public class RoomService : ResponseHandler, IRoomService
         string ResolveName(RoomParticipant p) =>
             ((p.User?.FirstName ?? "") + " " + (p.User?.LastName ?? "")).Trim();
 
+        // Only the host and people on stage can use their microphone
+        bool ResolveCanPublish(RoomParticipant p) =>
+            room.HostId == p.UserId || p.IsOnStage;
+
         if (existingParticipant != null)
         {
             if (existingParticipant.Status == ParticipantStatus.Active)
             {
                 var name = ResolveName(existingParticipant);
-                var token = _liveKitService.GenerateToken(roomId, userId, name);
+                var canPublish = ResolveCanPublish(existingParticipant);
+                var token = _liveKitService.GenerateToken(roomId, userId, name, canPublish);
                 return Success(new JoinRoomResultDto
                 {
                     LiveKitToken = token,
@@ -208,7 +213,8 @@ public class RoomService : ResponseHandler, IRoomService
             else
             {
                 var name = ResolveName(existingParticipant);
-                var token = _liveKitService.GenerateToken(roomId, userId, name);
+                var canPublish = ResolveCanPublish(existingParticipant);
+                var token = _liveKitService.GenerateToken(roomId, userId, name, canPublish);
                 return Success(new JoinRoomResultDto
                 {
                     LiveKitToken = token,
@@ -268,7 +274,8 @@ public class RoomService : ResponseHandler, IRoomService
             // Fetch the user info for the display name
             var user = await _userManager.FindByIdAsync(userId.ToString());
             var displayName = ((user?.FirstName ?? "") + " " + (user?.LastName ?? "")).Trim();
-            var token = _liveKitService.GenerateToken(roomId, userId, displayName);
+            var canPublish = ResolveCanPublish(newParticipant);
+            var token = _liveKitService.GenerateToken(roomId, userId, displayName, canPublish);
             return Success(new JoinRoomResultDto
             {
                 LiveKitToken = token,
@@ -335,7 +342,8 @@ public class RoomService : ResponseHandler, IRoomService
 
         // Generate a fresh LiveKit token for the requesting user
         var currentName = ((currentParticipant.User?.FirstName ?? "") + " " + (currentParticipant.User?.LastName ?? "")).Trim();
-        var liveKitToken = _liveKitService.GenerateToken(roomId, currentUserId, currentName);
+        var currentCanPublish = room.HostId == currentUserId || currentParticipant.IsOnStage;
+        var liveKitToken = _liveKitService.GenerateToken(roomId, currentUserId, currentName, currentCanPublish);
 
         var roomState = new RoomStateDto
         {
