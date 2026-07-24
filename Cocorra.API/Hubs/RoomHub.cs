@@ -287,6 +287,8 @@ namespace Cocorra.API.Hubs
             await _roomRepo.UpdateParticipantAsync(participant);
             await _roomRepo.SaveChangesAsync();
 
+            try { await _liveKitService.UpdateStagePermissionAsync(roomGuid, targetGuid, canPublish: true); } catch { }
+
             await Clients.Group(roomId).SendAsync("StageUpdated", new
             {
                 UserId = targetGuid,
@@ -321,6 +323,8 @@ namespace Cocorra.API.Hubs
 
             await _roomRepo.UpdateParticipantAsync(participant);
             await _roomRepo.SaveChangesAsync();
+
+            try { await _liveKitService.UpdateStagePermissionAsync(roomGuid, targetGuid, canPublish: false); } catch { }
 
             await Clients.Group(roomId).SendAsync("StageUpdated", new
             {

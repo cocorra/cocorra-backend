@@ -205,4 +205,18 @@ public class LiveKitServiceTests
         var videoClaim = jwt.Claims.First(c => c.Type == "video");
         Assert.Contains("\"canPublish\":false", videoClaim.Value);
     }
+
+    [Theory]
+    [InlineData("wss://test.livekit.dev")]
+    [InlineData("ws://test.livekit.dev")]
+    [InlineData("https://test.livekit.dev")]
+    public void Constructor_AcceptsServerUrlAcrossSchemes(string serverUrl)
+    {
+        // Arrange
+        var settings = new LiveKitSettings { ServerUrl = serverUrl, ApiKey = _settings.ApiKey, ApiSecret = _settings.ApiSecret };
+
+        // Act & Assert — building the RoomServiceClient from ServerUrl must not throw for any supported scheme
+        var service = new LiveKitService(Options.Create(settings));
+        Assert.NotNull(service);
+    }
 }
