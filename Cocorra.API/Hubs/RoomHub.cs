@@ -5,6 +5,7 @@ using Cocorra.DAL.Enums;
 using Cocorra.DAL.Repository.RoomRepository;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Security.Claims;
@@ -22,11 +23,12 @@ namespace Cocorra.API.Hubs
         private readonly ILiveKitService _liveKitService;
         private readonly LiveKitSettings _liveKitSettings;
         private readonly IEventTracker _eventTracker;
+        private readonly ILogger<RoomHub> _logger;
 
         // Thread-safe mapping: ConnectionId → (UserId, RoomId)
         private static readonly ConcurrentDictionary<string, (Guid UserId, Guid RoomId)> _connections = new();
 
-        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker)
+        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker, ILogger<RoomHub> logger)
         {
             _roomRepo = roomRepo;
             _roomService = roomService;
@@ -34,15 +36,42 @@ namespace Cocorra.API.Hubs
             _liveKitService = liveKitService;
             _liveKitSettings = liveKitSettings.Value;
             _eventTracker = eventTracker;
+            _logger = logger;
         }
+
+        // ==========================================================================
+        // TEMPORARY DIAGNOSTIC LOGGING — "[JOINROOM-TRACE]" / "[HUB-TRACE]".
+        // Remove once the LiveKitToken delivery investigation is closed.
+        // Adds no control flow: every catch below rethrows, so behaviour is
+        // byte-for-byte identical to before instrumentation.
+        // ==========================================================================
+        private static string Now() => DateTime.UtcNow.ToString("O");
 
         public override async Task OnConnectedAsync()
         {
+            _logger.LogInformation(
+                "[HUB-TRACE] OnConnectedAsync ConnectionId={ConnectionId} IsAuthenticated={IsAuthenticated} " +
+                "UserIdClaim={UserIdClaim} UserIdentifier={UserIdentifier} Transport={Transport} Ts={Ts}",
+                Context.ConnectionId,
+                Context.User?.Identity?.IsAuthenticated,
+                Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "(none)",
+                Context.UserIdentifier ?? "(none)",
+                Context.Features.Get<Microsoft.AspNetCore.Http.Connections.Features.IHttpTransportFeature>()?.TransportType.ToString() ?? "(unknown)",
+                Now());
+
             await base.OnConnectedAsync();
         }
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
+            _logger.LogInformation(exception,
+                "[HUB-TRACE] OnDisconnectedAsync ConnectionId={ConnectionId} HadTrackedRoom={Tracked} " +
+                "ExceptionType={ExceptionType} Ts={Ts}",
+                Context.ConnectionId,
+                _connections.ContainsKey(Context.ConnectionId),
+                exception?.GetType().Name ?? "(none — clean close)",
+                Now());
+
             if (_connections.TryRemove(Context.ConnectionId, out var mapping))
             {
                 try
@@ -78,7 +107,14 @@ namespace Cocorra.API.Hubs
                         });
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // TEMPORARY DIAGNOSTIC LOGGING — still swallowed, exactly as before.
+                    _logger.LogError(ex,
+                        "[HUB-TRACE] OnDisconnectedAsync cleanup threw (swallowed). " +
+                        "ConnectionId={ConnectionId} UserId={UserId} RoomId={RoomId} Ts={Ts}",
+                        Context.ConnectionId, mapping.UserId, mapping.RoomId, Now());
+                }
             }
 
             await base.OnDisconnectedAsync(exception);
@@ -143,21 +179,67 @@ namespace Cocorra.API.Hubs
 
         public async Task JoinRoom(string roomId)
         {
+            // [JOINROOM-TRACE] #1 — entering JoinRoom
+            _logger.LogInformation(
+                "[JOINROOM-TRACE] #1 ENTER JoinRoom ConnectionId={ConnectionId} RawRoomId={RawRoomId} " +
+                "IsAuthenticated={IsAuthenticated} UserIdClaim={UserIdClaim} Ts={Ts}",
+                Context.ConnectionId, roomId,
+                Context.User?.Identity?.IsAuthenticated,
+                Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "(none)",
+                Now());
+
+            try
+            {
             var userId = GetUserId();
             var roomGuid = ParseGuidSafe(roomId, "Room ID");
 
             var room = await _roomRepo.GetByIdAsync(roomGuid);
             if (room == null || room.Status != RoomStatus.Live)
+            {
+                // [JOINROOM-TRACE] EXIT-A — throws before any token is generated
+                _logger.LogWarning(
+                    "[JOINROOM-TRACE] EXIT-A ABORT: room not live. ConnectionId={ConnectionId} UserId={UserId} " +
+                    "RoomId={RoomId} RoomFound={RoomFound} Status={Status} Ts={Ts}",
+                    Context.ConnectionId, userId, roomGuid, room != null,
+                    room?.Status.ToString() ?? "(null)", Now());
                 throw new HubException("Room is not live yet or has ended.");
+            }
 
             var participant = await _roomRepo.GetParticipantAsync(roomGuid, userId);
 
             if (participant == null)
+            {
+                // [JOINROOM-TRACE] EXIT-B — throws before any token is generated
+                _logger.LogWarning(
+                    "[JOINROOM-TRACE] EXIT-B ABORT: no RoomParticipant row (client did not call POST /Room/{{id}}/Join first). " +
+                    "ConnectionId={ConnectionId} UserId={UserId} RoomId={RoomId} Ts={Ts}",
+                    Context.ConnectionId, userId, roomGuid, Now());
                 throw new HubException("You are not a member of this room. Please join via the REST API first.");
+            }
             if (participant.Status == ParticipantStatus.PendingApproval)
+            {
+                // [JOINROOM-TRACE] EXIT-C — throws before any token is generated
+                _logger.LogWarning(
+                    "[JOINROOM-TRACE] EXIT-C ABORT: participant PendingApproval. ConnectionId={ConnectionId} " +
+                    "UserId={UserId} RoomId={RoomId} Ts={Ts}",
+                    Context.ConnectionId, userId, roomGuid, Now());
                 throw new HubException("Your request is still pending approval from the host.");
+            }
             if (participant.Status == ParticipantStatus.Kicked || participant.Status == ParticipantStatus.Rejected)
+            {
+                // [JOINROOM-TRACE] EXIT-D — throws before any token is generated
+                _logger.LogWarning(
+                    "[JOINROOM-TRACE] EXIT-D ABORT: participant {Status}. ConnectionId={ConnectionId} " +
+                    "UserId={UserId} RoomId={RoomId} Ts={Ts}",
+                    participant.Status, Context.ConnectionId, userId, roomGuid, Now());
                 throw new HubException("You are not allowed to join this room.");
+            }
+
+            _logger.LogInformation(
+                "[JOINROOM-TRACE] #2 PRECHECKS PASSED ConnectionId={ConnectionId} UserId={UserId} RoomId={RoomId} " +
+                "ParticipantStatus={Status} IsOnStage={IsOnStage} IsHost={IsHost} Ts={Ts}",
+                Context.ConnectionId, userId, roomGuid, participant.Status, participant.IsOnStage,
+                room.HostId == userId, Now());
 
             // Re-activate users who had previously left (e.g., disconnect/reconnect)
             if (participant.Status == ParticipantStatus.Left)
@@ -197,12 +279,84 @@ namespace Cocorra.API.Hubs
             // Send LiveKit token to the joining user so they can connect to the media server
             var displayName = ((participant.User?.FirstName ?? "") + " " + (participant.User?.LastName ?? "")).Trim();
             var canPublish = room.HostId == userId || participant.IsOnStage;
+
+            // [JOINROOM-TRACE] #3 — before generating the LiveKit token
+            _logger.LogInformation(
+                "[JOINROOM-TRACE] #3 BEFORE GenerateToken ConnectionId={ConnectionId} UserId={UserId} " +
+                "RoomId={RoomId} ParticipantName={ParticipantName} CanPublish={CanPublish} Ts={Ts}",
+                Context.ConnectionId, userId, roomGuid, displayName, canPublish, Now());
+
             var liveKitToken = _liveKitService.GenerateToken(roomGuid, userId, displayName, canPublish);
-            await Clients.Caller.SendAsync("LiveKitToken", new
+
+            // [JOINROOM-TRACE] #4 — after generating the LiveKit token
+            _logger.LogInformation(
+                "[JOINROOM-TRACE] #4 AFTER GenerateToken ConnectionId={ConnectionId} UserId={UserId} " +
+                "RoomId={RoomId} TokenLength={TokenLength} ServerUrl={ServerUrl} Ts={Ts}",
+                Context.ConnectionId, userId, roomGuid, liveKitToken?.Length ?? -1,
+                _liveKitSettings.ServerUrl, Now());
+
+            // [JOINROOM-TRACE] #5 — immediately before SendAsync
+            _logger.LogInformation(
+                "[JOINROOM-TRACE] #5 BEFORE SendAsync(\"LiveKitToken\") ConnectionId={ConnectionId} UserId={UserId} " +
+                "RoomId={RoomId} TokenLength={TokenLength} ServerUrl={ServerUrl} " +
+                "ConnectionAborted={Aborted} Ts={Ts}",
+                Context.ConnectionId, userId, roomGuid, liveKitToken?.Length ?? -1,
+                _liveKitSettings.ServerUrl, Context.ConnectionAborted.IsCancellationRequested, Now());
+
+            try
             {
-                Token = liveKitToken,
-                ServerUrl = _liveKitSettings.ServerUrl
-            });
+                await Clients.Caller.SendAsync("LiveKitToken", new
+                {
+                    Token = liveKitToken,
+                    ServerUrl = _liveKitSettings.ServerUrl
+                });
+            }
+            catch (Exception sendEx)
+            {
+                // [JOINROOM-TRACE] #6-FAIL — SendAsync threw. Rethrown; behaviour unchanged.
+                _logger.LogError(sendEx,
+                    "[JOINROOM-TRACE] #6-FAIL SendAsync(\"LiveKitToken\") THREW {ExceptionType}. " +
+                    "ConnectionId={ConnectionId} UserId={UserId} RoomId={RoomId} " +
+                    "ConnectionAborted={Aborted} Ts={Ts}",
+                    sendEx.GetType().Name, Context.ConnectionId, userId, roomGuid,
+                    Context.ConnectionAborted.IsCancellationRequested, Now());
+                throw;
+            }
+
+            // [JOINROOM-TRACE] #6 — SendAsync completed. NOTE: this proves the frame was handed to
+            // the transport, NOT that the client processed it. Compare against the Flutter log.
+            _logger.LogInformation(
+                "[JOINROOM-TRACE] #6 AFTER SendAsync(\"LiveKitToken\") COMPLETED OK. " +
+                "ConnectionId={ConnectionId} UserId={UserId} RoomId={RoomId} TokenLength={TokenLength} " +
+                "ServerUrl={ServerUrl} ConnectionAborted={Aborted} Ts={Ts}",
+                Context.ConnectionId, userId, roomGuid, liveKitToken?.Length ?? -1,
+                _liveKitSettings.ServerUrl, Context.ConnectionAborted.IsCancellationRequested, Now());
+
+            // [JOINROOM-TRACE] #7 — normal end of JoinRoom
+            _logger.LogInformation(
+                "[JOINROOM-TRACE] #7 EXIT-OK JoinRoom ConnectionId={ConnectionId} UserId={UserId} " +
+                "RoomId={RoomId} Ts={Ts}",
+                Context.ConnectionId, userId, roomGuid, Now());
+            }
+            catch (HubException hubEx)
+            {
+                // Expected client-facing aborts (EXIT-A..D and GetUserId/ParseGuidSafe). Rethrown unchanged.
+                _logger.LogWarning(
+                    "[JOINROOM-TRACE] EXIT-HUBEX JoinRoom threw HubException: {Message} " +
+                    "ConnectionId={ConnectionId} RawRoomId={RawRoomId} Ts={Ts}",
+                    hubEx.Message, Context.ConnectionId, roomId, Now());
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Unexpected failure anywhere in JoinRoom. Rethrown unchanged — SignalR will send the
+                // client a generic invocation error (EnableDetailedErrors is not set, Program.cs:122-128).
+                _logger.LogError(ex,
+                    "[JOINROOM-TRACE] EXIT-EX JoinRoom threw {ExceptionType} before completing. " +
+                    "ConnectionId={ConnectionId} RawRoomId={RawRoomId} Ts={Ts}",
+                    ex.GetType().Name, Context.ConnectionId, roomId, Now());
+                throw;
+            }
         }
 
         public async Task LeaveRoom(string roomId)

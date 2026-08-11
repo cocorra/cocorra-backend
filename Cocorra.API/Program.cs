@@ -380,16 +380,37 @@ app.UseAuthorization();
 app.UseSessionTracking();
 app.UseDeviceBlocking();
 
-app.UseSwagger();
+// Enable Swagger JSON & Swagger UI in all environments (including Production)
+app.UseSwagger(options =>
+{
+    options.RouteTemplate = "swagger/{documentName}/swagger.json";
+});
+
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "Cocorra API v1");
+    c.RoutePrefix = "swagger";
+    c.DocumentTitle = "Cocorra API Documentation";
 });
 
 app.MapHub<RoomHub>("/hubs/rooms");
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<Cocorra.API.Hubs.SupportHub>("/hubs/support");
 app.MapControllers();
-app.MapGet("/", () => "Welcome to Cocorra API - System is Running Successfully! ");
+app.MapGet("/", context =>
+{
+    context.Response.ContentType = "text/html";
+    return context.Response.WriteAsync(@"<!DOCTYPE html>
+<html>
+<head>
+    <title>Cocorra API</title>
+    <meta http-equiv=""refresh"" content=""0;url=/swagger"" />
+</head>
+<body>
+    <p>Welcome to Cocorra API - System is Running Successfully!</p>
+    <p>Redirecting to <a href=""/swagger"">Swagger API Documentation</a>...</p>
+</body>
+</html>");
+});
 
 app.Run();
