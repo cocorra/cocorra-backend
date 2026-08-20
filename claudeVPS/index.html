@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تقرير اختبار كفاءة وتحمل السيرفر | LiveKit Load Test Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --surface: #111827;
+            --surface-border: #1f2937;
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.15);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.15);
+            --warning: #f59e0b;
+            --warning-glow: rgba(245, 158, 11, 0.15);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --code-bg: #030712;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Cairo', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-main);
+            line-height: 1.6;
+            padding: 2.5rem 1rem;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            border: 1px solid var(--surface-border);
+            border-radius: 16px;
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(to bottom, var(--primary), var(--success));
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            background: var(--success-glow);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            margin-bottom: 1rem;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 1.05rem;
+        }
+
+        /* Grid */
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 2rem;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--surface);
+            border: 1px solid var(--surface-border);
+            border-radius: 14px;
+            padding: 1.5rem;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .card:hover {
+            border-color: #374151;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card-title svg {
+            width: 20px;
+            height: 20px;
+            stroke: var(--primary);
+        }
+
+        .stat-value {
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-desc {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        /* Tables */
+        .table-container {
+            background-color: var(--surface);
+            border: 1px solid var(--surface-border);
+            border-radius: 14px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: right;
+        }
+
+        th {
+            background-color: #1a2234;
+            color: var(--text-muted);
+            font-weight: 700;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--surface-border);
+        }
+
+        th:first-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+        th:last-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+
+        td {
+            padding: 1rem;
+            font-size: 0.95rem;
+            border-bottom: 1px solid #1f2937;
+            color: var(--text-main);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .code-cell {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            color: #60a5fa;
+            direction: ltr;
+            text-align: left;
+        }
+
+        /* Highlights */
+        .tag-success {
+            display: inline-block;
+            background: var(--success-glow);
+            color: var(--success);
+            padding: 0.2rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .tag-warning {
+            display: inline-block;
+            background: var(--warning-glow);
+            color: var(--warning);
+            padding: 0.2rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        /* Formula Box */
+        .formula-box {
+            background: #172033;
+            border: 1px dashed var(--primary);
+            border-radius: 10px;
+            padding: 1.25rem;
+            margin: 1rem 0;
+            font-family: 'JetBrains Mono', monospace;
+            color: #93c5fd;
+            font-size: 0.95rem;
+            direction: ltr;
+            text-align: center;
+        }
+
+        /* List Items */
+        .spec-list {
+            list-style: none;
+        }
+
+        .spec-list li {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.65rem 0;
+            border-bottom: 1px solid #1f2937;
+            font-size: 0.95rem;
+        }
+
+        .spec-list li:last-child {
+            border-bottom: none;
+        }
+
+        .spec-label {
+            color: var(--text-muted);
+        }
+
+        .spec-val {
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 2rem 0 1rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--surface-border);
+        }
+
+        @media (max-width: 768px) {
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .header { padding: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <!-- Header Section -->
+    <header class="header">
+        <div class="badge">
+            <span style="width: 8px; height: 8px; background: var(--success); border-radius: 50%;"></span>
+            Production Load-Test Verified
+        </div>
+        <h1>تقرير أداء واختبار تحمل الغرف الصوتية</h1>
+        <p>تحليل القدرة الاستيعابية، استهلاك الموارد، وأقصى طاقة تشغيلية لمحرك LiveKit الصوتي على سيرفر الإنتاج.</p>
+    </header>
+
+    <!-- Key Metrics Cards -->
+    <div class="grid-3">
+        <div class="card">
+            <div class="card-title">مستخدمين في الغرفة المفردة</div>
+            <div class="stat-value" style="color: #60a5fa;">500</div>
+            <div class="stat-desc">11 متحدث نشط + 489 مستمع متزامن</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">استهلاك المعالج (CPU Peak)</div>
+            <div class="stat-value" style="color: #fbbf24;">~65%</div>
+            <div class="stat-desc">على معالج 4 vCPUs (Worst-case stress)</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">معدل فقدان البيانات (Packet Loss)</div>
+            <div class="stat-value" style="color: #34d399;">0.0%</div>
+            <div class="stat-desc">بث صوتي كامل بجودة ممتازة واستقرار تام</div>
+        </div>
+    </div>
+
+    <!-- System Info & Analysis -->
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">
+                مواصفات السيرفر (Infrastructure)
+            </div>
+            <ul class="spec-list">
+                <li>
+                    <span class="spec-label">نظام التشغيل</span>
+                    <span class="spec-val">Debian Linux</span>
+                </li>
+                <li>
+                    <span class="spec-label">المعالج (CPU)</span>
+                    <span class="spec-val">4 vCPUs</span>
+                </li>
+                <li>
+                    <span class="spec-label">الذاكرة العشوائية (RAM)</span>
+                    <span class="spec-val">8.0 GB</span>
+                </li>
+                <li>
+                    <span class="spec-label">محرك الصوت والوسائط</span>
+                    <span class="spec-val">LiveKit SFU (v2.x)</span>
+                </li>
+                <li>
+                    <span class="spec-label">البروكسي والأمان</span>
+                    <span class="spec-val">Caddy + Let's Encrypt SSL</span>
+                </li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                معادلة معالجة الصوت في الغرفة الواحدة
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">
+                الـ SFU يقوم بإعادة توجيه كل مسار صوتي لجميع المستمعين بدون خلط، مما يفسر استهلاك المعالج في الغرف الضخمة:
+            </p>
+            <div class="formula-box">
+                Total Tracks = 11 Publishers × 489 Subs = 5,379 Concurrent Tracks
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">
+                ✔ معالجة وتشفير <strong>5,379 مسار صوتي لحظي</strong> عند 65% CPU فقط يعد كفاءة تشغيلية ممتازة لمحرك Go-based SFU.
+            </p>
+        </div>
+    </div>
+
+    <!-- Live Test Results Breakdown -->
+    <div class="table-container">
+        <h3 style="color: #ffffff; margin-bottom: 1.25rem; font-size: 1.2rem;">استهلاك الموارد أثناء الاختبار (Live Container Metrics)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>الخدمة (Container)</th>
+                    <th>استهلاك المعالج (CPU %)</th>
+                    <th>استهلاك الذاكرة (RAM Usage)</th>
+                    <th>النسبة من إجمالي الرام</th>
+                    <th>الحالة</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight: 700; color: #fff;">livekit-server</td>
+                    <td class="code-cell">~65.0%</td>
+                    <td class="code-cell">141.4 MiB</td>
+                    <td>1.8%</td>
+                    <td><span class="tag-success">مستقر جداً</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 700; color: #fff;">cocorra-api (.NET)</td>
+                    <td class="code-cell">2.72%</td>
+                    <td class="code-cell">219.9 MiB</td>
+                    <td>2.8%</td>
+                    <td><span class="tag-success">طبيعي</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 700; color: #fff;">cocorra_db (SQL Server)</td>
+                    <td class="code-cell">2.82%</td>
+                    <td class="code-cell">1017 MiB</td>
+                    <td>12.8%</td>
+                    <td><span class="tag-success">طبيعي</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 700; color: #fff;">redis</td>
+                    <td class="code-cell">1.16%</td>
+                    <td class="code-cell">12.3 MiB</td>
+                    <td>0.2%</td>
+                    <td><span class="tag-success">خفيف جداً</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 700; color: #fff;">caddy (Reverse Proxy)</td>
+                    <td class="code-cell">0.00%</td>
+                    <td class="code-cell">20.4 MiB</td>
+                    <td>0.3%</td>
+                    <td><span class="tag-success">أداء ممتاز</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Capacity Limits Recommendation -->
+    <div class="table-container">
+        <h3 style="color: #ffffff; margin-bottom: 1.25rem; font-size: 1.2rem;">حدود السعة التشغيلية الموصى بها (Capacity Recommendations)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>نوع السيناريو</th>
+                    <th>العدد المقترح (Concurrent)</th>
+                    <th>استهلاك الـ CPU المتوقع</th>
+                    <th>التقييم التشغيلي</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>غرفة صوتية عملاقة مفردة (Mega Stage)</strong></td>
+                    <td class="code-cell">600 - 750 مستخدم</td>
+                    <td class="code-cell">75% - 85%</td>
+                    <td><span class="tag-warning">الحد الأقصى للغرفة المفردة</span></td>
+                </tr>
+                <tr>
+                    <td><strong>غرف متعددة موزعة (مثلاً 25 غرفة × 50 مستخدم)</strong></td>
+                    <td class="code-cell">1,200 - 1,500 مستخدم</td>
+                    <td class="code-cell">65% - 75%</td>
+                    <td><span class="tag-success">آمن وموزع على كافة الأنوية</span></td>
+                </tr>
+                <tr>
+                    <td><strong>نقطة الخطر (Threshold Bottleneck)</strong></td>
+                    <td class="code-cell">&gt; 1,800 مستخدم</td>
+                    <td class="code-cell">&gt; 90%</td>
+                    <td><span class="tag-warning">يتطلب ترقية السيرفر أو إضافة Node</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Recommendations / Next Steps -->
+    <div class="card" style="margin-bottom: 2rem;">
+        <div class="card-title">توصيات الإنتاج (Production Recommendations)</div>
+        <ul style="padding-right: 1.5rem; color: var(--text-muted); font-size: 0.95rem; line-height: 1.9;">
+            <li><strong>تفعيل ميزة الـ Auto-mute:</strong> كتم صوت الميكروفون للمستمعين بمجرد النزول من المسرح لتقليل عدد الـ Active Publishers دائماً.</li>
+            <li><strong>ضبط حدود النظام (Linux ulimit):</strong> التأكد من رفع الـ File Descriptors (Open Files Limit) في السيرفر إلى <code style="color: #93c5fd;">65535</code> لدعم آلاف الـ WebSockets المتزامنة.</li>
+            <li><strong>التوسع الأفقي (Clustering):</strong> السيرفر الحالي يتحمل حتى 1,500 مستخدم صوتي بكفاءة عالية، وعند الوصول لـ 2,000+ يوزر يمكن إضافة سيرفر آخر وربطهما عبر Redis بدون أي تعديل برمجي على التطبيق.</li>
+        </ul>
+    </div>
+
+    <footer class="footer">
+        تم إعداد التقرير تلقائياً بناءً على نتائج اختبارات الضغط الميدانية بواسطة LiveKit CLI Benchmark.
+    </footer>
+
+</div>
+
+</body>
+</html>

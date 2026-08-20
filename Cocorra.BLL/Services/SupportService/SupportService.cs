@@ -171,7 +171,7 @@ namespace Cocorra.BLL.Services.SupportService
                     if (!string.IsNullOrEmpty(warnUser?.FcmToken))
                     {
                         var data = new Dictionary<string, string> { { "type", "report" }, { "reportId", report.Id.ToString() } };
-                        try { await _pushService.SendPushNotificationAsync(warnUser.FcmToken, warning.Title, warning.Message, data); } catch { }
+                        await _pushService.SendPushNotificationAsync(warnUser.FcmToken, warning.Title, warning.Message, data);
                     }
 
                     report.Status = "Resolved";
@@ -192,10 +192,23 @@ namespace Cocorra.BLL.Services.SupportService
                         report.ReportedUserId.Value,
                         "Your account has been temporarily suspended for 24 hours.");
 
+                    var muteNotification = new Notification
+                    {
+                        UserId = report.ReportedUserId.Value,
+                        Title = "Account Locked",
+                        Message = "Your account has been temporarily suspended for 24 hours.",
+                        Type = NotificationType.AdminWarning,
+                        ReferenceId = report.Id,
+                        CreatedAt = DateTime.UtcNow,
+                        IsRead = false
+                    };
+                    await _notificationRepo.AddAsync(muteNotification);
+
                     if (!string.IsNullOrEmpty(muteUser?.FcmToken))
                     {
                         var data = new Dictionary<string, string> { { "type", "account_locked" } };
-                        try { await _pushService.SendPushNotificationAsync(muteUser.FcmToken, "Account Locked", "Your account has been temporarily suspended for 24 hours.", data); } catch { }
+                        await _pushService.SendPushNotificationAsync(
+                            muteUser.FcmToken, muteNotification.Title, muteNotification.Message, data);
                     }
 
                     report.Status = "Resolved";
@@ -216,10 +229,23 @@ namespace Cocorra.BLL.Services.SupportService
                         report.ReportedUserId.Value,
                         "Your account has been permanently banned.");
 
+                    var banNotification = new Notification
+                    {
+                        UserId = report.ReportedUserId.Value,
+                        Title = "Account Locked",
+                        Message = "Your account has been permanently banned.",
+                        Type = NotificationType.AdminWarning,
+                        ReferenceId = report.Id,
+                        CreatedAt = DateTime.UtcNow,
+                        IsRead = false
+                    };
+                    await _notificationRepo.AddAsync(banNotification);
+
                     if (!string.IsNullOrEmpty(banUser?.FcmToken))
                     {
                         var data = new Dictionary<string, string> { { "type", "account_locked" } };
-                        try { await _pushService.SendPushNotificationAsync(banUser.FcmToken, "Account Locked", "Your account has been permanently banned.", data); } catch { }
+                        await _pushService.SendPushNotificationAsync(
+                            banUser.FcmToken, banNotification.Title, banNotification.Message, data);
                     }
 
                     report.Status = "Resolved";

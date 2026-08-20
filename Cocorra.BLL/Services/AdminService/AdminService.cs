@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.IO;
 using Cocorra.DAL.Repository.UserRepository;
 using Cocorra.DAL.Repository.BlockedDevicesRepository;
+using Cocorra.DAL.Repository.NotificationRepository;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.DAL.Data;
 
@@ -29,17 +30,19 @@ namespace Cocorra.BLL.Services.AdminService
         private readonly IBlockedDevicesRepository _blockedDevicesRepository;
         private readonly IEventTracker _eventTracker;
         private readonly AppDbContext _context;
+        private readonly INotificationRepository _notificationRepo;
 
         public AdminService(
-            UserManager<ApplicationUser> userManager, 
-            IUploadVoice uploadVoice, 
-            IConfiguration configuration, 
-            IEmailService emailService, 
-            IUserRepository userRepository, 
-            IPushNotificationService pushService, 
+            UserManager<ApplicationUser> userManager,
+            IUploadVoice uploadVoice,
+            IConfiguration configuration,
+            IEmailService emailService,
+            IUserRepository userRepository,
+            IPushNotificationService pushService,
             IBlockedDevicesRepository blockedDevicesRepository,
             IEventTracker eventTracker,
-            AppDbContext context)
+            AppDbContext context,
+            INotificationRepository notificationRepo)
         {
             _blockedDevicesRepository = blockedDevicesRepository;
             _userManager = userManager;
@@ -50,6 +53,7 @@ namespace Cocorra.BLL.Services.AdminService
             _pushService = pushService;
             _eventTracker = eventTracker;
             _context = context;
+            _notificationRepo = notificationRepo;
         }
 
         private string? BuildFullUrl(string? relativePath)
@@ -66,6 +70,10 @@ namespace Cocorra.BLL.Services.AdminService
             return $"{_baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
         }
 
+        // Shared by the persisted Notification and the push so the two can't drift apart.
+        private const string ReRecordTitle = "إعادة تسجيل صوتي 🎙️";
+        private const string ReRecordBody = "نعتذر منك، نحتاج منك إعادة تسجيل المقطع الصوتي الخاص بك بوضوح أكبر.";
+
         public async Task<Response<string>> ChangeUserStatusAsync(Guid userId, UserStatus newStatus)
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
@@ -79,6 +87,10 @@ namespace Cocorra.BLL.Services.AdminService
 
             var oldStatus = user.Status;
             user.Status = newStatus;
+
+            // Captured in the switch, consumed by the push below once the update succeeds.
+            DateTimeOffset? banLockoutEnd = null;
+
             switch (newStatus)
             {
                 case UserStatus.Active:
@@ -92,23 +104,13 @@ namespace Cocorra.BLL.Services.AdminService
 
                 case UserStatus.Banned:
                     await _userManager.SetLockoutEnabledAsync(user, true);
-                    var lockoutEndDate = DateTimeOffset.MaxValue;
-                    await _userManager.SetLockoutEndDateAsync(user, lockoutEndDate);
+                    banLockoutEnd = DateTimeOffset.MaxValue;
+                    await _userManager.SetLockoutEndDateAsync(user, banLockoutEnd);
                     _uploadVoice.DeleteVoice(user.VoiceVerificationPath);
                     user.VoiceVerificationPath = null;
-                    
+
                     // SECURITY: Invalidate refresh token to prevent session resurrection.
                     user.RefreshToken = null;
-                    
-                    if (!string.IsNullOrEmpty(user.FcmToken))
-                    {
-                        var banData = new Dictionary<string, string>
-                        {
-                            { "type", "account_locked" },
-                            { "lockout_end", lockoutEndDate.ToString("o") }
-                        };
-                        try { await _pushService.SendPushNotificationAsync(user.FcmToken, "", "", banData); } catch { }
-                    }
                     break;
 
                 case UserStatus.Rejected:
@@ -117,15 +119,6 @@ namespace Cocorra.BLL.Services.AdminService
 
                     // Invalidate refresh token so rejected user can't silently refresh.
                     user.RefreshToken = null;
-
-                    if (!string.IsNullOrEmpty(user.FcmToken))
-                    {
-                        var rejectData = new Dictionary<string, string>
-                        {
-                            { "type", "account_rejected" }
-                        };
-                        try { await _pushService.SendPushNotificationAsync(user.FcmToken, "", "", rejectData); } catch { }
-                    }
                     break;
 
                 case UserStatus.ReRecord:
@@ -152,16 +145,94 @@ namespace Cocorra.BLL.Services.AdminService
                     }
                 }
 
+                // Persist a Notification row so the decision survives a failed push and
+                // can still be read back from GET api/Notifications/my-notifications.
+                Notification? statusNotification = newStatus switch
+                {
+                    UserStatus.Active => new Notification
+                    {
+                        UserId = user.Id,
+                        Title = "Account Verified ✅",
+                        Message = "Your voice verification has been approved. You now have full access to Cocorra.",
+                        Type = NotificationType.System,
+                        IsRead = false
+                    },
+                    UserStatus.Banned => new Notification
+                    {
+                        UserId = user.Id,
+                        Title = "Account Suspended",
+                        Message = "Your account has been permanently suspended for violating community guidelines.",
+                        Type = NotificationType.AdminWarning,
+                        IsRead = false
+                    },
+                    UserStatus.Rejected => new Notification
+                    {
+                        UserId = user.Id,
+                        Title = "Verification Rejected",
+                        Message = "Your voice verification has been rejected. Please contact support for more information.",
+                        Type = NotificationType.System,
+                        IsRead = false
+                    },
+                    UserStatus.ReRecord => new Notification
+                    {
+                        UserId = user.Id,
+                        Title = ReRecordTitle,
+                        Message = ReRecordBody,
+                        Type = NotificationType.System,
+                        IsRead = false
+                    },
+                    _ => null
+                };
+
+                if (statusNotification != null)
+                {
+                    await _notificationRepo.AddAsync(statusNotification);
+                }
+
                 try
                 {
                     await SendVerificationEmailAsync(user, newStatus);
                 }
                 catch { }
 
-                if (newStatus == UserStatus.ReRecord && !string.IsNullOrEmpty(user.FcmToken))
+                // All pushes live here, after a successful UpdateAsync, so a user is never
+                // told their status changed when the write actually failed.
+                if (!string.IsNullOrEmpty(user.FcmToken))
                 {
-                    var data = new Dictionary<string, string> { { "type", "reRecord" } };
-                    try { await _pushService.SendPushNotificationAsync(user.FcmToken, "إعادة تسجيل صوتي 🎙️", "نعتذر منك، نحتاج منك إعادة تسجيل المقطع الصوتي الخاص بك بوضوح أكبر.", data); } catch { }
+                    switch (newStatus)
+                    {
+                        case UserStatus.Active:
+                            await _pushService.SendPushNotificationAsync(
+                                user.FcmToken,
+                                "Account Verified ✅",
+                                "Your account is now fully active.",
+                                new Dictionary<string, string> { { "type", "account_activated" } });
+                            break;
+
+                        case UserStatus.Banned:
+                            var banData = new Dictionary<string, string>
+                            {
+                                { "type", "account_locked" }
+                            };
+                            if (banLockoutEnd.HasValue)
+                            {
+                                banData["lockout_end"] = banLockoutEnd.Value.ToString("o");
+                            }
+                            await _pushService.SendPushNotificationAsync(user.FcmToken, "", "", banData);
+                            break;
+
+                        case UserStatus.Rejected:
+                            await _pushService.SendPushNotificationAsync(
+                                user.FcmToken, "", "",
+                                new Dictionary<string, string> { { "type", "account_rejected" } });
+                            break;
+
+                        case UserStatus.ReRecord:
+                            await _pushService.SendPushNotificationAsync(
+                                user.FcmToken, ReRecordTitle, ReRecordBody,
+                                new Dictionary<string, string> { { "type", "reRecord" } });
+                            break;
+                    }
                 }
 
                 return Success($"User status changed from {oldStatus} to {newStatus}");
