@@ -257,7 +257,7 @@ public class RoomService : ResponseHandler, IRoomService
             if (!string.IsNullOrEmpty(hostUser?.FcmToken))
             {
                 var data = new Dictionary<string, string> { { "type", "room" }, { "roomId", room.Id.ToString() } };
-                try { await _pushService.SendPushNotificationAsync(hostUser.FcmToken, notification.Title, notification.Message, data); } catch { }
+                await _pushService.SendPushNotificationAsync(hostUser.FcmToken, notification.Title, notification.Message, data);
             }
         }
 
@@ -318,7 +318,7 @@ public class RoomService : ResponseHandler, IRoomService
         if (!string.IsNullOrEmpty(approvedUser?.FcmToken))
         {
             var data = new Dictionary<string, string> { { "type", "room" }, { "roomId", room.Id.ToString() } };
-            try { await _pushService.SendPushNotificationAsync(approvedUser.FcmToken, notification.Title, notification.Message, data); } catch { }
+            await _pushService.SendPushNotificationAsync(approvedUser.FcmToken, notification.Title, notification.Message, data);
         }
 
         _eventTracker.Track(EventTypes.RoomJoinApproved, hostId, new { roomId, approvedUserId = targetUserId });
@@ -482,7 +482,7 @@ public class RoomService : ResponseHandler, IRoomService
                 var user = await _userManager.FindByIdAsync(r.UserId.ToString());
                 if (!string.IsNullOrEmpty(user?.FcmToken))
                 {
-                    try { await _pushService.SendPushNotificationAsync(user.FcmToken, "Room Starting Now! 🎙️", $"The room '{room.RoomTitle}' has just started. Join now!", data); } catch { }
+                    await _pushService.SendPushNotificationAsync(user.FcmToken, "Room Starting Now! 🎙️", $"The room '{room.RoomTitle}' has just started. Join now!", data);
                 }
             }
 
