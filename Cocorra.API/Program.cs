@@ -108,15 +108,47 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+// CORS: explicit allow-list of front-end origins, from Cors:AllowedOrigins.
+// AllowCredentials() cannot legally be combined with a wildcard origin, and
+// reflecting every Origin while allowing credentials would let any site call the
+// API with the caller's credentials — so the origins are named here instead.
+// SignalR's JS client sends credentials on /hubs negotiate, hence AllowCredentials.
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("CorsPolicy", builder =>
-        builder
-            .SetIsOriginAllowed(_ => true)
-            .AllowAnyMethod()
-            .AllowAnyHeader()
-            .AllowCredentials());
+    options.AddPolicy("CorsPolicy", policy =>
+    {
+        policy.AllowAnyMethod()
+              .AllowAnyHeader()
+              .AllowCredentials()
+              // Allows the admin panel to read pagination/diagnostic headers.
+              .WithExposedHeaders("Content-Disposition");
+
+        if (allowedOrigins.Length > 0)
+        {
+            // Configured origins, plus any localhost port so a dev server on
+            // 4201/4300 works without a config edit. Remote origins stay pinned.
+            policy.SetIsOriginAllowed(origin =>
+                allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)
+                || IsLocalhost(origin));
+        }
+        else
+        {
+            // No configuration present — fall back to the previous permissive
+            // behaviour rather than silently breaking every browser client.
+            policy.SetIsOriginAllowed(_ => true);
+        }
+    });
 });
+
+static bool IsLocalhost(string origin) =>
+    Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+    && (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+        || uri.Host == "127.0.0.1"
+        || uri.Host == "[::1]");
 
 #region AddScopedServices
 builder.Services.AddSignalR(options =>
