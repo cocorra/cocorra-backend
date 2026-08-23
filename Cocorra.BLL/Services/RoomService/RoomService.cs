@@ -87,21 +87,10 @@ public class RoomService : ResponseHandler, IRoomService
             string? imagePath = null;
             if (roomImage != null && roomImage.Length > 0)
             {
-                var savedPath = await _uploadImage.SaveImageAsync(roomImage);
-                if (!savedPath.StartsWith("Error"))
+                var savedPath = await _uploadImage.SaveImageAsync(roomImage, "Rooms");
+                if (!savedPath.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Relocate from Profiles subfolder to Rooms subfolder
-                    imagePath = savedPath.Replace("Uploads/img/Profiles/", "Uploads/img/Rooms/");
-                    // Ensure the Rooms directory exists and move the file
-                    var profilesPath = Path.Combine(GetContentPath(), savedPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-                    var roomsDir = Path.Combine(GetContentPath(), "Uploads", "img", "Rooms");
-                    if (!Directory.Exists(roomsDir)) Directory.CreateDirectory(roomsDir);
-                    var fileName = Path.GetFileName(savedPath);
-                    var roomsFilePath = Path.Combine(roomsDir, fileName);
-                    if (File.Exists(profilesPath))
-                    {
-                        File.Move(profilesPath, roomsFilePath);
-                    }
+                    imagePath = savedPath;
                 }
             }
 
@@ -145,11 +134,6 @@ public class RoomService : ResponseHandler, IRoomService
         {
             return BadRequest<Guid>($"Failed to create room: {ex.Message}");
         }
-    }
-
-    private string GetContentPath()
-    {
-        return Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
     }
 
     public async Task<Response<JoinRoomResultDto>> JoinRoomAsync(Guid roomId, Guid userId)

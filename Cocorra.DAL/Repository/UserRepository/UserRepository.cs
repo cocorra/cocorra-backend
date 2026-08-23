@@ -52,9 +52,14 @@ namespace Cocorra.DAL.Repository.UserRepository
                 })
                 .ToListAsync();
 
-            string BuildFullUrl(string? relativePath)
+            string? BuildFullUrl(string? relativePath)
             {
-                if (string.IsNullOrWhiteSpace(relativePath)) return null!;
+                if (string.IsNullOrWhiteSpace(relativePath)) return null;
+                if (relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || 
+                    relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    return relativePath;
+                }
                 return $"{baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
             }
 

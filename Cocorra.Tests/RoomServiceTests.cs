@@ -13,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Moq;
 using Cocorra.BLL.Services.EventTracking;
+using Microsoft.AspNetCore.Http;
 
 namespace Cocorra.Tests;
 
@@ -356,4 +357,78 @@ public class RoomServiceTests
         Assert.False(result.Succeeded);
         Assert.Contains("host", result.Message!, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ===================================================================
+    // CreateRoomAsync Tests
+    // ===================================================================
+
+    [Fact]
+    public async Task CreateRoomAsync_WithImage_UploadsToRoomsSubFolder()
+    {
+        // Arrange
+        var hostId = Guid.NewGuid();
+        var dto = new CreateRoomDto
+        {
+            RoomTitle = "Test Room",
+            Description = "Test Desc",
+            DurationHours = 2,
+            TotalCapacity = 50,
+            StageCapacity = 5,
+            DefaultSpeakerDurationMinutes = 5,
+            IsPrivate = false,
+            SelectionMode = RoomSelectionMode.Manual_CoachDecision,
+            Category = RoomCategory.Relationships
+        };
+
+        var fileMock = new Mock<IFormFile>();
+        fileMock.Setup(f => f.Length).Returns(100);
+        fileMock.Setup(f => f.FileName).Returns("test.jpg");
+
+        const string expectedUrl = "https://storage.cocorraapp.com/cocorra-assets/Uploads/img/Rooms/test-guid.jpg";
+        _uploadImageMock
+            .Setup(u => u.SaveImageAsync(fileMock.Object, "Rooms"))
+            .ReturnsAsync(expectedUrl);
+
+        Room? savedRoom = null;
+        _roomRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<Room>()))
+            .Callback<Room>(r => savedRoom = r)
+            .ReturnsAsync((Room r) => r);
+
+        var service = CreateService();
+
+        // Act
+        var result = await service.CreateRoomAsync(dto, hostId, fileMock.Object);
+
+        // Assert
+        Assert.True(result.Succeeded);
+        _uploadImageMock.Verify(u => u.SaveImageAsync(fileMock.Object, "Rooms"), Times.Once);
+        Assert.NotNull(savedRoom);
+        Assert.Equal(expectedUrl, savedRoom!.ImagePath);
+    }
+
+    [Fact]
+    public async Task CreateRoomAsync_InvalidDuration_ReturnsBadRequest()
+    {
+        // Arrange
+        var hostId = Guid.NewGuid();
+        var dto = new CreateRoomDto
+        {
+            RoomTitle = "Invalid Duration Room",
+            DurationHours = 5, // Only 2 and 3 are allowed
+            TotalCapacity = 50,
+            StageCapacity = 5,
+            Category = RoomCategory.Others
+        };
+
+        var service = CreateService();
+
+        // Act
+        var result = await service.CreateRoomAsync(dto, hostId);
+
+        // Assert
+        Assert.False(result.Succeeded);
+        Assert.Contains("Room duration must be exactly 2 or 3 hours", result.Message!);
+    }
 }
+

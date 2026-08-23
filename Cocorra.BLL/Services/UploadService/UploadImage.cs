@@ -26,7 +26,7 @@ namespace Cocorra.BLL.Services.Upload
             _settings = settings.Value;
         }
 
-        public async Task<string> SaveImageAsync(IFormFile imageFile)
+        public async Task<string> SaveImageAsync(IFormFile imageFile, string subFolder = "Profiles")
         {
             try
             {
@@ -45,7 +45,10 @@ namespace Cocorra.BLL.Services.Upload
                 if (!IsValidImageSignature(imageFile)) return "Error:FakeImage";
 
                 string fileName = Guid.NewGuid().ToString() + extension;
-                var objectKey = $"Uploads/img/Profiles/{fileName}";
+                string cleanSubFolder = (subFolder ?? "Profiles").Replace("\\", "/").Trim('/');
+                var objectKey = cleanSubFolder.StartsWith("Uploads/", StringComparison.OrdinalIgnoreCase)
+                    ? $"{cleanSubFolder}/{fileName}"
+                    : $"Uploads/img/{cleanSubFolder}/{fileName}";
 
                 using var newMemoryStream = new MemoryStream();
                 await imageFile.CopyToAsync(newMemoryStream);
