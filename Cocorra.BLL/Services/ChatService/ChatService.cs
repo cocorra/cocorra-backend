@@ -13,6 +13,8 @@ using System.Threading.Tasks;
 using static Cocorra.BLL.Services.Events.ChatEvents;
 using Cocorra.BLL.Services.EventTracking;
 
+using Microsoft.Extensions.Logging;
+
 namespace Cocorra.BLL.Services.ChatService
 {
     public class ChatService : ResponseHandler, IChatService
@@ -23,8 +25,16 @@ namespace Cocorra.BLL.Services.ChatService
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IMediator _mediator; 
         private readonly IEventTracker _eventTracker;
+        private readonly ILogger<ChatService> _logger;
 
-        public ChatService(IUserBlockRepository blockRepo, IMessageRepository messageRepo, IPushNotificationService pushService, UserManager<ApplicationUser> userManager, IMediator mediator, IEventTracker eventTracker)
+        public ChatService(
+            IUserBlockRepository blockRepo,
+            IMessageRepository messageRepo,
+            IPushNotificationService pushService,
+            UserManager<ApplicationUser> userManager,
+            IMediator mediator,
+            IEventTracker eventTracker,
+            ILogger<ChatService> logger)
         {
             _blockRepo = blockRepo;
             _messageRepo = messageRepo;
@@ -32,6 +42,7 @@ namespace Cocorra.BLL.Services.ChatService
             _userManager = userManager;
             _mediator = mediator;
             _eventTracker = eventTracker;
+            _logger = logger;
         }
 
         public async Task<Response<IEnumerable<MessageDto>>> GetChatHistoryAsync(Guid currentUserId, Guid friendId, int pageNumber, int pageSize)
@@ -102,7 +113,12 @@ namespace Cocorra.BLL.Services.ChatService
                     await _pushService.SendPushNotificationAsync(receiver.FcmToken, senderName, content, data);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "FCM push notification failed for chat message. SenderId: {SenderId}, ReceiverId: {ReceiverId}",
+                    senderId, receiverId);
+            }
 
             return Success(dto);
         }

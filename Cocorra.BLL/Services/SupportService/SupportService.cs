@@ -221,8 +221,13 @@ namespace Cocorra.BLL.Services.SupportService
                     var banUser = await _userManager.FindByIdAsync(report.ReportedUserId.Value.ToString());
                     if (banUser == null) return NotFound<string>("Reported user not found.");
 
+                    banUser.Status = UserStatus.Banned;
                     await _userManager.SetLockoutEnabledAsync(banUser, true);
                     await _userManager.SetLockoutEndDateAsync(banUser, DateTimeOffset.UtcNow.AddYears(100));
+
+                    // Invalidate refresh token to prevent session resurrection
+                    banUser.RefreshToken = null;
+                    banUser.RefreshTokenExpiryTime = DateTime.UtcNow;
 
                     // Force kick from any active room via SignalR
                     await _realTimeNotifier.ForceLogoutAsync(
@@ -251,6 +256,10 @@ namespace Cocorra.BLL.Services.SupportService
                         await _pushService.SendPushNotificationAsync(
                             banUser.FcmToken, "", "", data);
                     }
+
+                    // Clear FCM token after push is sent
+                    banUser.FcmToken = null;
+                    await _userManager.UpdateAsync(banUser);
 
                     report.Status = "Resolved";
                     break;

@@ -314,6 +314,19 @@ namespace Cocorra.BLL.Services.AuthServices
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null) return BadRequest<string>("User not found.");
 
+            if (!string.IsNullOrWhiteSpace(fcmToken))
+            {
+                var staleUsers = await _userManager.Users
+                    .Where(u => u.FcmToken == fcmToken && u.Id != userId)
+                    .ToListAsync();
+
+                foreach (var staleUser in staleUsers)
+                {
+                    staleUser.FcmToken = null;
+                    await _userManager.UpdateAsync(staleUser);
+                }
+            }
+
             user.FcmToken = fcmToken;
             await _userManager.UpdateAsync(user);
 
@@ -618,10 +631,12 @@ namespace Cocorra.BLL.Services.AuthServices
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null) return BadRequest<string>("Invalid user");
 
-            if (string.IsNullOrEmpty(user.RefreshToken))
+            if (string.IsNullOrEmpty(user.RefreshToken) && string.IsNullOrEmpty(user.FcmToken))
                 return Success<string>("Token already revoked.");
 
             user.RefreshToken = null;
+            user.RefreshTokenExpiryTime = DateTime.UtcNow;
+            user.FcmToken = null;
             await _userManager.UpdateAsync(user);
 
             return Success<string>("Token revoked successfully.");
