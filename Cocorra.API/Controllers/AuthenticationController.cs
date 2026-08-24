@@ -69,12 +69,18 @@ namespace Cocorra.API.Controllers
         }
         [Authorize(Policy = "VerificationOnly")]
         [HttpPut(Router.AuthenticationRouting.UpdateFcmToken)]
-        public async Task<IActionResult> UpdateFcmToken([FromBody] string fcmToken)
+        public async Task<IActionResult> UpdateFcmToken(
+            [FromQuery] string? fcmToken,
+            [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] UpdateFcmTokenDto? dto)
         {
+            var token = !string.IsNullOrWhiteSpace(fcmToken) ? fcmToken : dto?.FcmToken;
+            if (string.IsNullOrWhiteSpace(token))
+                return BadRequest("FCM token is required.");
+
             var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (!Guid.TryParse(userIdString, out Guid userId)) return Unauthorized();
 
-            var result = await _authServices.UpdateFcmTokenAsync(userId, fcmToken);
+            var result = await _authServices.UpdateFcmTokenAsync(userId, token);
             return StatusCode((int)result.StatusCode, result);
         }
         [HttpPost(Router.AuthenticationRouting.ResendOtp)]
