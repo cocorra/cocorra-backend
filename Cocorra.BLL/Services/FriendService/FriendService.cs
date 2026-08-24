@@ -13,6 +13,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Cocorra.BLL.Services.EventTracking;
 
+using Microsoft.Extensions.Logging;
+
 namespace Cocorra.BLL.Services.FriendService
 {
     public class FriendService : ResponseHandler, IFriendService 
@@ -22,14 +24,22 @@ namespace Cocorra.BLL.Services.FriendService
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IPushNotificationService _pushService; 
         private readonly IEventTracker _eventTracker;
+        private readonly ILogger<FriendService> _logger;
 
-        public FriendService(IFriendRepository friendRepo, INotificationRepository notificationRepo, UserManager<ApplicationUser> userManager, IPushNotificationService pushService, IEventTracker eventTracker)
+        public FriendService(
+            IFriendRepository friendRepo,
+            INotificationRepository notificationRepo,
+            UserManager<ApplicationUser> userManager,
+            IPushNotificationService pushService,
+            IEventTracker eventTracker,
+            ILogger<FriendService> logger)
         {
             _friendRepo = friendRepo;
             _notificationRepo = notificationRepo;
             _userManager = userManager;
             _pushService = pushService;
             _eventTracker = eventTracker;
+            _logger = logger;
         }
 
         public async Task<Response<UserSearchDto>> SearchUserByIdAsync(Guid currentUserId, Guid targetUserId)
@@ -126,7 +136,10 @@ namespace Cocorra.BLL.Services.FriendService
                     if (!string.IsNullOrEmpty(targetUser?.FcmToken))
                         await _pushService.SendPushNotificationAsync(targetUser.FcmToken, "New Friend Request", notification.Message, new Dictionary<string, string> { { "type", "general" } }); 
                 } 
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "FCM push notification failed for friend request. SenderId: {SenderId}, TargetUserId: {TargetUserId}", currentUserId, targetUserId);
+                }
 
                 return Success("Friend request sent successfully.");
             }
@@ -179,7 +192,10 @@ namespace Cocorra.BLL.Services.FriendService
                         if (!string.IsNullOrEmpty(senderUser?.FcmToken))
                             await _pushService.SendPushNotificationAsync(senderUser.FcmToken, "Friend Request Accepted", notification.Message, new Dictionary<string, string> { { "type", "general" } }); 
                     } 
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "FCM push notification failed for accepted friend request. SenderId: {SenderId}, CurrentUserId: {CurrentUserId}", senderId, currentUserId);
+                    }
                 }
                 else
                 {

@@ -235,6 +235,14 @@ namespace Cocorra.BLL.Services.AdminService
                     }
                 }
 
+                // Clear FCM token AFTER the notification is dispatched so future pushes
+                // are not routed to a stale or reassigned device.
+                if (newStatus == UserStatus.Banned || newStatus == UserStatus.Rejected)
+                {
+                    user.FcmToken = null;
+                    await _userManager.UpdateAsync(user);
+                }
+
                 return Success($"User status changed from {oldStatus} to {newStatus}");
             }
 
@@ -405,9 +413,10 @@ namespace Cocorra.BLL.Services.AdminService
             await _userManager.SetLockoutEnabledAsync(user, true);
             await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
             
-            // SECURITY: Invalidate refresh token to prevent session resurrection.
+            // SECURITY: Invalidate refresh token and clear FCM token to prevent session resurrection or stale pushes.
             user.RefreshToken = null;
             user.RefreshTokenExpiryTime = DateTime.UtcNow;
+            user.FcmToken = null;
 
             await _userManager.UpdateAsync(user);
 
