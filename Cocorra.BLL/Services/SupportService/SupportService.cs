@@ -243,9 +243,13 @@ namespace Cocorra.BLL.Services.SupportService
 
                     if (!string.IsNullOrEmpty(banUser?.FcmToken))
                     {
-                        var data = new Dictionary<string, string> { { "type", "account_locked" } };
+                        var data = new Dictionary<string, string>
+                        {
+                            { "type", "account_locked" },
+                            { "lockout_end", DateTimeOffset.UtcNow.AddYears(100).ToString("o") }
+                        };
                         await _pushService.SendPushNotificationAsync(
-                            banUser.FcmToken, banNotification.Title, banNotification.Message, data);
+                            banUser.FcmToken, "", "", data);
                     }
 
                     report.Status = "Resolved";
