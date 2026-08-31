@@ -308,7 +308,8 @@ namespace Cocorra.API.Hubs
                 await Clients.Caller.SendAsync("LiveKitToken", new
                 {
                     Token = liveKitToken,
-                    ServerUrl = _liveKitSettings.ServerUrl
+                    ServerUrl = _liveKitSettings.ServerUrl,
+                    IceServers = _liveKitSettings.IceServers
                 });
             }
             catch (Exception sendEx)

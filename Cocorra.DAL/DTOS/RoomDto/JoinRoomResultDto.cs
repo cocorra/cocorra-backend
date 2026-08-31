@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace Cocorra.DAL.DTOS.RoomDto;
@@ -24,4 +25,11 @@ public class JoinRoomResultDto
     /// </summary>
     [JsonPropertyName("roomName")]
     public string? RoomName { get; set; }
+
+    /// <summary>
+    /// Optional dynamic ICE / STUN / TURN servers configuration for WebRTC connectivity.
+    /// </summary>
+    [JsonPropertyName("iceServers")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<IceServerDto>? IceServers { get; set; }
 }

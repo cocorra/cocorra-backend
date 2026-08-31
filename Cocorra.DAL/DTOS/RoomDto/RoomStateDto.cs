@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Text.Json.Serialization;
 using Cocorra.DAL.Enums;
 
 namespace Cocorra.DAL.DTOS.RoomDto;
@@ -8,7 +8,7 @@ namespace Cocorra.DAL.DTOS.RoomDto;
 public class RoomStateDto
 {
     public Guid RoomId { get; set; }
-    public string RoomTitle { get; set; }=string.Empty;
+    public string RoomTitle { get; set; } = string.Empty;
     public Guid HostId { get; set; }
     public int TotalCapacity { get; set; }
     public int StageCapacity { get; set; }
@@ -25,4 +25,11 @@ public class RoomStateDto
     /// The LiveKit server WebSocket URL.
     /// </summary>
     public string? LiveKitServerUrl { get; set; }
+
+    /// <summary>
+    /// Optional dynamic ICE / STUN / TURN servers configuration for WebRTC connectivity.
+    /// </summary>
+    [JsonPropertyName("iceServers")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<IceServerDto>? IceServers { get; set; }
 }

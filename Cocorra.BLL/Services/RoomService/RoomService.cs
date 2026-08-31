@@ -174,7 +174,8 @@ public class RoomService : ResponseHandler, IRoomService
                 {
                     LiveKitToken = token,
                     LiveKitServerUrl = _liveKitSettings.ServerUrl,
-                    RoomName = roomId.ToString()
+                    RoomName = roomId.ToString(),
+                    IceServers = _liveKitSettings.IceServers
                 });
             }
             if (existingParticipant.Status == ParticipantStatus.Kicked) return BadRequest<JoinRoomResultDto>("You are banned from this room.");
@@ -203,7 +204,8 @@ public class RoomService : ResponseHandler, IRoomService
                 {
                     LiveKitToken = token,
                     LiveKitServerUrl = _liveKitSettings.ServerUrl,
-                    RoomName = roomId.ToString()
+                    RoomName = roomId.ToString(),
+                    IceServers = _liveKitSettings.IceServers
                 }, message: "Rejoined successfully.");
             }
         }
@@ -264,7 +266,8 @@ public class RoomService : ResponseHandler, IRoomService
             {
                 LiveKitToken = token,
                 LiveKitServerUrl = _liveKitSettings.ServerUrl,
-                RoomName = roomId.ToString()
+                RoomName = roomId.ToString(),
+                IceServers = _liveKitSettings.IceServers
             }, message: "Joined successfully.");
         }
     }
@@ -349,7 +352,8 @@ public class RoomService : ResponseHandler, IRoomService
                 JoinedAt = p.JoinedAt
             }).ToList(),
             LiveKitToken = liveKitToken,
-            LiveKitServerUrl = _liveKitSettings.ServerUrl
+            LiveKitServerUrl = _liveKitSettings.ServerUrl,
+            IceServers = _liveKitSettings.IceServers
         };
 
         return Success(roomState);
