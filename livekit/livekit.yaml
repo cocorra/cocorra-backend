@@ -1,0 +1,53 @@
+# ==============================================================================
+# LiveKit Server Configuration (with Built-in STUN/TURN & NAT Traversal)
+# Domain: live.cocorraapp.com | Server IP: 152.239.115.176
+# ==============================================================================
+
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+# API Keys matching Cocorra.API appsettings.json
+keys:
+  APIbnoqt7M8yCA4: 4vQLn7Z9GienF7cPZ54SOcA4fYyec5fTSAevDQh2DU5G
+
+logging:
+  json: false
+  level: info
+
+# WebRTC & Media Engine Configuration
+rtc:
+  # TCP fallback port when UDP is blocked
+  tcp_port: 7881
+  
+  # UDP port range for media streams (RTP/RTCP audio packets)
+  port_range_start: 50000
+  port_range_end: 60000
+  
+  # CRITICAL: Detect & use public IP for ICE candidates advertisement
+  use_external_ip: true
+  
+  # If behind 1:1 NAT, specify the public IP directly:
+  # node_ip: "152.239.115.176"
+
+  # ICE Lite (server-driven peer connections)
+  ice_lite: true
+
+# Built-in TURN / STUN Server Configuration for Symmetric NAT & Strict Firewalls
+turn:
+  enabled: true
+  domain: live.cocorraapp.com
+  
+  # Standard STUN/TURN UDP & TCP port
+  udp_port: 3478
+  
+  # Secure TURNS (TLS) port
+  tls_port: 5349
+  
+  # Set to true if TLS is terminated upstream by reverse proxy (Nginx / Caddy)
+  external_tls: true
+
+  # Static credentials (synced with Cocorra.API appsettings.json -> LiveKit:IceServers)
+  users:
+    - username: cocorra_turn_user
+      password: CocorraTurnSecretPassword@@2026

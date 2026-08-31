@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Moq;
 using System.Security.Claims;
+using Xunit;
 
 namespace Cocorra.Tests;
 
@@ -46,6 +47,31 @@ public class RoomsControllerTests
         };
 
         return controller;
+    }
+
+    // ===================================================================
+    // Create Endpoint Tests
+    // ===================================================================
+
+    [Fact]
+    public async Task Create_Success_ReturnsOk()
+    {
+        var hostId = Guid.NewGuid();
+        var dto = new CreateRoomDto { RoomTitle = "New Room" };
+        var serviceResponse = new Response<Guid>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = Guid.NewGuid()
+        };
+
+        _roomServiceMock.Setup(s => s.CreateRoomAsync(dto, hostId, null)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController(hostId);
+        var result = await controller.Create(dto, null);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(serviceResponse, ok.Value);
     }
 
     // ===================================================================
@@ -114,6 +140,32 @@ public class RoomsControllerTests
     }
 
     // ===================================================================
+    // Approve Endpoint Tests
+    // ===================================================================
+
+    [Fact]
+    public async Task Approve_Success_ReturnsOk()
+    {
+        var hostId = Guid.NewGuid();
+        var roomId = Guid.NewGuid();
+        var targetUserId = Guid.NewGuid();
+        var serviceResponse = new Response<bool>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = true
+        };
+
+        _roomServiceMock.Setup(s => s.ApproveUserAsync(roomId, targetUserId, hostId)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController(hostId);
+        var result = await controller.Approve(roomId, targetUserId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(serviceResponse, ok.Value);
+    }
+
+    // ===================================================================
     // GetRoomState Endpoint Tests
     // ===================================================================
 
@@ -155,6 +207,73 @@ public class RoomsControllerTests
     }
 
     // ===================================================================
+    // Feed & Reminders Tests
+    // ===================================================================
+
+    [Fact]
+    public async Task GetRoomsFeed_ReturnsOk()
+    {
+        var userId = Guid.NewGuid();
+        var feedItems = new List<RoomSummaryDto>();
+        var serviceResponse = new Response<IEnumerable<RoomSummaryDto>>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = feedItems
+        };
+
+        _roomServiceMock.Setup(s => s.GetRoomsFeedAsync(userId, null, 1, 20)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController(userId);
+        var result = await controller.GetRoomsFeed(null, 1, 20);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(200, obj.StatusCode);
+    }
+
+    [Fact]
+    public async Task ToggleReminder_ReturnsOk()
+    {
+        var userId = Guid.NewGuid();
+        var roomId = Guid.NewGuid();
+        var serviceResponse = new Response<string>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = "Reminder toggled"
+        };
+
+        _roomServiceMock.Setup(s => s.ToggleReminderAsync(roomId, userId)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController(userId);
+        var result = await controller.ToggleReminder(roomId);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(200, obj.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartScheduledRoom_ReturnsOk()
+    {
+        var hostId = Guid.NewGuid();
+        var roomId = Guid.NewGuid();
+        var serviceResponse = new Response<string>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = "Room started"
+        };
+
+        _roomServiceMock.Setup(s => s.StartScheduledRoomAsync(roomId, hostId)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController(hostId);
+        var result = await controller.StartScheduledRoom(roomId);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(200, obj.StatusCode);
+    }
+
+    // ===================================================================
     // GetLiveKitToken Endpoint Tests
     // ===================================================================
 
@@ -188,10 +307,10 @@ public class RoomsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.NotNull(ok.Value);
 
-        // Use dynamic to check the anonymous object
         var json = System.Text.Json.JsonSerializer.Serialize(ok.Value);
         Assert.Contains("fresh-token", json);
         Assert.Contains("wss://test.livekit.dev", json);
+        Assert.Contains("IceServers", json);
     }
 
     [Fact]
@@ -248,5 +367,24 @@ public class RoomsControllerTests
         // Assert
         var statusResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(200, statusResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetRoomHistory_ReturnsOk()
+    {
+        var serviceResponse = new Response<IEnumerable<RoomSummaryDto>>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = new List<RoomSummaryDto>()
+        };
+
+        _roomServiceMock.Setup(s => s.GetEndedRoomsHistoryAsync(1, 20)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController();
+        var result = await controller.GetRoomHistory(1, 20);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(200, obj.StatusCode);
     }
 }

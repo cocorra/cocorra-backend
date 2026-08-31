@@ -153,7 +153,8 @@ namespace Cocorra.API.Controllers
                 Data = new
                 {
                     LiveKitToken = result.Data!.LiveKitToken,
-                    LiveKitServerUrl = result.Data.LiveKitServerUrl
+                    LiveKitServerUrl = result.Data.LiveKitServerUrl,
+                    IceServers = result.Data.IceServers
                 }
             });
         }
