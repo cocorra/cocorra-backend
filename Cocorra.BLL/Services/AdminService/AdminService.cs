@@ -74,7 +74,7 @@ namespace Cocorra.BLL.Services.AdminService
         private const string ReRecordTitle = "إعادة تسجيل صوتي 🎙️";
         private const string ReRecordBody = "نعتذر منك، نحتاج منك إعادة تسجيل المقطع الصوتي الخاص بك بوضوح أكبر.";
 
-        public async Task<Response<string>> ChangeUserStatusAsync(Guid userId, UserStatus newStatus)
+        public async Task<Response<string>> ChangeUserStatusAsync(Guid userId, UserStatus newStatus, Guid adminId, bool isBulk = false)
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null) return BadRequest<string>("User not found");
@@ -136,13 +136,31 @@ namespace Cocorra.BLL.Services.AdminService
             {
                 _eventTracker.Track(EventTypes.VoiceVerificationResult, user.Id, new { status = newStatus.ToString() });
 
+                // AN-011: the only durable record of the transition, emitted after the update
+                // succeeded so a failed write cannot produce a phantom transition.
+                _eventTracker.Track(
+                    EventTypes.UserStatusChanged,
+                    user.Id,
+                    new
+                    {
+                        fromStatus = oldStatus.ToString(),
+                        toStatus = newStatus.ToString(),
+                        changedByAdminId = adminId,
+                        isBulkOperation = isBulk
+                    });
+
                 if (newStatus == UserStatus.Active)
                 {
-                    var alreadyActivated = await _context.UserEvents.AnyAsync(e => e.UserId == user.Id && e.EventType == EventTypes.ActivationCompleted);
-                    if (!alreadyActivated)
-                    {
-                        _eventTracker.Track(EventTypes.ActivationCompleted, user.Id);
-                    }
+                    // AN-010: idempotency is enforced by UX_UserEvents_EventId, not by reading
+                    // the table. The previous AnyAsync guard queried UserEvents while Track only
+                    // ENQUEUES, so two concurrent activations both saw "not yet activated" and
+                    // both emitted. A deterministic eventKey makes the duplicate impossible to
+                    // persist and removes a database round-trip from the activation path.
+                    _eventTracker.Track(
+                        EventTypes.ActivationCompleted,
+                        user.Id,
+                        properties: null,
+                        eventKey: $"{EventTypes.ActivationCompleted}:{user.Id}");
                 }
 
                 // Persist a Notification row so the decision survives a failed push and
@@ -286,7 +304,7 @@ namespace Cocorra.BLL.Services.AdminService
 
                 // Reuse the single-user path so all side effects (lockout, token
                 // invalidation, voice cleanup, email, push, event tracking) apply.
-                var single = await ChangeUserStatusAsync(userId, model.NewStatus);
+                var single = await ChangeUserStatusAsync(userId, model.NewStatus, adminId, isBulk: true);
                 result.Results.Add(new BulkItemResultDto
                 {
                     UserId = userId,

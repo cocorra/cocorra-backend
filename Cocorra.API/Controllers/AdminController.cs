@@ -57,7 +57,14 @@ namespace Cocorra.API.Controllers
                 return BadRequest(new { succeeded = false, message = "You cannot change your own status." });
             }
 
-            var result = await _adminService.ChangeUserStatusAsync(id, model.NewStatus);
+            // AN-011: forward the acting admin so the transition is attributable. The claim is
+            // already read above; it was simply not passed on.
+            if (!Guid.TryParse(adminId, out var adminGuid))
+            {
+                return BadRequest(new { succeeded = false, message = "Could not resolve the acting admin identity." });
+            }
+
+            var result = await _adminService.ChangeUserStatusAsync(id, model.NewStatus, adminGuid);
             if (!result.Succeeded)
                 return BadRequest(result);
 

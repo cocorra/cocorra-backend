@@ -102,6 +102,25 @@ namespace Cocorra.DAL.AppMetaData
             public const string PeakHours     = Prefix + "/PeakHours";       // GET ?from=&to=
             public const string VoiceDropOff  = Prefix + "/VoiceVerification/DropOff"; // GET ?from=&to=
             public const string ActiveVsPassive = Prefix + "/Participation/ActiveVsPassive"; // GET ?from=&to=
+
+            // AN-007 / AN-006 / AN-012 additions. Additive routes: the legacy Funnel and
+            // Retention routes keep serving until the dashboard cuts over page by page.
+            public const string ActivationFunnel = Prefix + "/Activation/Funnel";  // GET ?from=&to=
+            public const string ReturnRate       = Prefix + "/Return/Weekly";      // GET ?from=&to=&weeks=
+            public const string MetricsRegistry  = Prefix + "/Metrics/Registry";   // GET
+
+            // AN-020..AN-023. All additive; none replaces an existing route.
+            public const string SupplyHealth  = Prefix + "/Supply/Health";       // GET ?granularity=&from=&to=
+            public const string ReportRate    = Prefix + "/Safety/ReportRate";   // GET ?from=&to=
+            public const string ReviewLatency = Prefix + "/Review/Latency";      // GET ?from=&to=
+            public const string Support       = Prefix + "/Support";             // GET ?from=&to=
+            public const string SystemHealth  = Prefix + "/System/Health";       // GET
+            public const string Backfill      = Prefix + "/System/Backfill";     // POST ?from=&to=&force=
+            public const string Social        = Prefix + "/Social";              // GET ?from=&to=
+            public const string Mbti          = Prefix + "/Mbti/Dichotomies";    // GET ?from=&to=
+            public const string CohortGrid    = Prefix + "/Return/CohortGrid";   // GET ?from=&to=
+            public const string DecisionCenter = Prefix + "/Decisions";          // GET
+            public const string LiveKitWebhook = Rule + "Webhooks/LiveKit";       // POST (signature auth)
         }
     }
 }

@@ -16,25 +16,57 @@ namespace Cocorra.BLL.Services.EventTracking
         private readonly ILogger<EventTracker> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IConfiguration _configuration;
+        private readonly EventPipelineMetrics _metrics;
 
         public EventTracker(
             Channel<UserEvent> queue, 
             ILogger<EventTracker> logger, 
             IHttpContextAccessor httpContextAccessor, 
-            IConfiguration configuration)
+            IConfiguration configuration,
+            EventPipelineMetrics? metrics = null)
         {
             _queue = queue;
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
             _configuration = configuration;
+            _metrics = metrics ?? new EventPipelineMetrics();
+            // Indexer rather than GetValue<T>: consistent with how the IP-hash salt is read,
+            // and tolerant of a stubbed IConfiguration that has no section support.
+            NewEventEmissionEnabled =
+                bool.TryParse(configuration["Analytics:EnableNewEventEmission"], out var newEventsOn) && newEventsOn;
+
+            // Deliberately conjunctive: the high-frequency increment cannot be enabled on its
+            // own. Deploying it before the low-frequency one has proven stable would remove any
+            // ability to attribute a drop-rate spike to one increment or the other.
+            HighFrequencyEventsEnabled =
+                NewEventEmissionEnabled
+                && bool.TryParse(configuration["Analytics:EnableHighFrequencyEvents"], out var highFreqOn)
+                && highFreqOn;
         }
 
+        /// <inheritdoc />
+        public bool NewEventEmissionEnabled { get; }
+
+        /// <inheritdoc />
+        public bool HighFrequencyEventsEnabled { get; }
+
         public void Track(string eventType, Guid? userId = null, object? properties = null)
+        {
+            Track(eventType, userId, properties, eventKey: null, sessionId: null, correlationId: null);
+        }
+
+        public void Track(
+            string eventType,
+            Guid? userId,
+            object? properties,
+            string? eventKey = null,
+            Guid? sessionId = null,
+            Guid? correlationId = null,
+            byte schemaVersion = 1)
         {
             try
             {
                 var httpContext = _httpContextAccessor.HttpContext;
-                Guid? sessionId = null;
                 string? ipHash = null;
                 string? userAgent = null;
 
@@ -50,8 +82,8 @@ namespace Cocorra.BLL.Services.EventTracking
                         }
                     }
 
-                    // Get SessionId from HttpContext Items (set by middleware)
-                    if (httpContext.Items.TryGetValue("SessionId", out var cachedSessionId) && cachedSessionId is Guid guidSessionId)
+                    // Get SessionId from HttpContext Items if not explicitly provided
+                    if (sessionId == null && httpContext.Items.TryGetValue("SessionId", out var cachedSessionId) && cachedSessionId is Guid guidSessionId)
                     {
                         sessionId = guidSessionId;
                     }
@@ -76,8 +108,16 @@ namespace Cocorra.BLL.Services.EventTracking
 
                 var propertiesJson = properties is null ? null : JsonSerializer.Serialize(properties);
 
+                // Deterministic EventId derivation if caller provided natural eventKey
+                var eventId = !string.IsNullOrWhiteSpace(eventKey)
+                    ? DeriveDeterministicGuid(eventKey)
+                    : Guid.NewGuid();
+
                 var evt = new UserEvent
                 {
+                    EventId = eventId,
+                    SchemaVersion = schemaVersion,
+                    CorrelationId = correlationId,
                     EventType = eventType,
                     UserId = userId,
                     PropertiesJson = propertiesJson,
@@ -91,7 +131,14 @@ namespace Cocorra.BLL.Services.EventTracking
                 // Non-blocking write to channel
                 if (!_queue.Writer.TryWrite(evt))
                 {
+                    // R-1: this is the pipeline's original silent loss path. The counter makes
+                    // the rate observable without grepping a rotating container log.
+                    _metrics.RecordDroppedOnEnqueue();
                     _logger.LogWarning("Event queue full; dropped {EventType}", eventType);
+                }
+                else
+                {
+                    _metrics.RecordEnqueued();
                 }
             }
             catch (Exception ex)
@@ -99,6 +146,26 @@ namespace Cocorra.BLL.Services.EventTracking
                 // Tracking must NEVER throw back to the user
                 _logger.LogError(ex, "Failed to enqueue event {EventType}", eventType);
             }
+        }
+
+        /// <summary>
+        /// Derives a stable EventId from a natural key so the same logical event produces the
+        /// same id in any process. SHA-256 rather than MD5: MD5 throws when Windows FIPS policy
+        /// is enforced and trips security scanners, and nothing here needs MD5's speed.
+        /// The version and variant bits are set so the result is a well-formed RFC-4122 UUID
+        /// rather than 16 arbitrary bytes.
+        /// </summary>
+        internal static Guid DeriveDeterministicGuid(string eventKey)
+        {
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(eventKey));
+
+            var guidBytes = new byte[16];
+            Array.Copy(hash, guidBytes, 16);
+
+            guidBytes[7] = (byte)((guidBytes[7] & 0x0F) | 0x50); // version 5 (name-based, SHA-1 family)
+            guidBytes[8] = (byte)((guidBytes[8] & 0x3F) | 0x80); // RFC-4122 variant
+
+            return new Guid(guidBytes);
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
 using Cocorra.DAL.Models;
+using Cocorra.DAL.Models.Analytics;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -26,6 +27,13 @@ namespace Cocorra.DAL.Data
         public DbSet<SupportMessage> SupportMessages { get; set; }
         public DbSet<BlockedDevices> BlockedDevices { get; set; }
         public DbSet<UserEvent> UserEvents { get; set; }
+        public DbSet<DeadLetterEvent> DeadLetterEvents { get; set; }
+        public DbSet<DailyStateSnapshot> DailyStateSnapshots { get; set; }
+        public DbSet<DailyPlatformMetrics> DailyPlatformMetrics { get; set; }
+        public DbSet<DailyRoomMetrics> DailyRoomMetrics { get; set; }
+        public DbSet<DailyHostMetrics> DailyHostMetrics { get; set; }
+        public DbSet<DailyFunnelMetrics> DailyFunnelMetrics { get; set; }
+        public DbSet<AggregationCheckpoint> AggregationCheckpoints { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -250,6 +258,16 @@ namespace Cocorra.DAL.Data
             // ============================================================
             builder.Entity<UserEvent>(e =>
             {
+                // Unique idempotency key
+                e.HasIndex(x => x.EventId)
+                 .IsUnique()
+                 .HasDatabaseName("UX_UserEvents_EventId");
+
+                // Filtered index on CorrelationId
+                e.HasIndex(x => x.CorrelationId)
+                 .HasFilter("[CorrelationId] IS NOT NULL")
+                 .HasDatabaseName("IX_UserEvents_CorrelationId");
+
                 // Indexes for filtering
                 e.HasIndex(x => new { x.EventType, x.OccurredAtUtc });
                 e.HasIndex(x => new { x.UserId, x.OccurredAtUtc });
@@ -261,6 +279,62 @@ namespace Cocorra.DAL.Data
                  .WithMany()
                  .HasForeignKey(x => x.UserId)
                  .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            // ============================================================
+            // 10. Analytics Read Models & Infrastructure
+            // ============================================================
+            builder.Entity<DeadLetterEvent>(e =>
+            {
+                e.HasIndex(x => x.EventId);
+                e.HasIndex(x => x.DeadLetteredAtUtc);
+            });
+
+            builder.Entity<DailyStateSnapshot>(e =>
+            {
+                // Unique constraint: one row per (Date, MetricKey) for idempotent snapshot runs
+                e.HasIndex(x => new { x.Date, x.MetricKey })
+                 .IsUnique()
+                 .HasDatabaseName("UX_DailyStateSnapshots_Date_MetricKey");
+            });
+
+            builder.Entity<DailyPlatformMetrics>(e =>
+            {
+                // RM-1: Grain is one row per Date
+                e.HasIndex(x => x.Date)
+                 .IsUnique()
+                 .HasDatabaseName("UX_DailyPlatformMetrics_Date");
+            });
+
+            builder.Entity<DailyRoomMetrics>(e =>
+            {
+                // RM-2: Grain is one row per (Date, RoomId)
+                e.HasIndex(x => new { x.Date, x.RoomId })
+                 .IsUnique()
+                 .HasDatabaseName("UX_DailyRoomMetrics_Date_RoomId");
+            });
+
+            builder.Entity<DailyHostMetrics>(e =>
+            {
+                // RM-3: Grain is one row per (Date, HostId)
+                e.HasIndex(x => new { x.Date, x.HostId })
+                 .IsUnique()
+                 .HasDatabaseName("UX_DailyHostMetrics_Date_HostId");
+            });
+
+            builder.Entity<DailyFunnelMetrics>(e =>
+            {
+                // RM-4: Grain is one row per (CohortDate, FunnelName, StepIndex)
+                e.HasIndex(x => new { x.CohortDate, x.FunnelName, x.StepIndex })
+                 .IsUnique()
+                 .HasDatabaseName("UX_DailyFunnelMetrics_CohortDate_Funnel_Step");
+            });
+
+            builder.Entity<AggregationCheckpoint>(e =>
+            {
+                e.HasIndex(x => x.PipelineName)
+                 .IsUnique()
+                 .HasDatabaseName("UX_AggregationCheckpoints_PipelineName");
             });
         }
 

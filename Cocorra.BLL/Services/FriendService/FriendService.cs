@@ -129,7 +129,14 @@ namespace Cocorra.BLL.Services.FriendService
 
                 transaction.Commit();
 
-                _eventTracker.Track(EventTypes.FriendRequestSent, currentUserId, new { targetUserId });
+                // AN-030: without an origin, friend requests cannot be attributed to the
+                // surface that produced them, so there is no way to tell whether rooms actually
+                // generate social connection or people just browse the friend list.
+                _eventTracker.Track(EventTypes.FriendRequestSent, currentUserId, new
+                {
+                    targetUserId,
+                    origin = "friend_list"
+                });
 
                 try 
                 {
@@ -184,7 +191,13 @@ namespace Cocorra.BLL.Services.FriendService
                     await _notificationRepo.AddAsync(notification);
                     transaction.Commit();
 
-                    _eventTracker.Track(EventTypes.FriendRequestAccepted, currentUserId, new { senderId });
+                    // Reciprocity before volume: an accepted request is the connection, a sent
+                    // one is only an attempt. hoursToAccept exposes the deliberation gap.
+                    _eventTracker.Track(EventTypes.FriendRequestAccepted, currentUserId, new
+                    {
+                        senderId,
+                        hoursToAccept = Math.Round((DateTime.UtcNow - request.CreatedAt).TotalHours, 2)
+                    });
 
                     try 
                     { 

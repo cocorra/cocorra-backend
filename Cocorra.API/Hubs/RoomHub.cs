@@ -241,11 +241,19 @@ namespace Cocorra.API.Hubs
                 Context.ConnectionId, userId, roomGuid, participant.Status, participant.IsOnStage,
                 room.HostId == userId, Now());
 
+            // AN-019: captured BEFORE the re-activation branch below overwrites Status and
+            // JoinedAt. Once that runs, there is no way to tell a rejoin from a first join.
+            var isRejoin = participant.Status == ParticipantStatus.Left;
+
             // Re-activate users who had previously left (e.g., disconnect/reconnect)
             if (participant.Status == ParticipantStatus.Left)
             {
                 participant.Status = ParticipantStatus.Active;
-                participant.JoinedAt = DateTime.UtcNow;
+                // AN-031: JoinedAt is NOT overwritten here any more. It is the first entry, and
+                // overwriting it destroyed the only record of when this person actually arrived.
+                participant.LastJoinedAt = DateTime.UtcNow;
+                participant.RejoinCount++;
+                participant.LeftAt = null;
                 participant.IsOnStage = false;
                 participant.IsMuted = true;
                 participant.IsHandRaised = false;
@@ -267,7 +275,21 @@ namespace Cocorra.API.Hubs
 
             await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
 
-            _eventTracker.Track(EventTypes.RoomJoined, userId, new { roomId = roomGuid });
+            // AN-019: isHost and isRejoin are free at this point — room is already loaded and
+            // the branch above already tested for Left. Host exclusion by property means a
+            // consumer no longer has to join back to Rooms to filter the host out.
+            // SchemaVersion 2 marks the richer payload so a reader can tell which shape it has.
+            _eventTracker.Track(
+                EventTypes.RoomJoined,
+                userId,
+                new
+                {
+                    roomId = roomGuid,
+                    isHost = room.HostId == userId,
+                    isRejoin,
+                    entrySource = "direct"
+                },
+                schemaVersion: 2);
 
             await Clients.Group(roomId).SendAsync("UserJoined", new
             {
@@ -388,9 +410,23 @@ namespace Cocorra.API.Hubs
 
             if (participant.IsOnStage) return;
 
+            var wasAlreadyRaised = participant.IsHandRaised;
+
             participant.IsHandRaised = true;
             await _roomRepo.UpdateParticipantAsync(participant);
             await _roomRepo.SaveChangesAsync();
+
+            // AN-018 / E-01. Emitted on every call, including a repeat raise, because the
+            // request is the signal: raise -> lower -> raise is two distinct asks for the stage,
+            // and collapsing them would understate demand.
+            if (_eventTracker.HighFrequencyEventsEnabled)
+            {
+                _eventTracker.Track(EventTypes.HandRaised, userId, new
+                {
+                    roomId = roomGuid,
+                    wasAlreadyRaised
+                });
+            }
 
             await Clients.Group(roomId).SendAsync("HandRaised", new
             {
@@ -407,9 +443,25 @@ namespace Cocorra.API.Hubs
             var participant = await _roomRepo.GetParticipantAsync(roomGuid, userId);
             if (participant == null) throw new HubException("You are not a member of this room.");
 
+            var wasRaised = participant.IsHandRaised;
+
             participant.IsHandRaised = false;
             await _roomRepo.UpdateParticipantAsync(participant);
             await _roomRepo.SaveChangesAsync();
+
+            // AN-018 / E-02. wasApproved is false here by construction: this path is the user
+            // lowering their own hand, i.e. giving up waiting. The approval path clears the same
+            // flag in ApproveToStage and is reported there with wasApproved = true. Same state
+            // change, opposite meaning — conflating them would make abandonment invisible.
+            if (_eventTracker.HighFrequencyEventsEnabled && wasRaised)
+            {
+                _eventTracker.Track(EventTypes.HandLowered, userId, new
+                {
+                    roomId = roomGuid,
+                    wasApproved = false,
+                    reason = "self_lowered"
+                });
+            }
 
             await Clients.Group(roomId).SendAsync("HandLowered", new
             {
@@ -435,6 +487,8 @@ namespace Cocorra.API.Hubs
             var participant = await _roomRepo.GetParticipantAsync(roomGuid, targetGuid);
             if (participant == null) throw new HubException("User not found in room.");
 
+            var handWasRaised = participant.IsHandRaised;
+
             participant.IsOnStage = true;
             participant.IsHandRaised = false;
             participant.IsMuted = true; // Start muted on stage, user unmutes when ready
@@ -443,6 +497,33 @@ namespace Cocorra.API.Hubs
             await _roomRepo.SaveChangesAsync();
 
             try { await _liveKitService.UpdateStagePermissionAsync(roomGuid, targetGuid, canPublish: true); } catch { }
+
+            // AN-017 / E-03. Tracked against the PROMOTED PARTICIPANT, not the host: the stage
+            // funnel measures what happened to the listener. room_join_approved uses the
+            // opposite convention, and copying it here would silently break M-400.
+            if (_eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.StagePromoted, targetGuid, new
+                {
+                    roomId = roomGuid,
+                    promotedByHostId = hostId,
+                    stageOccupancyAfter = stageSpeakers.Count + 1,
+                    viaHandRaise = handWasRaised
+                });
+            }
+
+            // AN-018 / E-02, approval path. The hand went down because the ask succeeded, which
+            // is the opposite outcome from the self-lowered path even though the state change is
+            // identical. Without wasApproved, abandonment and success are indistinguishable.
+            if (_eventTracker.HighFrequencyEventsEnabled && handWasRaised)
+            {
+                _eventTracker.Track(EventTypes.HandLowered, targetGuid, new
+                {
+                    roomId = roomGuid,
+                    wasApproved = true,
+                    reason = "approved_to_stage"
+                });
+            }
 
             await Clients.Group(roomId).SendAsync("StageUpdated", new
             {
@@ -465,11 +546,13 @@ namespace Cocorra.API.Hubs
             var participant = await _roomRepo.GetParticipantAsync(roomGuid, targetGuid);
             if (participant == null) return;
 
+            double? demotionSegmentSeconds = null;
             if (!participant.IsMuted && participant.LastUnmutedAt.HasValue)
             {
                 var spokenSeconds = (DateTime.UtcNow - participant.LastUnmutedAt.Value).TotalSeconds;
                 participant.TotalSpokenSeconds += spokenSeconds;
                 participant.LastUnmutedAt = null;
+                demotionSegmentSeconds = spokenSeconds;
             }
 
             participant.IsOnStage = false;
@@ -480,6 +563,29 @@ namespace Cocorra.API.Hubs
             await _roomRepo.SaveChangesAsync();
 
             try { await _liveKitService.UpdateStagePermissionAsync(roomGuid, targetGuid, canPublish: false); } catch { }
+
+            // AN-018 / E-05, close site 1 of 5: the mic closed because the host demoted them.
+            if (_eventTracker.HighFrequencyEventsEnabled && demotionSegmentSeconds.HasValue)
+            {
+                _eventTracker.Track(EventTypes.MicDeactivated, targetGuid, new
+                {
+                    roomId = roomGuid,
+                    segmentSeconds = Math.Round(demotionSegmentSeconds.Value, 2),
+                    reason = "demoted_by_host",
+                    wasInitialHostMic = false
+                });
+            }
+
+            // AN-017 / E-04. Tracked against the demoted participant, matching stage_promoted.
+            if (_eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.StageDemoted, targetGuid, new
+                {
+                    roomId = roomGuid,
+                    demotedByHostId = hostId,
+                    reason = "host_action"
+                });
+            }
 
             await Clients.Group(roomId).SendAsync("StageUpdated", new
             {
@@ -512,6 +618,20 @@ namespace Cocorra.API.Hubs
 
             if (muteStatus == false && remainingSeconds <= 0 && userId != room.HostId)
             {
+                // AN-017 / E-06. Emitted BEFORE the throw: the rejection IS the fact being
+                // recorded, so emitting after the domain write (the usual rule) would mean it
+                // never fires at all. This is the one event in the increment where that applies.
+                if (_eventTracker.NewEventEmissionEnabled)
+                {
+                    _eventTracker.Track(EventTypes.SpeakerTimeExhausted, userId, new
+                    {
+                        roomId = roomGuid,
+                        allowedSeconds = totalAllowedSeconds,
+                        spokenSeconds = Math.Round(participant.TotalSpokenSeconds),
+                        extraMinutesGranted = participant.ExtraMinutesGranted
+                    });
+                }
+
                 throw new HubException("Your time is up! The host needs to grant you more time.");
             }
 
@@ -529,6 +649,22 @@ namespace Cocorra.API.Hubs
                     participant.LastUnmutedAt = null;
 
                     remainingSeconds = totalAllowedSeconds - participant.TotalSpokenSeconds;
+
+                    // AN-018 / E-05, close site 2 of 5: the speaker muted themselves. This is the
+                    // only close site that mirrors mic_activated one-for-one; the other four end
+                    // a segment because somebody else acted.
+                    if (_eventTracker.HighFrequencyEventsEnabled)
+                    {
+                        _eventTracker.Track(EventTypes.MicDeactivated, userId, new
+                        {
+                            roomId = roomGuid,
+                            segmentSeconds = Math.Round(spokenSeconds, 2),
+                            reason = "self_muted",
+                            // True only for the host's auto-opened mic, which is never preceded
+                            // by a mic_activated event: the room opens with it already unmuted.
+                            wasInitialHostMic = userId == room.HostId
+                        });
+                    }
                 }
             }
 
@@ -567,6 +703,19 @@ namespace Cocorra.API.Hubs
             await _roomRepo.UpdateParticipantAsync(participant);
             await _roomRepo.SaveChangesAsync();
 
+            // AN-017 / E-09. Emitted after the write succeeds. A host granting extra time is a
+            // signal the default speaker duration is too short — currently invisible.
+            if (_eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.SpeakerTimeExtended, targetGuid, new
+                {
+                    roomId = roomGuid,
+                    grantedByHostId = hostId,
+                    addedMinutes = minutes,
+                    totalExtraMinutes = participant.ExtraMinutesGranted
+                });
+            }
+
             await Clients.Group(roomId).SendAsync("ExtraTimeGranted", new
             {
                 UserId = targetGuid,
@@ -592,13 +741,29 @@ namespace Cocorra.API.Hubs
             if (participant == null) return;
 
             // Finalize spoken time if they were unmuted on stage
+            double? kickSegmentSeconds = null;
             if (!participant.IsMuted && participant.LastUnmutedAt.HasValue)
             {
-                participant.TotalSpokenSeconds += (DateTime.UtcNow - participant.LastUnmutedAt.Value).TotalSeconds;
+                var spokenSeconds = (DateTime.UtcNow - participant.LastUnmutedAt.Value).TotalSeconds;
+                participant.TotalSpokenSeconds += spokenSeconds;
                 participant.LastUnmutedAt = null;
+                kickSegmentSeconds = spokenSeconds;
+            }
+
+            // AN-018 / E-05, close site 3 of 5: the mic closed because the host removed them.
+            if (_eventTracker.HighFrequencyEventsEnabled && kickSegmentSeconds.HasValue)
+            {
+                _eventTracker.Track(EventTypes.MicDeactivated, targetGuid, new
+                {
+                    roomId = roomGuid,
+                    segmentSeconds = Math.Round(kickSegmentSeconds.Value, 2),
+                    reason = "kicked",
+                    wasInitialHostMic = false
+                });
             }
 
             participant.Status = ParticipantStatus.Kicked;
+            participant.LeftAt = DateTime.UtcNow; // AN-031: a kick is an exit too
             participant.IsOnStage = false;
             participant.IsMuted = true;
             participant.IsHandRaised = false;
@@ -613,6 +778,18 @@ namespace Cocorra.API.Hubs
             {
                 _connections.TryRemove(kickedConnId, out _);
                 await Groups.RemoveFromGroupAsync(kickedConnId, roomId);
+            }
+
+            // AN-017 / E-08. A moderation outcome with no other durable record: without this
+            // event a kick leaves only a ParticipantStatus flag with no timestamp or actor.
+            if (_eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.ParticipantKicked, targetGuid, new
+                {
+                    roomId = roomGuid,
+                    kickedByHostId = hostId,
+                    wasOnStage = participant.IsOnStage
+                });
             }
 
             await Clients.Group(roomId).SendAsync("UserKicked", new

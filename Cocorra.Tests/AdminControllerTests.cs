@@ -161,7 +161,7 @@ public class AdminControllerTests
             Data = "Status updated successfully."
         };
 
-        _adminServiceMock.Setup(s => s.ChangeUserStatusAsync(targetUserId, UserStatus.Active)).ReturnsAsync(serviceResponse);
+        _adminServiceMock.Setup(s => s.ChangeUserStatusAsync(targetUserId, UserStatus.Active, It.IsAny<Guid>(), false)).ReturnsAsync(serviceResponse);
 
         // Act
         var result = await controller.ChangeStatus(targetUserId, model);
@@ -187,7 +187,7 @@ public class AdminControllerTests
             Data = "User banned."
         };
 
-        _adminServiceMock.Setup(s => s.ChangeUserStatusAsync(targetUserId, UserStatus.Banned)).ReturnsAsync(serviceResponse);
+        _adminServiceMock.Setup(s => s.ChangeUserStatusAsync(targetUserId, UserStatus.Banned, It.IsAny<Guid>(), false)).ReturnsAsync(serviceResponse);
 
         // Act
         var result = await controller.ChangeStatus(targetUserId, model);

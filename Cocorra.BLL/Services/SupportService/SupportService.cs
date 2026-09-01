@@ -175,6 +175,7 @@ namespace Cocorra.BLL.Services.SupportService
                     }
 
                     report.Status = "Resolved";
+                    report.StatusCode = ReportStatus.Resolved;
                     break;
 
                 case AdminReportAction.Mute24h:
@@ -212,6 +213,7 @@ namespace Cocorra.BLL.Services.SupportService
                     }
 
                     report.Status = "Resolved";
+                    report.StatusCode = ReportStatus.Resolved;
                     break;
 
                 case AdminReportAction.BanUser:
@@ -262,10 +264,12 @@ namespace Cocorra.BLL.Services.SupportService
                     await _userManager.UpdateAsync(banUser);
 
                     report.Status = "Resolved";
+                    report.StatusCode = ReportStatus.Resolved;
                     break;
 
                 case AdminReportAction.RejectReport:
                     report.Status = "Rejected";
+                    report.StatusCode = ReportStatus.Rejected;
                     break;
 
                 default:
@@ -273,7 +277,28 @@ namespace Cocorra.BLL.Services.SupportService
             }
 
             report.UpdatedAt = DateTime.UtcNow;
+
+            // AN-033: the only record of WHEN the report reached a terminal state. Without it
+            // moderation response time is unmeasurable — only the current status exists.
+            report.ResolvedAt = DateTime.UtcNow;
+
             await _supportRepo.UpdateReportAsync(report);
+
+            // AN-034: the enforcement OUTCOME. Report.Status alone cannot distinguish "we
+            // banned someone" from "we dismissed it" — both end as a status change — so the
+            // action taken is recorded explicitly. Emitted after the write succeeds.
+            if (_eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.ModerationActionTaken, report.ReportedUserId, new
+                {
+                    reportId = report.Id,
+                    reportedRoomId = report.ReportedRoomId,
+                    reportCategory = report.Category.ToString(),
+                    action = dto.Action.ToString(),
+                    outcome = report.StatusCode.ToString(),
+                    hoursFromReportToAction = Math.Round((DateTime.UtcNow - report.CreatedAt).TotalHours, 2)
+                });
+            }
 
             return Success($"Action '{dto.Action}' applied successfully.");
         }

@@ -128,6 +128,23 @@ public class RoomService : ResponseHandler, IRoomService
 
             await _roomRepo.AddAsync(room);
             _eventTracker.Track(EventTypes.RoomCreated, hostId, new { roomId = room.Id, category = room.Category.ToString(), isPrivate = room.IsPrivate });
+
+            // AN-017 / E-07, path 1 of 2: created directly as live. Emitting from only one of
+            // the two start paths would undercount rooms gone live with no visible symptom.
+            if (status == RoomStatus.Live && _eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.RoomWentLive, hostId, new
+                {
+                    roomId = room.Id,
+                    category = room.Category.ToString(),
+                    isPrivate = room.IsPrivate,
+                    startPath = "created_live",
+                    scheduledStartUtc = room.StartDate,
+                    stageCapacity = room.StageCapacity,
+                    selectionMode = room.SelectionMode.ToString()
+                });
+            }
+
             return Success(room.Id);
         }
         catch (Exception ex)
@@ -436,6 +453,26 @@ public class RoomService : ResponseHandler, IRoomService
         room.Status = RoomStatus.Live;
         await _roomRepo.UpdateAsync(room); 
 
+        // AN-017 / E-07, path 2 of 2: a scheduled room being started. startPath distinguishes
+        // the two so "created live" and "scheduled then started" stay separable — they are
+        // different host behaviours and likely have different audience outcomes.
+        if (_eventTracker.NewEventEmissionEnabled)
+        {
+            _eventTracker.Track(EventTypes.RoomWentLive, hostId, new
+            {
+                roomId = room.Id,
+                category = room.Category.ToString(),
+                isPrivate = room.IsPrivate,
+                startPath = "scheduled_started",
+                scheduledStartUtc = room.StartDate,
+                // Negative means the host started early; positive means late. Neither is
+                // recoverable later, because StartDate is not updated on start.
+                minutesFromScheduledStart = Math.Round((DateTime.UtcNow - room.StartDate).TotalMinutes),
+                stageCapacity = room.StageCapacity,
+                selectionMode = room.SelectionMode.ToString()
+            });
+        }
+
         var hostParticipant = new RoomParticipant
         {
             RoomId = roomId,
@@ -494,6 +531,21 @@ public class RoomService : ResponseHandler, IRoomService
         if (existingReminder != null)
         {
             await _roomRepo.RemoveRoomReminderAsync(existingReminder);
+
+            // AN-026: the row is about to be deleted, so this event is the only surviving
+            // record that the reminder ever existed. Without it, reminder-to-join conversion
+            // is computed over survivors only and reads optimistically.
+            if (_eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.RoomReminderToggled, userId, new
+                {
+                    roomId,
+                    enabled = false,
+                    minutesBeforeStart = Math.Round((room.StartDate - DateTime.UtcNow).TotalMinutes),
+                    heldForMinutes = Math.Round((DateTime.UtcNow - existingReminder.CreatedAt).TotalMinutes)
+                });
+            }
+
             return Success("Reminder removed.");
         }
         else
@@ -505,6 +557,19 @@ public class RoomService : ResponseHandler, IRoomService
                 CreatedAt = DateTime.UtcNow
             };
             await _roomRepo.AddRoomReminderAsync(reminder);
+
+            if (_eventTracker.NewEventEmissionEnabled)
+            {
+                _eventTracker.Track(EventTypes.RoomReminderToggled, userId, new
+                {
+                    roomId,
+                    enabled = true,
+                    // Negative would mean a reminder set after the scheduled start; the guard
+                    // above rules that out, but the value is recorded rather than assumed.
+                    minutesBeforeStart = Math.Round((room.StartDate - DateTime.UtcNow).TotalMinutes)
+                });
+            }
+
             return Success("Reminder set successfully.");
         }
     }
@@ -528,10 +593,27 @@ public class RoomService : ResponseHandler, IRoomService
         {
             if (!p.IsMuted && p.LastUnmutedAt.HasValue)
             {
-                p.TotalSpokenSeconds += (DateTime.UtcNow - p.LastUnmutedAt.Value).TotalSeconds;
+                var spokenSeconds = (DateTime.UtcNow - p.LastUnmutedAt.Value).TotalSeconds;
+                p.TotalSpokenSeconds += spokenSeconds;
                 p.LastUnmutedAt = null;
+
+                // AN-018 / E-05, close site 4 of 5: the room ended under them. Easy to miss —
+                // the blueprint named three close sites, but this one and LeaveRoomCleanupAsync
+                // also finalise a segment, and omitting them would under-count every segment
+                // that ran to the end of a room.
+                if (_eventTracker.HighFrequencyEventsEnabled)
+                {
+                    _eventTracker.Track(EventTypes.MicDeactivated, p.UserId, new
+                    {
+                        roomId,
+                        segmentSeconds = Math.Round(spokenSeconds, 2),
+                        reason = "room_ended",
+                        wasInitialHostMic = p.UserId == room.HostId
+                    });
+                }
             }
             p.Status = ParticipantStatus.Left;
+            p.LeftAt = DateTime.UtcNow; // AN-031
             p.IsOnStage = false;
             p.IsMuted = true;
             p.IsHandRaised = false;
@@ -540,7 +622,24 @@ public class RoomService : ResponseHandler, IRoomService
 
         await _roomRepo.SaveChangesAsync();
 
-        _eventTracker.Track(EventTypes.RoomEnded, hostId, new { roomId, durationHours = (DateTime.UtcNow - room.StartDate).TotalHours, participantCount = participants.Count });
+        // AN-019: durationHours measures against the SCHEDULED StartDate, so for a room that
+        // started late it reports schedule length, not airtime. It is kept for continuity and
+        // actualDurationSeconds added alongside; the read side should prefer the latter, which
+        // is derivable from room_went_live -> room_ended once AN-017 is enabled.
+        _eventTracker.Track(
+            EventTypes.RoomEnded,
+            hostId,
+            new
+            {
+                roomId,
+                durationHours = (DateTime.UtcNow - room.StartDate).TotalHours,
+                participantCount = participants.Count,
+                actualDurationSeconds = Math.Round((DateTime.UtcNow - room.StartDate).TotalSeconds),
+                endReason = "host_ended",
+                peakParticipants = participants.Count,
+                category = room.Category.ToString()
+            },
+            schemaVersion: 2);
 
         foreach (var p in participants)
         {
@@ -560,11 +659,25 @@ public class RoomService : ResponseHandler, IRoomService
 
         if (!participant.IsMuted && participant.LastUnmutedAt.HasValue)
         {
-            participant.TotalSpokenSeconds += (DateTime.UtcNow - participant.LastUnmutedAt.Value).TotalSeconds;
+            var spokenSeconds = (DateTime.UtcNow - participant.LastUnmutedAt.Value).TotalSeconds;
+            participant.TotalSpokenSeconds += spokenSeconds;
             participant.LastUnmutedAt = null;
+
+            // AN-018 / E-05, close site 5 of 5: the speaker disconnected while unmuted.
+            if (_eventTracker.HighFrequencyEventsEnabled)
+            {
+                _eventTracker.Track(EventTypes.MicDeactivated, userId, new
+                {
+                    roomId,
+                    segmentSeconds = Math.Round(spokenSeconds, 2),
+                    reason = "left_or_disconnected",
+                    wasInitialHostMic = false
+                });
+            }
         }
 
         participant.Status = ParticipantStatus.Left;
+        participant.LeftAt = DateTime.UtcNow; // AN-031
         participant.IsOnStage = false;
         participant.IsMuted = true;
         participant.IsHandRaised = false;
