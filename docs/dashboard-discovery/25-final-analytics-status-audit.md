@@ -422,3 +422,25 @@ This audit concluded "actionable-now gaps: three" (AN-027, AN-041, AN-036). That
 Three of the four misses share one shape: a complete, correct-looking contract or DTO pointing at something other than what it claimed. No completeness check finds those. The check that does is a comparison — *does this metric's technical definition describe a figure actually present in this endpoint's payload?* — and it has to be run deliberately, across every `BuildMeta` call site.
 
 **Final tally after Phase 1: 7 actionable gaps found, 7 fixed, 0 remaining.** Full detail in `FINAL-ANALYTICS-IMPLEMENTATION-REPORT.md` §4 (Wave 7) and `26-metric-registry-reconciliation.md` §6.
+
+
+---
+
+# ADDENDUM 2 — the baseline claim in this document is superseded
+
+> Appended 2026-09-02 during Wave 8.
+
+§AN-039 above states that the Decision Center page "must render a 'collecting baseline' state
+until 4–6 weeks of read-model history accumulate". **The 4–6 week figure is wrong.**
+
+`DecisionCenterService` requires `RequiredBaselineWeeks = 4` **complete weeks present in
+`DailyPlatformMetrics`** — and `AnalyticsBackfillService` can populate those retroactively,
+because it runs the same rollup code path as live aggregation. RM-1's participation fields
+derive from `RoomParticipants`, not from `room_joined` events, so they reconstruct to the
+platform's first day.
+
+The gate is therefore **`hasBaseline` on the endpoint**, not a date on a calendar. The
+statement above described the planning assumption rather than the shipped behaviour.
+
+Corrected model, including the three other clocks that do genuinely have to wait:
+`28-production-analytics-activation.md` §5.

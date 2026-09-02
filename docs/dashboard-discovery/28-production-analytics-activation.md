@@ -12,7 +12,9 @@
 
 That is the intended sequencing, not an oversight. But it has a consequence worth stating plainly before the process below:
 
-> **The 4–6 week history clock that gates the Decision Center is not running for those events.** Every day the flags stay off is a day the stage funnel (M-400) has no data, and `hand_raised` / `stage_promoted` **cannot be backfilled** — they were never captured, so history not collected today is permanently unavailable.
+> **Every day the flags stay off is a day the stage funnel (M-400) has no data**, and `hand_raised` / `stage_promoted` **cannot be backfilled** — they were never captured, so history not collected today is permanently unavailable.
+>
+> Note that this does **not** apply to the Decision Center, contrary to earlier revisions of this document: it reads `DailyPlatformMetrics`, which the backfill can populate retroactively. See §5.
 
 The counter-pressure is equally real: turning both on at once, without a measured baseline, risks saturating a bounded channel that the *currently working* events share. That is risk R-1, and the drop is only visible because AN-003 made it countable.
 
@@ -80,7 +82,9 @@ Analytics__IpHashSalt=<secret>
 
 **RECOMMENDATION** — flip the flags by **environment variable, not by editing `appsettings.json`**. A flag set in the committed file is a flag that arrives with the next deploy of any branch; a flag set in the environment can be reverted in seconds without a build, which is what makes the rollback in §7 credible.
 
-**Do not put `IpHashSalt` in any committed file.** It is currently in `appsettings.json` and should be moved to the environment as part of this work. A committed salt makes the IP pseudonymisation reversible by anyone with repository access, which defeats its only purpose.
+**`IpHashSalt` is no longer in any committed file.** It was externalised in Wave 8: `appsettings.json` carries only a pointer, `docker-compose.yml` reads `Analytics__IpHashSalt` from a gitignored `.env`, and `docker compose up` aborts with an explanatory message if the variable is unset.
+
+**The old value remains in git history and must be treated as compromised.** Moving a secret does not un-publish it. Rotate on first deploy; the impact analysis is in `PRODUCTION-READINESS-REPORT.md` §2.
 
 ---
 
@@ -237,13 +241,80 @@ Any movement in `eventsDroppedOnEnqueue` → roll back this flag only. `EnableNe
 
 # 5. Stage D — Baseline collection
 
-## The clock
+## There is no single baseline clock — there are four
 
-| Marker | Value |
+> **CORRECTED 2026-09-02 (Wave 8).** Earlier revisions of this document, and
+> `FINAL-ANALYTICS-IMPLEMENTATION-REPORT.md`, stated that "the baseline clock starts when
+> `EnableHighFrequencyEvents` goes true". **That is wrong for three of the four families**, and
+> it was wrong in the direction that costs the most time: it implied a 4–6 week wait for the
+> Decision Center that the backfill already satisfies.
+>
+> The error came from the planning documents, which assumed read models could only accumulate
+> forward. They can be **backfilled**, and `AnalyticsBackfillService` runs the same rollup code
+> path as live aggregation, so a backfilled week is indistinguishable from a lived one.
+
+Four independent clocks. **Different metric families start at different times, and pretending
+one timestamp covers them all is what produced the error above.**
+
+### Clock 1 — Relational metrics: ALREADY RUNNING, since day one
+
+| | |
 |---|---|
-| **Baseline start** | The UTC timestamp `EnableHighFrequencyEvents` went true. **Record it.** It is the `dataAvailableFromUtc` for every M-400 reading and the anchor for every "since instrumentation" claim. |
-| **Required observation period** | **4–6 weeks** for change detection; **8 weeks** for the cohort grid |
-| **Compressible?** | **No.** Only by having started earlier. |
+| **Starts** | Cocorra's first room. Nothing to wait for. |
+| **Source** | `Rooms`, `RoomParticipants`, `AspNetUsers` — relational, never purged |
+| **Backfillable** | **Fully**, to the platform's first day |
+| **Metrics** | M-200, M-201, M-202, M-205, M-300, M-301, M-501, M-503, M-504 |
+| **Action** | Run the backfill. No waiting. |
+
+### Clock 2 — Read-model metrics: SATISFIED BY BACKFILL
+
+| | |
+|---|---|
+| **Starts** | First successful aggregation — **but retroactively extended by backfill** |
+| **Source** | RM-1 `DailyPlatformMetrics`, RM-3 `DailyHostMetrics` |
+| **Backfillable** | **RM-3 to day one. RM-1 to day one for every field except `VoiceVerificationsSubmitted` and `VoiceVerificationsApproved`, which are event-derived and therefore bounded by the 180-day raw window.** RM-1's participation fields come from `RoomParticipants.JoinedAt`, not from `room_joined` events. |
+| **Metrics** | M-100, M-101, and **the Decision Center** |
+| **Action** | Backfill, then **read `weeksOfHistory` from `GET /Analytics/Decisions`.** |
+
+**The Decision Center is not gated on elapsed time.** `DecisionCenterService.RequiredBaselineWeeks = 4`, counted as **complete weeks present in `DailyPlatformMetrics`**. A successful backfill over the last quarter satisfies that immediately. The endpoint returns `weeksOfHistory`, `requiredBaselineWeeks` and `hasBaseline` — **read those rather than counting days on a calendar.**
+
+### Clock 3 — Snapshot metrics: STARTS AT FIRST DEPLOY, and CANNOT be recovered
+
+| | |
+|---|---|
+| **Starts** | The first successful `StateSnapshotService` run — **Stage A, deploy day.** Not Stage B, not Stage C. |
+| **Source** | RM-5 `DailyStateSnapshots` |
+| **Backfillable** | **NO. Structurally impossible.** No event records how many users were `Pending` yesterday. |
+| **Metrics** | M-303 queue-depth **trend**, FCM token-coverage trend |
+| **Action** | **Deploy sooner rather than later.** Every day before the first deploy is a permanent hole. |
+
+**This is the only clock where delay destroys evidence**, and it is the one the earlier text obscured by pointing at Stage C. `snapshotGapDates` on `GET /Analytics/System/Health` lists holes already accumulated.
+
+### Clock 4 — New-event metrics: STARTS AT STAGE B / STAGE C
+
+| | Stage B events | Stage C events |
+|---|---|---|
+| **Starts** | `EnableNewEventEmission=true` | `EnableHighFrequencyEvents=true` |
+| **Events** | `room_went_live`, `stage_promoted`, `stage_demoted`, `participant_kicked`, `speaker_time_extended`, `speaker_time_exhausted`, `operation_failed`, `room_reminder_toggled`, `moderation_action_taken` | `hand_raised`, `hand_lowered`, `mic_deactivated` |
+| **Backfillable** | **NO — never captured** | **NO — never captured** |
+| **Metrics** | M-400 step 3 | **M-400 step 2**; reserved M-401, M-402 |
+
+**Record both timestamps.** They are the `dataAvailableFromUtc` for anything resting on those events, and they are the only clocks that genuinely cannot be compressed.
+
+### The one-line answer
+
+> **Q: When does the baseline clock start?**
+>
+> **A: There is no single clock.** Relational and read-model metrics have their baseline
+> *already*, once the backfill runs — including the Decision Center. Snapshot metrics start
+> the day the container first runs and can never be recovered. Only the new core-loop events
+> start at Stage B and Stage C, and only those require waiting.
+
+### Metric maturity is a separate gate from baseline
+
+`M-400` is graded **EXPERIMENTAL** and promotes to VERIFIED after **4 weeks of stable emission**
+following Stage C. That is a *validation* period — confirming the events behave as designed in
+production — not baseline accumulation. It is genuine and it cannot be compressed.
 
 ## Analysable immediately (no baseline needed)
 
@@ -269,9 +340,9 @@ These rest on relational data that was never purged and needs no new events:
 | Waiting on | What | Why |
 |---|---|---|
 | Stage C + 4 weeks | **M-400 stage funnel** graded EXPERIMENTAL → VERIFIED | The contract says promotion requires stable emission, not elapsed time alone |
-| Stage C + 4–6 weeks | **Decision Center** (`/Analytics/Decisions`) | Change detection against no baseline produces alerts on ordinary variance. **A dashboard that cries wolf in its first month is ignored permanently — harder to reverse than a delayed launch.** Render "Collecting baseline" until then. |
+| **Backfill, not elapsed time** | **Decision Center** (`/Analytics/Decisions`) | Needs 4 complete weeks present in RM-1, which the backfill supplies. **Read `hasBaseline` from the endpoint; do not count calendar days.** Until it reports true, render "Collecting baseline" — change detection against no baseline alerts on ordinary variance, and a dashboard that cries wolf in its first month is ignored permanently. |
 | RM-5 accumulation | Pending-queue and FCM-coverage trends | Snapshots cannot be backfilled |
-| 8 weeks of RM-1 | **Cohort grid** (`/Analytics/Return/CohortGrid`) | Check `hasSufficientHistory` before rendering; hidden beats sparse |
+| **8 weeks of room_joined history** | **Cohort grid** (`/Analytics/Return/CohortGrid`) | Reads raw `UserEvents`, **not RM-1**, so its gate depends on how long `room_joined` has been emitting, bounded above by the 180-day retention window. Find the real start with `SELECT MIN(OccurredAtUtc) FROM UserEvents WHERE EventType = 'room_joined'`. Check `hasSufficientHistory` before rendering; hidden beats sparse. |
 | A production query | **AN-032** group-chat materiality; **AN-035** session-signal evidence (R-4); **AN-045** partitioning (R-3) | All are measurements, not code |
 
 ---
@@ -339,15 +410,20 @@ Every stage rolls back by configuration. No code change, no migration reversal.
 # 9. Fastest defensible path
 
 ```
-Week 0    Move IpHashSalt to env. Deploy. Begin Stage A.
-Week 1    Stage A exit gate. Run Stage 6 backfill.
+Week 0    Salt externalised (done, Wave 8). Deploy. Begin Stage A.
+          ← RM-5 SNAPSHOT CLOCK STARTS. Unrecoverable, so this is the one
+            date worth pulling forward.
+Week 1    Stage A exit gate. Run the backfill.
+          ← Decision Center baseline likely SATISFIED here, not in week 9.
+            Verify with hasBaseline on GET /Analytics/Decisions.
           → Build dashboard pages 1,2,3,5,7,8,9 (all available now)
-Week 2    Stage B: EnableNewEventEmission=true
+Week 2    Stage B: EnableNewEventEmission=true     ← AN-017 EVENT CLOCK STARTS
 Week 3    Stage B exit gate. Raise EventChannelCapacity, deploy, verify.
-Week 4    Stage C: EnableHighFrequencyEvents=true  ← BASELINE CLOCK STARTS
+Week 4    Stage C: EnableHighFrequencyEvents=true  ← AN-018 EVENT CLOCK STARTS
 Week 5    Stage C exit gate. Stage funnel isFullyInstrumented=true.
-Week 9    M-400 EXPERIMENTAL → VERIFIED. Decision Center baseline met.
-Week 13   Cohort grid has 8 weeks. Dashboard complete.
+Week 8    M-400 EXPERIMENTAL → VERIFIED (4 weeks of stable emission).
+          Cohort grid gate depends on room_joined history, not on this
+          schedule — query MIN(OccurredAtUtc) for its real date.
 ```
 
 **INFERENCE — the ordering matters more than the duration.** Seven of ten dashboard pages need none of this and can be built during weeks 0–1. The three that wait are waiting on time, which no amount of effort compresses. Building the available pages first means the dashboard delivers value in week 1 rather than week 13, and it puts the trust register in front of users before any number they might act on.

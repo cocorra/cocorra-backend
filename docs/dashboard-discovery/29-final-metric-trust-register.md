@@ -59,7 +59,9 @@
 | **Trust** | **VERIFIED** |
 | **Decision supported** | Is Cocorra delivering more value than last week, and which input constrained it? |
 
-**Note on availability**: until this phase, M-100 was reachable **only** through `/Analytics/Decisions`, which must not be relied on before 4–6 weeks of baseline exist. The declared north star was therefore unreadable on any page anyone could trust. `A-1` fixes that.
+**Note on availability**: until this phase, M-100 was reachable **only** through `/Analytics/Decisions`, which must not be relied on until that endpoint reports `hasBaseline: true`. The declared north star was therefore unreadable on any page anyone could trust. `A-1` fixes that.
+
+**Baseline**: M-100 comes from RM-1, whose participation fields derive from `RoomParticipants`, not from `room_joined` events — so the backfill reconstructs it to the platform's first day. **This metric does not wait for Stage B or Stage C.** See `28-production-analytics-activation.md` §5.
 
 ---
 

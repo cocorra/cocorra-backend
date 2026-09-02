@@ -144,7 +144,8 @@ VERIFIED METRICS   IMetricRegistry — 27 contracts in code              ★ NEW
 OBSERVABILITY      PipelineHealthService  ★ NEW    → GET /Analytics/System/Health
                    StructuredFileLogger   ★ NEW    (opt-in, survives restart)
       ↓
-DECISION LAYER     DecisionCenterService  ★ NEW    (gated on 4–6 weeks baseline)
+DECISION LAYER     DecisionCenterService  ★ NEW    (gated on 4 complete weeks of RM-1,
+                                                    which the backfill can supply)
       ↓
 DASHBOARD API      AnalyticsRepository v2 (6 partials) · AnalyticsService [MODIFIED]
                    Response<T>.Meta — POPULATED                         [REUSED as designed]
@@ -284,7 +285,7 @@ DASHBOARD          28 endpoints · 26 contracted metrics · trust on every respo
 
 | Item | Delivered |
 |---|---|
-| **AN-039** Decision Center | `DecisionCenterService`, `GET /Analytics/Decisions`. **Built, and gated** — must render "collecting baseline" until 4–6 weeks exist |
+| **AN-039** Decision Center | `DecisionCenterService`, `GET /Analytics/Decisions`. **Built, and gated** — must render "collecting baseline" until the endpoint reports `hasBaseline: true`. It reads RM-1, so the backfill can satisfy this without waiting; see `28-` §5 |
 | **AN-040** LiveKit webhooks | `LiveKitWebhookController`, `media_session_event` |
 | **AN-042** Structured log sink | `StructuredFileLogger`, registered **only** when `Analytics:StructuredLogPath` is set |
 | **AN-041** Failure-path events | ⚠ **Constant declared, ZERO emission sites** — carried into Wave 7 |
@@ -324,7 +325,7 @@ A reader of the trust envelope on supply health was being told Cocorra's leading
 
 **D-8 — The north star was unreachable on any page anyone could trust.**
 
-M-100 had a contract but was referenced by exactly one consumer: `DecisionCenterService`. The Decision Center must not be relied on before 4–6 weeks of baseline exist. **The declared north star was therefore not readable anywhere trustworthy.** A-1 was specified in the API blueprint and had never been built. It now exists.
+M-100 had a contract but was referenced by exactly one consumer: `DecisionCenterService`, which must not be relied on until it reports `hasBaseline: true`. **The declared north star was therefore not readable anywhere trustworthy.** A-1 was specified in the API blueprint and had never been built. It now exists.
 
 **D-10 / D-11 — two more metric keys attached to payloads they did not describe.**
 
@@ -489,7 +490,7 @@ READ MODELS ──► IMetricRegistry ──► Response<T>.Meta ──► DASHB
 | **Support** | No endpoint | **M-601** | CONDITIONALLY RELIABLE | Fully historical |
 | **Social graph** | No endpoint | **M-701** | CONDITIONALLY RELIABLE | Fully historical |
 | **MBTI vs speaking** | Not analysed | **M-702** four dichotomies | CONDITIONALLY RELIABLE | ≤180 days |
-| **Cohort grid** | Did not exist | **M-103** | CONDITIONALLY RELIABLE | Needs 8 weeks |
+| **Cohort grid** | Did not exist | **M-103** | CONDITIONALLY RELIABLE | Needs 8 weeks of `room_joined` history (raw events, not RM-1) |
 | **Stage funnel** | Did not exist | **M-400** *(Wave 7)* | **EXPERIMENTAL** | **CANNOT be backfilled** |
 | **WPU (north star)** | Contract only, unreachable (D-8) | **M-100** on A-1 *(Wave 7)* | VERIFIED | From read models |
 
@@ -567,8 +568,10 @@ Full detail: **`docs/mobile/COCORRA-ANALYTICS-MOBILE-INTEGRATION-GUIDE.md`**
 Stage A  1 week, flags off   Record the baseline from /Analytics/System/Health
 Stage B  EnableNewEventEmission=true              → verify 7 days
 Stage C  Raise channel capacity (separate deploy)
-         EnableHighFrequencyEvents=true           → BASELINE CLOCK STARTS
-Stage D  4–6 weeks → Decision Center · 8 weeks → cohort grid
+         EnableHighFrequencyEvents=true           → AN-018 event clock starts
+Stage D  Four separate clocks, not one. Relational and read-model baselines
+         are satisfied by the backfill; RM-5 snapshots start at first deploy
+         and are unrecoverable; only the new events start at Stage B / C.
 ```
 
 **Monitoring**: `GET /Analytics/System/Health`. `pipelineHealthy` goes `false` on stale aggregation, dead letters, drops, or snapshot gaps — the thresholds are encoded, not merely documented.
@@ -658,8 +661,8 @@ Stated because a coverage claim is only useful if its limits are stated:
 | Item | Wait |
 |---|---|
 | **M-400 → VERIFIED** | 4 weeks of stable emission after Stage C |
-| **Decision Center usable** | 4–6 weeks of read-model history. **No baseline exists for any Cocorra metric.** A dashboard that cries wolf in its first month is ignored permanently |
-| **Cohort grid (M-103)** | 8 weeks of RM-1 |
+| **Decision Center usable** | 4 complete weeks present in RM-1 — **suppliable by the backfill, not necessarily by waiting.** Read `hasBaseline` from the endpoint. Change detection against no baseline alerts on ordinary variance, and a dashboard that cries wolf in its first month is ignored permanently |
+| **Cohort grid (M-103)** | 8 weeks of `room_joined` history in the raw event store |
 | **RM-5 trends** | Accumulation — cannot be backfilled |
 
 ## Blocked on a production measurement
@@ -734,8 +737,8 @@ Stated because a coverage claim is only useful if its limits are stated:
 | Not trustworthy | Why | When |
 |---|---|---|
 | **M-400 stage funnel** | Two of four steps behind flags that are **off**. Returns `isMeasured: false` — correctly | 4 weeks after Stage C |
-| **Decision Center** | **No baseline exists for any Cocorra metric.** Detection without one alerts on ordinary variance | 4–6 weeks after Stage C |
-| **Cohort grid** | Needs ~8 weeks; a short row is missing data, not a retention collapse | 8 weeks |
+| **Decision Center** | Needs 4 complete weeks in RM-1; detection without a baseline alerts on ordinary variance | **After the backfill** — verify with `hasBaseline`, do not assume a wait |
+| **Cohort grid** | Needs ~8 weeks of `room_joined`; a short row is missing data, not a retention collapse | Query `MIN(OccurredAtUtc)` for the real date |
 | **Queue-depth / FCM-coverage trends** | RM-5 must accumulate; cannot be backfilled | Ongoing |
 | **M-102-LEGACY** | Exact-day matching over a cookie signal. **Graded UNRELIABLE — must not be displayed** | Never — delete at cutover |
 | **Anything from `/Analytics/Platform/Health` today** | Read models are empty until aggregation runs. Returns nulls, correctly | After Stage A backfill |
@@ -798,9 +801,9 @@ Stated because a coverage claim is only useful if its limits are stated:
 | | |
 |---|---|
 | **Status** | **NOT STARTED** |
-| **Starts** | The moment `EnableHighFrequencyEvents` goes true (Stage C) |
-| **Record** | That UTC timestamp. It is the `dataAvailableFromUtc` for every M-400 reading |
-| **Duration** | 4–6 weeks for change detection; 8 for cohorts |
+| **Starts** | **Four separate clocks.** RM-5 snapshots at first deploy (unrecoverable); relational and read-model baselines via the backfill; AN-017 events at Stage B; AN-018 events at Stage C |
+| **Record** | The Stage B and Stage C UTC timestamps. They are the `dataAvailableFromUtc` for everything resting on those events |
+| **Duration** | Per clock — see `28-` §5. Only the AN-017/AN-018 event clocks require waiting |
 | **Compressible** | **No** — only by having started earlier |
 
 ## P3 FUTURE WORK

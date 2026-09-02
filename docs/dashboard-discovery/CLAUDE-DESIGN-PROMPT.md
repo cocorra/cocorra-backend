@@ -114,7 +114,7 @@ Showing the gap does three things at once: it prevents a wrong conclusion, it te
 
 | # | Page | The decision it supports | Data state |
 |:--:|---|---|---|
-| **0** | **Decision Center** | Where should attention go this week? | 🟡 **Collecting baseline** — needs 4–6 weeks |
+| **0** | **Decision Center** | Where should attention go this week? | 🟡 **Collecting baseline** — the server reports when it ends |
 | **1** | **Platform Health** | Is Cocorra delivering more value, and which input constrained it? | 🟢 Live |
 | **2** | **Supply Health** | Recruit more coaches, or help existing coaches run better rooms? | 🟢 Live |
 | **3** | **Activation Pipeline** | Restructure onboarding, invest in review capacity, or leave the gate alone? | 🟢 Live |
@@ -221,7 +221,7 @@ A filterable table of all 26 metric contracts: ID, name, trust level, business p
 
 ### Page 0 — Decision Center (design both states)
 
-**Do not design live change detection as the launch state.** No baseline exists yet. Detection without one alerts on ordinary variance, and **a dashboard that cries wolf in its first month is ignored permanently — harder to recover from than a delayed launch.**
+**Do not design live change detection as the launch state.** The backend reports whether a baseline exists yet, and on day one it will not. Detection without one alerts on ordinary variance, and **a dashboard that cries wolf in its first month is ignored permanently — harder to recover from than a delayed launch.**
 
 Design the **"Collecting baseline"** state: progress toward the gate, and what *is* available meanwhile.
 
@@ -275,7 +275,7 @@ Design this as a coherent navigation pattern, not ten unrelated links.
 | **No data** | Genuinely nothing happened in the window. A real zero — **this one is a finding** |
 | **Not measured** | The event is not instrumented. **A labelled gap. Never a zero** |
 | **Insufficient data** | Present but too thin to read — hide the visualisation, explain the bar |
-| **Collecting baseline** | Needs 4–6 weeks; show progress and what is available now |
+| **Collecting baseline** | The server reports progress toward the gate; show that progress and what is available meanwhile |
 | **Feature disabled** | Instrumentation exists but is switched off |
 | **Experimental** | Computed, not yet validated |
 | **Data delayed** | The pipeline is stale — banner plus per-metric staleness |

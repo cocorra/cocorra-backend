@@ -44,7 +44,7 @@ Ten pages. Order and content are fixed by `09-` and `20-`. **Do not invent pages
 
 | # | Page | Decision supported | Data state |
 |:--:|---|---|---|
-| **0** | **Decision Center** | Where should attention go this week? | 🟡 **Collecting baseline** — 4–6 weeks required |
+| **0** | **Decision Center** | Where should attention go this week? | 🟡 **Collecting baseline** — gated on `hasBaseline` from the endpoint, not on a fixed wait |
 | **1** | **Platform Health** | Is Cocorra delivering more value, and which input constrained it? | 🟢 Available |
 | **2** | **Supply Health** | Recruit more coaches, or help existing coaches run better rooms? | 🟢 Available — **highest value-to-effort page** |
 | **3** | **Activation Pipeline** | Restructure onboarding, invest in review capacity, or leave the gate alone? | 🟢 Available (1 trend needs history) |
@@ -132,7 +132,9 @@ When the requested window includes today, `isPartialPeriod` is true. Label it ("
 
 **State: 🟡 must ship in a "Collecting baseline" state.**
 
-**Do not ship live change detection.** No baseline exists for any Cocorra metric. Detection without one produces alerts on ordinary variance, and **a dashboard that cries wolf in its first month is ignored permanently — harder to reverse than a delayed launch.**
+**Do not ship live change detection until the endpoint says it is safe to.** `GET /Analytics/Decisions` returns `hasBaseline`, `weeksOfHistory` and `requiredBaselineWeeks` — branch on those, never on a hardcoded date. Detection without a baseline produces alerts on ordinary variance, and **a dashboard that cries wolf in its first month is ignored permanently — harder to reverse than a delayed launch.**
+
+The baseline may be satisfied sooner than the planning documents suggest: the Decision Center reads a read model the backfill can populate retroactively. **Design the collecting state anyway** — it is what users see on day one, and the server decides when it ends.
 
 Design both states: the baseline-collecting state *and* the populated state.
 
