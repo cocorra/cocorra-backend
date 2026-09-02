@@ -6,6 +6,36 @@
 
 ---
 
+# ⚠ THE METRIC IDs IN THIS DOCUMENT ARE SUPERSEDED
+
+> **Amended 2026-09-02.** This is a **planning artefact**. Its metric *rationale* — the business
+> purposes, the exclusions, the reasoning about why a mean is wrong or why sixteen MBTI types are
+> too many — remains valuable and is why the document is kept. **Its metric IDs must not be used.**
+>
+> **Authoritative source for every metric ID: `Cocorra.BLL/Services/Analytics/MetricRegistry.cs`,**
+> served at runtime by `GET /Analytics/Metrics/Registry`.
+>
+> Six IDs in this document mean something entirely different in the shipped system:
+>
+> | ID | This document | **The shipped system** |
+> |---|---|---|
+> | `M-300` | Sequential Onboarding Funnel | **Report Insights** |
+> | `M-301` | Admin Review Latency | **Report Rate by Room Category** |
+> | `M-302` | Activation to First Room Join | **Voice Verification Review Latency** |
+> | `M-500` | Report Rate per 1,000 Room Joins | **Platform Summary** |
+> | `M-501` | Report Rate by Room Category | **User Registrations** |
+> | `M-502` | Repeat-Reported Users | **User Status At Time** |
+>
+> Reading an ID from here and wiring it to an endpoint would connect, for example, a safety chart
+> to user-registration counts — and the trust envelope would label the result VERIFIED.
+>
+> **Full mapping, with the reasoning: `26-metric-registry-reconciliation.md` §4.**
+> **Current trust grades: `29-final-metric-trust-register.md`.**
+>
+> Each contract heading below carries a **STATUS** line naming its real shipped ID, or marking it RESERVED.
+
+---
+
 ## Mandatory Rule
 
 **No metric may enter the dashboard unless it defines all four of:**
@@ -70,6 +100,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-100 — Weekly Participating Users (WPU)
 
+> **STATUS: ALIGNED — shipped as M-100.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-100` |
@@ -97,6 +129,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-101 — Speaking Conversion Rate
 
+> **STATUS: ALIGNED — shipped as M-101.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-101` |
@@ -123,6 +157,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-102 — Weekly Return Rate
+
+> **STATUS: ALIGNED — shipped as M-102.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -157,6 +193,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-200 — Distinct Active Hosts
 
+> **STATUS: REDEFINED — shipped as M-200 (Distinct Active Hosts); the room count moved to M-205.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-200` |
@@ -183,6 +221,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-201 — Host Retention
+
+> **STATUS: ALIGNED — shipped as M-201 (Host Second-Room Rate).** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -211,6 +251,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-202 — Supply Concentration
 
+> **STATUS: ALIGNED — shipped as M-202 (Host Concentration).** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-202` |
@@ -238,6 +280,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-203 — Distinct Non-Host Speakers per Room
 
+> **STATUS: RESERVED — NOT IMPLEMENTED.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-203` |
@@ -264,6 +308,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-204 — Audience Return per Host
+
+> **STATUS: RESERVED — NOT IMPLEMENTED.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -296,6 +342,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-300 — Sequential Onboarding Funnel
 
+> **STATUS: ID REASSIGNED — shipped as M-507 (Sequential Activation Funnel). M-300 is Report Insights.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-300` |
@@ -322,6 +370,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-301 — Admin Review Latency
+
+> **STATUS: ID REASSIGNED — shipped as M-302 (Voice Verification Review Latency). M-301 is Report Rate by Room Category.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -350,6 +400,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-302 — Activation to First Room Join
 
+> **STATUS: RESERVED — NOT IMPLEMENTED. M-302 is Voice Verification Review Latency.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-302` |
@@ -376,6 +428,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-303 — Pending Verification Queue Depth
+
+> **STATUS: ALIGNED — shipped as M-303.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -408,6 +462,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-400 — Stage Funnel
 
+> **STATUS: ALIGNED — shipped as M-400 (AN-027).** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-400` |
@@ -434,6 +490,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-401 — Non-Host Speaking Minutes
+
+> **STATUS: RESERVED — NOT IMPLEMENTED.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -462,6 +520,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-402 — Hand-Raise to Stage Promotion Rate
 
+> **STATUS: RESERVED — NOT IMPLEMENTED. The value is served as M-400's step-2 to step-3 conversion.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-402` |
@@ -488,6 +548,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-403 — Speaking Conversion by Room Configuration
+
+> **STATUS: RESERVED — NOT IMPLEMENTED.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -519,6 +581,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-500 — Report Rate per 1,000 Room Joins
 
+> **STATUS: ID REASSIGNED — NOT IMPLEMENTED as a normalised rate. M-500 is Platform Summary.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-500` |
@@ -546,6 +610,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-501 — Report Rate by Room Category
 
+> **STATUS: ID REASSIGNED — shipped as M-301 (Report Rate by Room Category). M-501 is User Registrations.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-501` |
@@ -572,6 +638,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-502 — Repeat-Reported Users
+
+> **STATUS: ID REASSIGNED — PARTIALLY SERVED as `MostReportedUsers` on `GET /Analytics/Reports` under M-300 (raw counts, not the repeat-offender rate defined here). M-502 is User Status At Time.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
@@ -604,6 +672,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-600 — Message Reciprocity Rate
 
+> **STATUS: RESERVED — NOT IMPLEMENTED. M-701 (Social Graph Health) covers FRIEND-REQUEST reciprocity; message reply reciprocity as defined here is not computed.** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-600` |
@@ -631,6 +701,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 
 ## M-601 — Technical Problem Ticket Rate
 
+> **STATUS: ALIGNED — shipped as M-601 (Support Volume and Response Time, a superset).** See `26-metric-registry-reconciliation.md`.
+
 | Field | Value |
 |---|---|
 | **metric_id** | `M-601` |
@@ -657,6 +729,8 @@ Each contract's `known_limitations` field lists only what is **additional** to t
 ---
 
 ## M-602 — Push Send Success Rate
+
+> **STATUS: RESERVED — NOT IMPLEMENTED. The push_send_* events exist (AN-024); no metric is registered.** See `26-metric-registry-reconciliation.md`.
 
 | Field | Value |
 |---|---|
