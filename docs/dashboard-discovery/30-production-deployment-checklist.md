@@ -31,7 +31,7 @@
 - [ ] `git log --oneline -1` matches the commit you intend to deploy; **write the SHA down**, §F needs it
 - [ ] `git diff --check` reports nothing (no conflict markers, no whitespace errors)
 - [ ] `dotnet build Cocorra.sln --no-incremental` → **0 errors**. 13 warnings is the expected baseline; investigate anything above that
-- [ ] `dotnet test Cocorra.Tests/Cocorra.Tests.csproj` → **268/268 pass, 0 skipped**
+- [ ] `dotnet test Cocorra.Tests/Cocorra.Tests.csproj` → **269/269 pass, 0 skipped**
 
 > The `Dockerfile` runs `dotnet test` during the build, so a failing test fails the image build. That is a backstop, not a substitute for running it yourself — you want the failure before you have started a deployment.
 
@@ -82,6 +82,22 @@ All three remain on disk; none is used by this deployment path.
 - [ ] **A restore-tested backup exists, taken immediately before this deployment**
 - [ ] `dotnet ef migrations list --project Cocorra.DAL --startup-project Cocorra.API` — note which are unapplied
 - [ ] `dotnet ef migrations has-pending-model-changes --project Cocorra.DAL --startup-project Cocorra.API` → "No changes have been made to the model since the last migration"
+
+> **If an `ef` command fails with `Analytics:IpHashSalt is not configured` followed by
+> `Unable to resolve service for type 'DbContextOptions<AppDbContext>'`, do NOT put the salt
+> back into `appsettings.json`.**
+>
+> That error means `Cocorra.DAL/Data/AppDbContextFactory.cs` is missing or was not found. Without
+> a design-time factory, EF Tools build the application host to obtain a `DbContext`, which runs
+> `Program.cs`, which correctly throws because the salt is absent by design. The factory exists
+> precisely so design-time tooling never touches the salt guard — it needs only a connection
+> string. `ProductionReadinessTests.DesignTimeFactory_CreatesAContextWithoutTheSalt` pins this.
+>
+> To target a specific database from the command line, set the connection string in the
+> environment rather than editing a file:
+>
+>     $env:ConnectionStrings__DefaultConnection = '<connection string>'      # PowerShell
+>     export ConnectionStrings__DefaultConnection='<connection string>'      # bash
 
 ## Feature flags — verify they are OFF
 

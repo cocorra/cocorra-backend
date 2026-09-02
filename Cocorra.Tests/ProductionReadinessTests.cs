@@ -185,6 +185,51 @@ public class ProductionReadinessTests
         Assert.Equal("true", config["Analytics:EnableNewEventEmission"]);
     }
 
+    // ── Design-time tooling must not need the salt ──────────────────────────
+
+    [Fact]
+    public void DesignTimeFactory_CreatesAContextWithoutTheSalt()
+    {
+        // REGRESSION GUARD. Externalising the salt broke every `dotnet ef` command: with no
+        // IDesignTimeDbContextFactory, EF Tools build the application host to obtain a
+        // DbContext, that runs Program.cs, and Program.cs correctly throws when the salt is
+        // absent — which it now always is at design time. The failure surfaced as a confusing
+        // two-part error ending in "Unable to resolve service for type
+        // DbContextOptions<AppDbContext>", which reads like a DI bug rather than a config one.
+        //
+        // The tempting fix was to relax the guard to Production-only. That was rejected: a dev
+        // environment with no salt would silently write reversible hashes, which is the exact
+        // failure the guard exists to prevent. The factory is the correct fix, and this test
+        // pins it — including that the salt is genuinely absent while it runs.
+        const string connKey = "ConnectionStrings__DefaultConnection";
+        const string saltKey = "Analytics__IpHashSalt";
+
+        var previousConn = Environment.GetEnvironmentVariable(connKey);
+        var previousSalt = Environment.GetEnvironmentVariable(saltKey);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(connKey, "Server=design-time;Database=x;Integrated Security=true");
+            Environment.SetEnvironmentVariable(saltKey, null);
+
+            var factory = new Cocorra.DAL.Data.AppDbContextFactory();
+
+            Assert.IsAssignableFrom<Microsoft.EntityFrameworkCore.Design.IDesignTimeDbContextFactory<Cocorra.DAL.Data.AppDbContext>>(factory);
+
+            using var ctx = factory.CreateDbContext([]);
+
+            Assert.NotNull(ctx);
+            // Must match Program.cs, or `migrations add` writes into an assembly the running
+            // application never scans, and the migration is silently invisible.
+            Assert.Equal("Microsoft.EntityFrameworkCore.SqlServer", ctx.Database.ProviderName);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(connKey, previousConn);
+            Environment.SetEnvironmentVariable(saltKey, previousSalt);
+        }
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

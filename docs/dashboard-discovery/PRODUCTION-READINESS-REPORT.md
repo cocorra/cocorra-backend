@@ -177,7 +177,7 @@ Ordered by blast radius so the least disruptive comes first. **Each needs its ow
 |---|---|
 | **Build** | ✅ **PASS** — `dotnet build Cocorra.sln --no-incremental`, **0 errors** |
 | **Warnings** | **13** |
-| **Tests** | ✅ **268 / 268 PASS** |
+| **Tests** | ✅ **269 / 269 PASS** |
 | **Failed** | **0** |
 | **Skipped** | **0** |
 | **Migrations** | No pending model changes — `has-pending-model-changes` reports none |
@@ -192,7 +192,7 @@ Ordered by blast radius so the least disruptive comes first. **Each needs its ow
 
 **No warning is in code this wave added.** They remain listed as known limitations, not as clean.
 
-## Tests added in Wave 8: +14 (254 → 268)
+## Tests added in Wave 8: +15 (254 → 269)
 
 `ProductionReadinessTests` — security posture and the rollback contract:
 
@@ -210,6 +210,29 @@ Ordered by blast radius so the least disruptive comes first. **Each needs its ow
 | `DisablingTheFlag_StopsNewEventEmission_ButTheProductStillWorks` | **The rollback contract.** Flag off → no event, **and the hub still notifies the client and saves the participant** |
 | `UngatedEvents_KeepEmittingAfterRollback` | `mic_activated` still emits with flags off — the north star survives a rollback |
 | `AFullChannel_DropsTheEventAndCountsIt_WithoutThrowing` | An analytics outage cannot become a product outage, and the drop is counted |
+| `DesignTimeFactory_CreatesAContextWithoutTheSalt` | **Added after a regression found in use.** `dotnet ef` must obtain a `DbContext` without the salt — see below |
+
+### A regression this wave introduced, found in use and fixed
+
+Externalising the salt broke **every `dotnet ef` command**. With no
+`IDesignTimeDbContextFactory`, EF Tools build the application host to obtain a `DbContext`; that
+executes `Program.cs`; and `Program.cs` correctly throws because the salt is now absent by
+design. It surfaced as a two-part error ending in *"Unable to resolve service for type
+`DbContextOptions<AppDbContext>`"*, which reads like a DI fault rather than a configuration one.
+
+**It also broke two commands in this report's own companion checklist** (`30-` §A), which
+instructs the deployer to run `migrations list` and `has-pending-model-changes`. My Wave 8
+validation ran `dotnet build` and `dotnet test` but did not re-run an `ef` command after removing
+the salt, so the break was not caught before commit.
+
+**Fix**: `Cocorra.DAL/Data/AppDbContextFactory.cs`. EF prefers a design-time factory over
+host-building, so `Program.cs` never runs during design time and the guard is never reached. The
+factory needs only a connection string — it does not read the salt, build the analytics pipeline,
+or start a background service.
+
+**The guard is unchanged.** Relaxing it to throw only in Production was considered and rejected:
+a development environment running without a salt would silently write reversible hashes, which is
+the exact failure the guard prevents.
 
 ---
 
@@ -437,7 +460,7 @@ AN-043 experiments (volume-gated) · AN-045 partitioning (needs R-3 from Stage A
 
 Every technical prerequisite is met and verified rather than asserted:
 
-- **Build clean, 268/268 tests pass**, zero new warnings
+- **Build clean, 269/269 tests pass**, zero new warnings
 - **The wave's stated security objective is closed.** The salt is externalised behind two independent guards, with an impact analysis showing rotation is functionally free, and 8 regression tests
 - **The activation lifecycle is unambiguous**, and a genuine error in it was found and corrected — the earlier model would have imposed a month-long wait the backfill already satisfies
 - **Every rollback is a configuration change**, and the rollback contract is proven by test: analytics goes silent, the product does not
@@ -477,7 +500,7 @@ The remaining exposure is **pre-existing and unchanged**. Cocorra is already run
 | Observable pipeline | ⚠ **Partial** — one good endpoint, **no alerting**. Gaps listed rather than implied |
 | Safe rollback | ✅ Configuration-only, proven by test |
 | Validated build | ✅ 0 errors, 13 pre-existing warnings |
-| Validated tests | ✅ 268/268 |
+| Validated tests | ✅ 269/269 |
 
 **Two of seven are partial, and both are stated as partial rather than rounded up.** That is why the decision is GO **WITH CONDITIONS** and not GO.
 
