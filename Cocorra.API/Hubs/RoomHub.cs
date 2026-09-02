@@ -136,6 +136,41 @@ namespace Cocorra.API.Hubs
         }
 
         /// <summary>
+        /// AN-041 — records that a core-loop operation did not complete.
+        ///
+        /// Funnelled through one helper on purpose. Five call sites emitting an event inline
+        /// would drift: someone would pass an exception message, someone else would invent a
+        /// reason string, and the closed vocabulary that makes the event queryable would be
+        /// gone within two changes. The only way to emit this event is to name a
+        /// <see cref="TrackedOperations"/> value and an <see cref="OperationFailureReasons"/>
+        /// value, both of which are constants.
+        ///
+        /// Behind <c>Analytics:EnableNewEventEmission</c>: this is low-frequency by nature (a
+        /// refused join is rare next to a successful one), so it belongs in the AN-017
+        /// increment rather than the high-frequency one.
+        /// </summary>
+        private void TrackOperationFailed(
+            string operation,
+            string reason,
+            Guid userId,
+            Guid roomId,
+            object? extra = null)
+        {
+            if (!_eventTracker.NewEventEmissionEnabled)
+            {
+                return;
+            }
+
+            _eventTracker.Track(EventTypes.OperationFailed, userId, new
+            {
+                operation,
+                reason,
+                roomId,
+                extra
+            });
+        }
+
+        /// <summary>
         /// Removes all _connections entries that belong to a specific room.
         /// Called when a room ends to prevent stale OnDisconnectedAsync cleanup.
         /// </summary>
@@ -202,6 +237,10 @@ namespace Cocorra.API.Hubs
                     "RoomId={RoomId} RoomFound={RoomFound} Status={Status} Ts={Ts}",
                     Context.ConnectionId, userId, roomGuid, room != null,
                     room?.Status.ToString() ?? "(null)", Now());
+
+                // AN-041, site 1 of 5. Before the throw: the rejection is the fact.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.RoomNotLive, userId, roomGuid);
+
                 throw new HubException("Room is not live yet or has ended.");
             }
 
@@ -214,6 +253,11 @@ namespace Cocorra.API.Hubs
                     "[JOINROOM-TRACE] EXIT-B ABORT: no RoomParticipant row (client did not call POST /Room/{{id}}/Join first). " +
                     "ConnectionId={ConnectionId} UserId={UserId} RoomId={RoomId} Ts={Ts}",
                     Context.ConnectionId, userId, roomGuid, Now());
+
+                // AN-041, site 2 of 5. The only reason in the set that indicates a client
+                // sequencing bug rather than a product state — worth being able to count.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.NotAParticipant, userId, roomGuid);
+
                 throw new HubException("You are not a member of this room. Please join via the REST API first.");
             }
             if (participant.Status == ParticipantStatus.PendingApproval)
@@ -223,6 +267,11 @@ namespace Cocorra.API.Hubs
                     "[JOINROOM-TRACE] EXIT-C ABORT: participant PendingApproval. ConnectionId={ConnectionId} " +
                     "UserId={UserId} RoomId={RoomId} Ts={Ts}",
                     Context.ConnectionId, userId, roomGuid, Now());
+
+                // AN-041, site 3 of 5. Nothing errored — the operation simply did not complete,
+                // which is the distinction the event name has to carry.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.PendingHostApproval, userId, roomGuid);
+
                 throw new HubException("Your request is still pending approval from the host.");
             }
             if (participant.Status == ParticipantStatus.Kicked || participant.Status == ParticipantStatus.Rejected)
@@ -232,6 +281,10 @@ namespace Cocorra.API.Hubs
                     "[JOINROOM-TRACE] EXIT-D ABORT: participant {Status}. ConnectionId={ConnectionId} " +
                     "UserId={UserId} RoomId={RoomId} Ts={Ts}",
                     participant.Status, Context.ConnectionId, userId, roomGuid, Now());
+
+                // AN-041, site 4 of 5. An enforcement outcome, and a funnel drop.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.BlockedFromRoom, userId, roomGuid);
+
                 throw new HubException("You are not allowed to join this room.");
             }
 
@@ -482,7 +535,21 @@ namespace Cocorra.API.Hubs
 
             var stageSpeakers = await _roomRepo.GetStageSpeakersAsync(roomGuid);
             if (stageSpeakers.Count >= room.StageCapacity)
+            {
+                // AN-041, site 5 of 5 — the highest-value one. M-400 shows hands raised that
+                // never became promotions; this is what separates "the host ignored them" from
+                // "the host could not act", and those have different fixes (host tooling versus
+                // raising StageCapacity). Tracked against the PARTICIPANT who did not get the
+                // stage, matching stage_promoted's convention rather than room_join_approved's.
+                TrackOperationFailed(
+                    TrackedOperations.StagePromotion,
+                    OperationFailureReasons.StageAtCapacity,
+                    targetGuid,
+                    roomGuid,
+                    new { stageCapacity = room.StageCapacity, stageOccupancy = stageSpeakers.Count });
+
                 throw new HubException("Stage is full. Someone must leave the stage first.");
+            }
 
             var participant = await _roomRepo.GetParticipantAsync(roomGuid, targetGuid);
             if (participant == null) throw new HubException("User not found in room.");
