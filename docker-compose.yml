@@ -7,9 +7,34 @@ services:
     restart: unless-stopped
     ports:
       - "5000:8080"
+    # Secrets come from a .env file next to this file, which docker-compose reads
+    # automatically. .env is gitignored; copy .env.example and fill it in.
+    env_file:
+      - .env
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
+
+      # REQUIRED. The `:?` form makes `docker compose up` fail immediately with this
+      # message if the variable is unset, so a missing salt is caught before the
+      # container starts rather than by the startup guard inside it.
+      #
+      # Not optional and not defaultable. This salt is what makes the stored IP
+      # pseudonymisation irreversible; a shared or guessable value can be brute-forced
+      # against the whole IPv4 space in minutes.
+      #
+      # Quoted because the substitution's error text would otherwise contain a
+      # colon-space sequence, which YAML cannot hold in a plain scalar.
+      - "Analytics__IpHashSalt=${ANALYTICS_IP_HASH_SALT:?set ANALYTICS_IP_HASH_SALT in .env — copy .env.example and generate a value with openssl rand -base64 32}"
+
+      # Analytics event-emission flags. Both default to false in appsettings.json.
+      # Uncomment ONLY when the corresponding stage gate in
+      # docs/dashboard-discovery/30-production-deployment-checklist.md has passed.
+      # Do NOT enable both in the same deploy.
+      # - Analytics__EnableNewEventEmission=true      # Stage B
+      # - Analytics__EnableHighFrequencyEvents=true   # Stage C (also raise the channel capacity first)
+      # - Analytics__EventChannelCapacity=25000       # Stage C, in a SEPARATE earlier deploy
+
       # Override connection string via environment variable if needed:
       # - ConnectionStrings__DefaultConnection=Server=YOUR_DB_HOST;Database=CocorraDb;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;MultipleActiveResultSets=True;
     volumes:
