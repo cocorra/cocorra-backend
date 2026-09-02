@@ -75,6 +75,24 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
         Task<SupportAnalyticsDto> GetSupportAnalyticsAsync(DateTime fromUtc, DateTime toUtc);
 
         /// <summary>
+        /// A-1: the north star and its supporting inputs with period-over-period comparison,
+        /// read from RM-1. Returns per-metric values with explicit unmeasured states rather than
+        /// a single composite figure.
+        /// </summary>
+        Task<PlatformHealthDto> GetPlatformHealthAsync(
+            DateTime fromUtc,
+            DateTime toUtc,
+            bool compareToPreviousPeriod);
+
+        /// <summary>
+        /// AN-027 / M-400: the stage participation funnel — room_joined, hand_raised,
+        /// stage_promoted, mic_activated — scoped per (room, participant), non-host, time
+        /// ordered. Reports instrumentation state per step: two of the four events are behind
+        /// flags that default to off, and an uninstrumented step returns null, never 0.
+        /// </summary>
+        Task<StageFunnelDto> GetStageFunnelAsync(DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>
         /// AN-007 / M-507: sequential activation funnel with median and p90 elapsed time
         /// between consecutive steps.
         /// </summary>

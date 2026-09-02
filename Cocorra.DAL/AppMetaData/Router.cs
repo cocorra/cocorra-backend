@@ -121,6 +121,16 @@ namespace Cocorra.DAL.AppMetaData
             public const string CohortGrid    = Prefix + "/Return/CohortGrid";   // GET ?from=&to=
             public const string DecisionCenter = Prefix + "/Decisions";          // GET
             public const string LiveKitWebhook = Rule + "Webhooks/LiveKit";       // POST (signature auth)
+
+            // AN-027 / M-400. Additive. Steps are fixed by the room flow, so unlike
+            // /Analytics/Activation/Funnel this route takes no `steps` parameter.
+            public const string StageFunnel   = Prefix + "/Participation/StageFunnel"; // GET ?from=&to=
+
+            // A-1. The dashboard's landing view: the north star plus its inputs, with a
+            // period-over-period comparison. Supersedes /Analytics/Summary, which returns one
+            // aggregate trust verdict over components of differing trust. Summary stays live
+            // until the dashboard cuts over.
+            public const string PlatformHealth = Prefix + "/Platform/Health"; // GET ?from=&to=&compareTo=
         }
     }
 }
