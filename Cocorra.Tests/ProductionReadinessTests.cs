@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -37,19 +38,53 @@ public class ProductionReadinessTests
     // ── Repository layout helpers ───────────────────────────────────────────
 
     /// <summary>
-    /// Walks up from the test assembly until it finds the solution file, so these
-    /// assertions do not depend on the working directory the test runner happens to use.
+    /// Locates the repository root by walking up from THIS SOURCE FILE's compile-time path,
+    /// not from the build output.
+    ///
+    /// <para>
+    /// The first version walked up from <c>AppContext.BaseDirectory</c>, which broke the moment
+    /// the solution was built with <c>-p:ArtifactsPath</c> pointing outside the repository: six
+    /// tests failed at once with an assertion about a null directory, which reads like a bug in
+    /// the assertions rather than in how they locate files. <c>CallerFilePath</c> is fixed at
+    /// compile time and always sits inside the repository, so the layout of the output
+    /// directory is irrelevant.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>AppContext.BaseDirectory</c> is retained as a fallback for the case where the
+    /// assembly was compiled elsewhere and copied in.
+    /// </para>
     /// </summary>
-    private static string RepoRoot()
+    private static string RepoRoot([CallerFilePath] string? thisSourceFile = null)
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Cocorra.sln")))
+        foreach (var start in new[]
+                 {
+                     string.IsNullOrEmpty(thisSourceFile) ? null : Path.GetDirectoryName(thisSourceFile),
+                     AppContext.BaseDirectory,
+                     Directory.GetCurrentDirectory()
+                 })
         {
-            dir = dir.Parent;
+            if (string.IsNullOrEmpty(start) || !Directory.Exists(start))
+            {
+                continue;
+            }
+
+            var dir = new DirectoryInfo(start);
+            while (dir is not null)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "Cocorra.sln")))
+                {
+                    return dir.FullName;
+                }
+
+                dir = dir.Parent;
+            }
         }
 
-        Assert.NotNull(dir);
-        return dir!.FullName;
+        throw new InvalidOperationException(
+            "Could not locate Cocorra.sln from the source path, the build output, or the working "
+            + "directory. These assertions read tracked repository files and need the repository "
+            + "on disk.");
     }
 
     private static string ReadRepoFile(string relativePath)
@@ -98,6 +133,33 @@ public class ProductionReadinessTests
 
         Assert.Contains("ANALYTICS_IP_HASH_SALT=", env);
         Assert.Contains("CHANGE_ME", env);
+    }
+
+    [Fact]
+    public void LaunchSettings_DoNotContainASalt()
+    {
+        // launchSettings.json is TRACKED, sets ASPNETCORE_ENVIRONMENT=Development, and has an
+        // environmentVariables block — which makes it the most tempting place to stash the salt
+        // once `dotnet watch run` starts failing. It is also the one place the earlier
+        // appsettings-only guard would not have caught.
+        //
+        // The supported local path is `dotnet user-secrets`, which stores the value outside the
+        // repository entirely.
+        var launch = ReadRepoFile("Cocorra.API/Properties/launchSettings.json");
+
+        Assert.DoesNotContain("IpHashSalt", launch, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ApiProject_EnablesUserSecrets_SoLocalDevelopmentHasASafePath()
+    {
+        // Without a UserSecretsId, WebApplication.CreateBuilder cannot load user secrets, and a
+        // developer running `dotnet watch run` has no way to supply the salt short of putting it
+        // back into tracked configuration. Removing this line would quietly recreate that
+        // pressure, so it is asserted rather than assumed.
+        var csproj = ReadRepoFile("Cocorra.API/Cocorra.API.csproj");
+
+        Assert.Contains("<UserSecretsId>", csproj);
     }
 
     [Fact]

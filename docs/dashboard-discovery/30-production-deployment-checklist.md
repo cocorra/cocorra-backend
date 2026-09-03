@@ -31,7 +31,7 @@
 - [ ] `git log --oneline -1` matches the commit you intend to deploy; **write the SHA down**, §F needs it
 - [ ] `git diff --check` reports nothing (no conflict markers, no whitespace errors)
 - [ ] `dotnet build Cocorra.sln --no-incremental` → **0 errors**. 13 warnings is the expected baseline; investigate anything above that
-- [ ] `dotnet test Cocorra.Tests/Cocorra.Tests.csproj` → **269/269 pass, 0 skipped**
+- [ ] `dotnet test Cocorra.Tests/Cocorra.Tests.csproj` → **271/271 pass, 0 skipped**
 
 > The `Dockerfile` runs `dotnet test` during the build, so a failing test fails the image build. That is a backstop, not a substitute for running it yourself — you want the failure before you have started a deployment.
 
@@ -98,6 +98,25 @@ All three remain on disk; none is used by this deployment path.
 >
 >     $env:ConnectionStrings__DefaultConnection = '<connection string>'      # PowerShell
 >     export ConnectionStrings__DefaultConnection='<connection string>'      # bash
+
+### Running the API locally
+
+`dotnet run` and `dotnet watch run` need the salt too, and this file is not how they get it.
+`.env` is read by docker-compose only. Use user-secrets, which stores the value **outside the
+repository**:
+
+    dotnet user-secrets set "Analytics:IpHashSalt" "$(openssl rand -base64 32)" --project Cocorra.API
+
+It loads automatically because `launchSettings.json` sets `ASPNETCORE_ENVIRONMENT=Development`.
+
+**User secrets load only in Development.** Running locally with `--no-launch-profile`, or with
+`ASPNETCORE_ENVIRONMENT=Production`, will still fail the guard — correctly, because a production
+environment must take the salt from its own environment rather than from a developer's machine.
+
+**Do not put the salt in `launchSettings.json`.** It is tracked, it has an
+`environmentVariables` block, and it is the most tempting place to stash the value once
+`dotnet watch run` starts failing. `ProductionReadinessTests.LaunchSettings_DoNotContainASalt`
+fails the build if anyone does.
 
 ## Feature flags — verify they are OFF
 

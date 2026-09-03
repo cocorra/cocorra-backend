@@ -4,6 +4,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+
+    <!--
+      Enables `dotnet user-secrets` for local development. WebApplication.CreateBuilder
+      loads user secrets automatically when ASPNETCORE_ENVIRONMENT is Development, which
+      launchSettings.json sets for both profiles.
+
+      This is the local-dev counterpart to the production mechanism, NOT a duplicate of it:
+        Production      -> Analytics__IpHashSalt from .env via docker-compose
+        Local dev       -> dotnet user-secrets, stored OUTSIDE the repository in
+                           %APPDATA%\Microsoft\UserSecrets\<id>\secrets.json
+
+      Both keep the salt out of source control, which is the point. See .env.example.
+    -->
+    <UserSecretsId>cocorra-api-b7f2c1a4-3e5d-4a9b-8c6f-1d2e3f4a5b6c</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

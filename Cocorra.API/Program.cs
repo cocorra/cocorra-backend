@@ -220,7 +220,20 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<StateSnapshotServi
 // silently fall back to a public value and become reversible (see USER_TRACKING_PLAN §4).
 if (string.IsNullOrWhiteSpace(builder.Configuration["Analytics:IpHashSalt"]))
     throw new InvalidOperationException(
-        "Analytics:IpHashSalt is not configured. Set a secret salt (env var or secrets store) before starting.");
+        "Analytics:IpHashSalt is not configured, and there is deliberately no fallback: a default "
+        + "or empty salt would make UserEvent.IpHash reversible by brute-forcing the IPv4 space.\n"
+        + "\n"
+        + "LOCAL DEVELOPMENT — store it outside the repository with user-secrets:\n"
+        + "    dotnet user-secrets set \"Analytics:IpHashSalt\" \"$(openssl rand -base64 32)\" --project Cocorra.API\n"
+        + "  or, without openssl:\n"
+        + "    dotnet user-secrets set \"Analytics:IpHashSalt\" \"any-long-random-dev-only-string\" --project Cocorra.API\n"
+        + "\n"
+        + "PRODUCTION — set ANALYTICS_IP_HASH_SALT in the .env file next to docker-compose.yml.\n"
+        + "  Copy .env.example and generate a value with: openssl rand -base64 32\n"
+        + "\n"
+        + "Do NOT put the value back into appsettings.json: it is tracked by git, and a committed "
+        + "salt is readable by anyone with repository access.\n"
+        + "Details: docs/dashboard-discovery/PRODUCTION-READINESS-REPORT.md section 2.");
 
 builder.Services.AddHttpContextAccessor();
 // Capacity comes from Analytics:EventChannelCapacity so the bound can be raised before the

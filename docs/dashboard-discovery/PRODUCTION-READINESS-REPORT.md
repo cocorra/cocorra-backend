@@ -82,7 +82,18 @@ The brief required an impact analysis before touching the salt. Here it is, and 
 | Developer path | `.env.example` is tracked, holds a `CHANGE_ME` placeholder, and documents `openssl rand -base64 32` |
 | Verified by test | 8 assertions in `ProductionReadinessTests` — see §3 |
 
-**Mechanism chosen to fit the existing deployment, not to add infrastructure.** `docker-compose.yml` already documented the `ConnectionStrings__DefaultConnection` env-var override pattern; this follows it. No secrets manager, no vault, no new dependency. `dotnet user-secrets` was considered and rejected: it would be a second mechanism for the same job, and the project has no `UserSecretsId`.
+**Mechanism chosen to fit the existing deployment, not to add infrastructure.** `docker-compose.yml` already documented the `ConnectionStrings__DefaultConnection` env-var override pattern; this follows it. No secrets manager, no vault, no new dependency.
+
+**Correction — `dotnet user-secrets` was initially rejected, and that call was wrong.** The stated reason was that it would be "a second mechanism for the same job". It is not: `.env` serves **production** via docker-compose, and user-secrets serves **local development**. Those are different environments, which is exactly the split ASP.NET Core's configuration stack is designed around.
+
+Rejecting it left local development with no supported path at all — `dotnet watch run` failed on the startup guard with no way forward short of putting the salt back into tracked configuration, which is the pressure the whole change exists to remove. `<UserSecretsId>` is now set on `Cocorra.API`, and the value lives outside the repository entirely.
+
+| Environment | Mechanism | Where the value lives |
+|---|---|---|
+| **Production** | `ANALYTICS_IP_HASH_SALT` in `.env` → `Analytics__IpHashSalt` | On the server, gitignored |
+| **Local development** | `dotnet user-secrets set "Analytics:IpHashSalt"` | `%APPDATA%\Microsoft\UserSecrets\<id>\secrets.json` — **outside the repository** |
+
+**One consequence worth knowing:** user secrets load only when `ASPNETCORE_ENVIRONMENT` is `Development`. Running locally with `--no-launch-profile`, or with the environment set to `Production`, still fails the guard. That is correct — a production environment must take the salt from its own environment, not from a developer's machine — but it is a sharp edge, so the guard's error message now names both paths explicitly.
 
 ### Status
 
@@ -177,7 +188,7 @@ Ordered by blast radius so the least disruptive comes first. **Each needs its ow
 |---|---|
 | **Build** | ✅ **PASS** — `dotnet build Cocorra.sln --no-incremental`, **0 errors** |
 | **Warnings** | **13** |
-| **Tests** | ✅ **269 / 269 PASS** |
+| **Tests** | ✅ **271 / 271 PASS** |
 | **Failed** | **0** |
 | **Skipped** | **0** |
 | **Migrations** | No pending model changes — `has-pending-model-changes` reports none |
@@ -192,7 +203,7 @@ Ordered by blast radius so the least disruptive comes first. **Each needs its ow
 
 **No warning is in code this wave added.** They remain listed as known limitations, not as clean.
 
-## Tests added in Wave 8: +15 (254 → 269)
+## Tests added in Wave 8: +17 (254 → 271)
 
 `ProductionReadinessTests` — security posture and the rollback contract:
 
@@ -233,6 +244,28 @@ or start a background service.
 **The guard is unchanged.** Relaxing it to throw only in Production was considered and rejected:
 a development environment running without a salt would silently write reversible hashes, which is
 the exact failure the guard prevents.
+
+### A second regression from the same change, also found in use
+
+`dotnet run` and `dotnet watch run` failed on the startup guard, because externalising the salt
+removed the only mechanism local development had for supplying it. The `.env` file is read by
+docker-compose and does nothing for `dotnet run`.
+
+**Root cause: rejecting `dotnet user-secrets` earlier in this wave was a mistake** — see §2.1. It
+is now enabled, verified working (`Hosting environment: Development`, `Application started`), and
+the guard's error message prints the exact command for both local and production paths instead of
+the previous unactionable *"set a secret salt (env var or secrets store)"*.
+
+Two further gaps closed while fixing it:
+
+| Gap | Guard added |
+|---|---|
+| `launchSettings.json` is tracked, has an `environmentVariables` block, and was **not** covered by the appsettings-only assertion — the most tempting place to stash the salt once `watch run` fails | `LaunchSettings_DoNotContainASalt` |
+| Removing `<UserSecretsId>` would silently recreate the pressure to commit the salt | `ApiProject_EnablesUserSecrets_SoLocalDevelopmentHasASafePath` |
+
+**Both regressions in this wave were about mechanisms that read configuration outside the paths
+`dotnet build` and `dotnet test` exercise** — design-time tooling and the local run profile.
+Removing a configuration value requires re-running everything that reads it, not just the build.
 
 ---
 
@@ -460,7 +493,7 @@ AN-043 experiments (volume-gated) · AN-045 partitioning (needs R-3 from Stage A
 
 Every technical prerequisite is met and verified rather than asserted:
 
-- **Build clean, 269/269 tests pass**, zero new warnings
+- **Build clean, 271/271 tests pass**, zero new warnings
 - **The wave's stated security objective is closed.** The salt is externalised behind two independent guards, with an impact analysis showing rotation is functionally free, and 8 regression tests
 - **The activation lifecycle is unambiguous**, and a genuine error in it was found and corrected — the earlier model would have imposed a month-long wait the backfill already satisfies
 - **Every rollback is a configuration change**, and the rollback contract is proven by test: analytics goes silent, the product does not
@@ -500,7 +533,7 @@ The remaining exposure is **pre-existing and unchanged**. Cocorra is already run
 | Observable pipeline | ⚠ **Partial** — one good endpoint, **no alerting**. Gaps listed rather than implied |
 | Safe rollback | ✅ Configuration-only, proven by test |
 | Validated build | ✅ 0 errors, 13 pre-existing warnings |
-| Validated tests | ✅ 269/269 |
+| Validated tests | ✅ 271/271 |
 
 **Two of seven are partial, and both are stated as partial rather than rounded up.** That is why the decision is GO **WITH CONDITIONS** and not GO.
 
