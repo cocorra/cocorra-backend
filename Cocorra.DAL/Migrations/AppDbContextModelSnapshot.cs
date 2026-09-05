@@ -22,6 +22,302 @@ namespace Cocorra.DAL.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Cocorra.DAL.Models.Analytics.AggregationCheckpoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("int");
+
+                    b.Property<long>("LastProcessedEventId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("LastSuccessAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PipelineName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PipelineName")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AggregationCheckpoints_PipelineName");
+
+                    b.ToTable("AggregationCheckpoints");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.Analytics.DailyFunnelMetrics", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CohortDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("ComputedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FunnelName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<int>("MedianSecondsFromPrevious")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("StepIndex")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("StepName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<int>("UsersReached")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CohortDate", "FunnelName", "StepIndex")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DailyFunnelMetrics_CohortDate_Funnel_Step");
+
+                    b.ToTable("DailyFunnelMetrics");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.Analytics.DailyHostMetrics", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("ComputedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("HostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ReportsAboutHostRooms")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RoomsCreated")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RoomsGoneLive")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TotalJoinersAcrossRooms")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Date", "HostId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DailyHostMetrics_Date_HostId");
+
+                    b.ToTable("DailyHostMetrics");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.Analytics.DailyPlatformMetrics", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("ComputedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<int>("DistinctActiveHosts")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DistinctJoiningUsers")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DistinctSpeakingUsers")
+                        .HasColumnType("int");
+
+                    b.Property<int>("NewRegistrations")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RoomsCreated")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RoomsGoneLive")
+                        .HasColumnType("int");
+
+                    b.Property<long>("TotalSpokenSeconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("VoiceVerificationsApproved")
+                        .HasColumnType("int");
+
+                    b.Property<int>("VoiceVerificationsSubmitted")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Date")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DailyPlatformMetrics_Date");
+
+                    b.ToTable("DailyPlatformMetrics");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.Analytics.DailyRoomMetrics", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTime>("ComputedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<int>("DistinctJoiners")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DistinctSpeakers")
+                        .HasColumnType("int");
+
+                    b.Property<int>("HandRaises")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("HostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ReportsCount")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SelectionMode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<int>("StageCapacity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StagePromotions")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TotalSpokenSeconds")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Date", "RoomId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DailyRoomMetrics_Date_RoomId");
+
+                    b.ToTable("DailyRoomMetrics");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.Analytics.DailyStateSnapshot", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("ComputedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("MetricKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<double>("Value")
+                        .HasColumnType("float");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Date", "MetricKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DailyStateSnapshots_Date_MetricKey");
+
+                    b.ToTable("DailyStateSnapshots");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.Analytics.DeadLetterEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("DeadLetteredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("FailureReason")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PropertiesJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("RoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeadLetteredAtUtc");
+
+                    b.HasIndex("EventId");
+
+                    b.ToTable("DeadLetterEvents");
+                });
+
             modelBuilder.Entity("Cocorra.DAL.Models.ApplicationUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -314,6 +610,9 @@ namespace Cocorra.DAL.Migrations
                     b.Property<Guid>("ReporterId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("ScreenshotPath")
                         .HasColumnType("nvarchar(max)");
 
@@ -321,6 +620,9 @@ namespace Cocorra.DAL.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("StatusCode")
+                        .HasColumnType("int");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2")
@@ -429,8 +731,17 @@ namespace Cocorra.DAL.Migrations
                     b.Property<DateTime>("JoinedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("LastJoinedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("LastUnmutedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LeftAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("RejoinCount")
+                        .HasColumnType("int");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -601,6 +912,9 @@ namespace Cocorra.DAL.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("ScreenshotPath")
                         .HasColumnType("nvarchar(max)");
 
@@ -608,6 +922,9 @@ namespace Cocorra.DAL.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("StatusCode")
+                        .HasColumnType("int");
 
                     b.Property<int>("Type")
                         .HasColumnType("int");
@@ -686,6 +1003,12 @@ namespace Cocorra.DAL.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<Guid?>("CorrelationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("EventType")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -704,6 +1027,9 @@ namespace Cocorra.DAL.Migrations
                     b.Property<Guid?>("RoomId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<byte>("SchemaVersion")
+                        .HasColumnType("tinyint");
+
                     b.Property<Guid?>("SessionId")
                         .HasColumnType("uniqueidentifier");
 
@@ -715,6 +1041,14 @@ namespace Cocorra.DAL.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CorrelationId")
+                        .HasDatabaseName("IX_UserEvents_CorrelationId")
+                        .HasFilter("[CorrelationId] IS NOT NULL");
+
+                    b.HasIndex("EventId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_UserEvents_EventId");
 
                     b.HasIndex("EventType", "OccurredAtUtc");
 

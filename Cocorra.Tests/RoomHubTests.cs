@@ -166,7 +166,18 @@ public class RoomHubTests
         _groupManagerMock.Verify(g => g.AddToGroupAsync("conn-user-1", roomId.ToString(), default), Times.Once);
 
         // Track event
-        _eventTrackerMock.Verify(e => e.Track(EventTypes.RoomJoined, (Guid?)userId, It.IsAny<object>()), Times.Once);
+        // AN-019: room_joined now carries isHost/isRejoin/entrySource at schema version 2, so
+        // host exclusion no longer requires joining back to Rooms on the read side.
+        _eventTrackerMock.Verify(
+            e => e.Track(
+                EventTypes.RoomJoined,
+                (Guid?)userId,
+                It.IsAny<object>(),
+                null,
+                null,
+                null,
+                (byte)2),
+            Times.Once);
 
         // Group broadcast UserJoined
         _groupProxyMock.Verify(g => g.SendCoreAsync("UserJoined", It.IsAny<object[]>(), default), Times.Once);

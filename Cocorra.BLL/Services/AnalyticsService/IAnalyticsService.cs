@@ -19,8 +19,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         Task<Response<UserGrowthDto>> GetUserGrowthAsync(
             string granularity = "monthly",
             DateTime? from = null,
-            DateTime? to = null,
-            int topN = 10);
+            DateTime? to = null);
 
         Task<Response<RoomAnalyticsDto>> GetRoomAnalyticsAsync(
             DateTime? from = null,
@@ -29,8 +28,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
 
         Task<Response<ParticipationStatsDto>> GetParticipationStatsAsync(
             DateTime? from = null,
-            DateTime? to = null,
-            int topN = 10);
+            DateTime? to = null);
 
         Task<Response<ReportInsightsDto>> GetReportInsightsAsync(
             DateTime? from = null,
@@ -42,6 +40,39 @@ namespace Cocorra.BLL.Services.AnalyticsService
             DateTime? from = null,
             DateTime? to = null);
 
+        Task<Response<SocialGraphDto>> GetSocialGraphAsync(DateTime? from = null, DateTime? to = null);
+
+        Task<Response<MbtiAnalysisDto>> GetMbtiAnalysisAsync(DateTime? from = null, DateTime? to = null);
+
+        Task<Response<CohortGridDto>> GetCohortGridAsync(DateTime? from = null, DateTime? to = null);
+
+        Task<Response<SupplyHealthDto>> GetSupplyHealthAsync(
+            string granularity = "monthly",
+            DateTime? from = null,
+            DateTime? to = null);
+
+        Task<Response<ReportRateInsightsDto>> GetReportRateByCategoryAsync(
+            DateTime? from = null,
+            DateTime? to = null);
+
+        Task<Response<ReviewLatencyDto>> GetReviewLatencyAsync(
+            DateTime? from = null,
+            DateTime? to = null);
+
+        Task<Response<SupportAnalyticsDto>> GetSupportAnalyticsAsync(
+            DateTime? from = null,
+            DateTime? to = null);
+
+        Task<Response<ActivationFunnelDto>> GetActivationFunnelAsync(
+            string[]? steps = null,
+            DateTime? from = null,
+            DateTime? to = null);
+
+        Task<Response<WeeklyReturnRateDto>> GetWeeklyReturnRateAsync(
+            DateTime? from = null,
+            DateTime? to = null);
+
+        /// <summary>DEPRECATED — superseded by GetWeeklyReturnRateAsync (M-102).</summary>
         Task<Response<Dictionary<int, double>>> GetRetentionCohortAsync(
             string cohortEvent,
             string activeEvent,

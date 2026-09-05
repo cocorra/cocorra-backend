@@ -78,6 +78,11 @@ namespace Cocorra.BLL.Services.ChatService
             if (await _blockRepo.IsBlockedAsync(senderId, receiverId))
                 return BadRequest<MessageDto>("You cannot send a message due to a block.");
 
+            // AN-030: checked BEFORE the insert, using the repository method that already
+            // exists, so no new query shape is introduced for analytics alone.
+            var isFirstMessageToRecipient =
+                await _messageRepo.GetLastMessageAsync(senderId, receiverId) is null;
+
             var message = new Message
             {
                 SenderId = senderId,
@@ -89,7 +94,16 @@ namespace Cocorra.BLL.Services.ChatService
 
             await _messageRepo.AddAsync(message);
 
-            _eventTracker.Track(EventTypes.MessageSent, senderId, new { receiverId });
+            // AN-030: isFirstMessageToRecipient distinguishes a conversation starting from an
+            // existing one continuing. Without it, one very active pair and many new connections
+            // produce the same message count, and the social loop cannot be told apart from
+            // background chatter between two people who already know each other.
+            _eventTracker.Track(EventTypes.MessageSent, senderId, new
+            {
+                receiverId,
+                isFirstMessageToRecipient,
+                contentLength = content?.Length ?? 0
+            });
 
             var dto = new MessageDto
             {

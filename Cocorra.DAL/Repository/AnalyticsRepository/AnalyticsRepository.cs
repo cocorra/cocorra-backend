@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
 {
-    public class AnalyticsRepository : IAnalyticsRepository
+    public partial class AnalyticsRepository : IAnalyticsRepository
     {
         private readonly AppDbContext _context;
 
@@ -18,80 +18,6 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
         // ─────────────────────────────────────────────────────────────────────
         // USER GROWTH
         // ─────────────────────────────────────────────────────────────────────
-        public async Task<UserGrowthDto> GetUserGrowthAsync(
-            string granularity,
-            DateTime from,
-            DateTime to,
-            int topN = 10)
-        {
-            var usersInPeriod = await _context.Users
-                .AsNoTracking()
-                .Where(u => u.CreatedAt >= from && u.CreatedAt <= to)
-                .Select(u => new
-                {
-                    u.CreatedAt,
-                    u.Status,
-                    u.MBTI,
-                    u.Age
-                })
-                .ToListAsync();
-
-            // ── Time bucketing ──────────────────────────────────────────────
-            var grouped = granularity.Equals("monthly", StringComparison.OrdinalIgnoreCase)
-                ? usersInPeriod.GroupBy(u => new DateTime(u.CreatedAt.Year, u.CreatedAt.Month, 1))
-                : usersInPeriod.GroupBy(u => u.CreatedAt.Date);
-
-            var dataPoints = grouped
-                .OrderBy(g => g.Key)
-                .Select(g =>
-                {
-                    var label = granularity.Equals("monthly", StringComparison.OrdinalIgnoreCase)
-                        ? g.Key.ToString("yyyy-MM")
-                        : g.Key.ToString("yyyy-MM-dd");
-
-                    return new UserGrowthDataPointDto
-                    {
-                        Period = label,
-                        NewUsers = g.Count(),
-                        ActiveUsers = g.Count(u => u.Status == UserStatus.Active),
-                        PendingUsers = g.Count(u => u.Status == UserStatus.Pending),
-                        BannedUsers = g.Count(u => u.Status == UserStatus.Banned),
-                        RejectedUsers = g.Count(u => u.Status == UserStatus.Rejected),
-                        ReRecordUsers = g.Count(u => u.Status == UserStatus.ReRecord)
-                    };
-                })
-                .ToList();
-
-            // ── Status breakdown (all-time in window) ──────────────────────
-            var statusBreakdown = usersInPeriod
-                .GroupBy(u => u.Status.ToString())
-                .ToDictionary(g => g.Key, g => g.Count());
-
-            // ── MBTI distribution ──────────────────────────────────────────
-            var mbtiDist = usersInPeriod
-                .Where(u => !string.IsNullOrWhiteSpace(u.MBTI))
-                .GroupBy(u => u.MBTI!)
-                .OrderByDescending(g => g.Count())
-                .ToDictionary(g => g.Key, g => g.Count());
-
-            // ── Average age ────────────────────────────────────────────────
-            var avgAge = usersInPeriod.Count > 0
-                ? usersInPeriod.Average(u => (double)u.Age)
-                : 0;
-
-            return new UserGrowthDto
-            {
-                Granularity = granularity.ToLower(),
-                From = from,
-                To = to,
-                TotalUsersInPeriod = usersInPeriod.Count,
-                DataPoints = dataPoints,
-                StatusBreakdown = statusBreakdown,
-                MbtiDistribution = mbtiDist,
-                AverageAge = Math.Round(avgAge, 2)
-            };
-        }
-
         // ─────────────────────────────────────────────────────────────────────
         // ROOM ANALYTICS
         // ─────────────────────────────────────────────────────────────────────
@@ -164,24 +90,20 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // PARTICIPATION STATS
+        // PARTICIPATION STATS (AN-005: Host-Excluded)
         // ─────────────────────────────────────────────────────────────────────
         public async Task<ParticipationStatsDto> GetParticipationStatsAsync(
             DateTime from,
-            DateTime to,
-            int topN = 10)
+            DateTime to)
         {
             var participants = await _context.RoomParticipants
                 .AsNoTracking()
-                .Where(p => p.JoinedAt >= from && p.JoinedAt <= to)
+                .Where(p => p.JoinedAt >= from && p.JoinedAt <= to && p.UserId != p.Room.HostId)
                 .Select(p => new
                 {
                     p.UserId,
                     p.TotalSpokenSeconds,
-                    p.IsHandRaised,
-                    p.JoinedAt,
-                    UserFirstName = p.User != null ? p.User.FirstName : string.Empty,
-                    UserLastName = p.User != null ? p.User.LastName : string.Empty
+                    p.JoinedAt
                 })
                 .ToListAsync();
 
@@ -189,21 +111,6 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             {
                 return new ParticipationStatsDto { From = from, To = to };
             }
-
-            // ── Top speakers ───────────────────────────────────────────────
-            var topSpeakers = participants
-                .GroupBy(p => p.UserId)
-                .Select(g => new TopSpeakerDto
-                {
-                    UserId = g.Key,
-                    FullName = $"{g.First().UserFirstName} {g.First().UserLastName}".Trim(),
-                    TotalSpokenSeconds = g.Sum(p => p.TotalSpokenSeconds),
-                    RoomsParticipatedIn = g.Count()
-                })
-                .Where(s => s.TotalSpokenSeconds > 0)
-                .OrderByDescending(s => s.TotalSpokenSeconds)
-                .Take(topN)
-                .ToList();
 
             // ── Peak hours (UTC) ───────────────────────────────────────────
             var peakHours = participants
@@ -214,6 +121,12 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
 
             var totalSpokenSeconds = participants.Sum(p => p.TotalSpokenSeconds);
 
+            // AN-005 step 3: derive speakers from mic_activated, host-excluded, rather than
+            // TotalSpokenSeconds > 0. Host exclusion alone is not enough — a non-host promoted
+            // to the stage is unmuted by default too, so accrued seconds still include idle
+            // open-mic time. Only the event proves someone actually took the mic.
+            var usersWhoSpoke = await CountDistinctNonHostMicActivatorsAsync(from, to);
+
             return new ParticipationStatsDto
             {
                 From = from,
@@ -223,11 +136,28 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     ? Math.Round(participants.Average(p => p.TotalSpokenSeconds), 2)
                     : 0,
                 TotalSpokenHours = Math.Round(totalSpokenSeconds / 3600.0, 2),
-                UsersWhoSpoke = participants.Count(p => p.TotalSpokenSeconds > 0),
-                UsersWhoRaisedHand = participants.Count(p => p.IsHandRaised),
-                TopSpeakers = topSpeakers,
+                UsersWhoSpoke = usersWhoSpoke,
                 PeakHours = peakHours
             };
+        }
+
+        /// <summary>
+        /// Distinct users with a mic_activated event in the window, excluding each event's own
+        /// room host. Shared by GetParticipationStatsAsync and GetActiveVsPassiveRateAsync so
+        /// the two panels cannot disagree about who spoke.
+        /// </summary>
+        private async Task<int> CountDistinctNonHostMicActivatorsAsync(DateTime from, DateTime to)
+        {
+            return await _context.UserEvents
+                .AsNoTracking()
+                .Where(e => e.EventType == EventTypes.MicActivated
+                         && e.OccurredAtUtc >= from && e.OccurredAtUtc <= to
+                         && e.UserId != null)
+                .Where(e => e.RoomId == null
+                         || !_context.Rooms.Any(r => r.Id == e.RoomId && r.HostId == e.UserId))
+                .Select(e => e.UserId)
+                .Distinct()
+                .CountAsync();
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -297,39 +227,87 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             };
         }
 
+        // AN-007: Sequential Funnel with strict monotonicity guarantee
         public async Task<Dictionary<string, int>> GetFunnelAsync(
             string[] steps, 
             DateTime fromUtc, 
             DateTime toUtc)
         {
-            var eventCounts = await _context.UserEvents
+            if (steps == null || steps.Length == 0)
+            {
+                return new Dictionary<string, int>();
+            }
+
+            // Fetch candidate step events in the window
+            var userEvents = await _context.UserEvents
+                .AsNoTracking()
                 .Where(e => steps.Contains(e.EventType)
                          && e.OccurredAtUtc >= fromUtc 
                          && e.OccurredAtUtc <= toUtc
                          && e.UserId != null)
-                .GroupBy(e => e.EventType)
-                .Select(g => new { g.Key, Count = g.Select(x => x.UserId).Distinct().Count() })
-                .ToDictionaryAsync(x => x.Key, x => x.Count);
+                .Select(e => new
+                {
+                    UserId = e.UserId!.Value,
+                    e.EventType,
+                    e.OccurredAtUtc
+                })
+                .ToListAsync();
 
-            // Ensure all steps have a value (defaulting to 0) and preserve initial step ordering
+            // Group by user and find earliest timestamp for each step
+            var userEarliestSteps = userEvents
+                .GroupBy(e => e.UserId)
+                .Select(g => new
+                {
+                    UserId = g.Key,
+                    StepTimes = g.GroupBy(x => x.EventType)
+                                 .ToDictionary(sg => sg.Key, sg => sg.Min(x => x.OccurredAtUtc))
+                })
+                .ToList();
+
             var result = new Dictionary<string, int>();
-            foreach (var step in steps)
+            var qualifiedUserIds = new HashSet<Guid>(userEarliestSteps.Select(u => u.UserId));
+            var previousStepTimes = new Dictionary<Guid, DateTime>();
+
+            for (int i = 0; i < steps.Length; i++)
             {
-                result[step] = eventCounts.TryGetValue(step, out var count) ? count : 0;
+                var stepName = steps[i];
+                var currentStepQualified = new HashSet<Guid>();
+
+                foreach (var user in userEarliestSteps)
+                {
+                    if (!qualifiedUserIds.Contains(user.UserId))
+                    {
+                        continue;
+                    }
+
+                    if (user.StepTimes.TryGetValue(stepName, out var stepTime))
+                    {
+                        // Step 0 requires only completion; step N requires stepTime >= stepN-1 time
+                        if (i == 0 || (previousStepTimes.TryGetValue(user.UserId, out var prevTime) && stepTime >= prevTime))
+                        {
+                            currentStepQualified.Add(user.UserId);
+                            previousStepTimes[user.UserId] = stepTime;
+                        }
+                    }
+                }
+
+                qualifiedUserIds = currentStepQualified;
+                result[stepName] = qualifiedUserIds.Count;
             }
 
             return result;
         }
 
+        // AN-006: Server-Authoritative Return Metric
         public async Task<Dictionary<int, double>> GetRetentionCohortAsync(
             string cohortEvent, 
             string activeEvent, 
             DateTime cohortStartUtc, 
             DateTime cohortEndUtc)
         {
-            // 1. Get the cohort of users who performed the cohortEvent in the time window,
-            // and their cohort date (first time they did it in this cohort window)
+            // 1. Cohort users who performed cohortEvent in the cohort window
             var cohortUsers = await _context.UserEvents
+                .AsNoTracking()
                 .Where(e => e.EventType == cohortEvent 
                          && e.OccurredAtUtc >= cohortStartUtc 
                          && e.OccurredAtUtc <= cohortEndUtc 
@@ -348,12 +326,19 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             }
 
             var cohortUserIds = cohortUsers.Select(u => u.UserId).ToList();
+            var userCohortMap = cohortUsers.ToDictionary(u => u.UserId, u => u.CohortDate);
 
-            // 2. Get all active events for these users that occurred after their cohort date
+            // 2. Bounded fetch. The unbounded version scanned every activity event a cohort
+            // user ever produced. Exact-day matching never looks past D30, so D30 + 1 day of
+            // slack is sufficient and the bound cannot change the result.
+            var maxActivityDate = cohortEndUtc.AddDays(31);
             var activityEvents = await _context.UserEvents
+                .AsNoTracking()
                 .Where(e => e.EventType == activeEvent 
                          && e.UserId != null 
-                         && cohortUserIds.Contains(e.UserId.Value))
+                         && cohortUserIds.Contains(e.UserId.Value)
+                         && e.OccurredAtUtc >= cohortStartUtc
+                         && e.OccurredAtUtc <= maxActivityDate)
                 .Select(e => new
                 {
                     UserId = e.UserId!.Value,
@@ -361,10 +346,6 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 })
                 .ToListAsync();
 
-            // 3. Map user cohort date for ease of calculations
-            var userCohortMap = cohortUsers.ToDictionary(u => u.UserId, u => u.CohortDate);
-
-            // 4. Calculate day differences and group by day offset (D1, D7, D30)
             var cohortSize = cohortUsers.Count;
             var retentionDays = new[] { 1, 7, 30 };
             var retentionCounts = new Dictionary<int, int> { { 1, 0 }, { 7, 0 }, { 30, 0 } };
@@ -497,45 +478,64 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             };
         }
 
-        // Active (took the mic) vs passive (join-only) participation.
+        // Active (took the mic) vs passive (join-only) participation (AN-005 / M-101: Host-Excluded).
         public async Task<ParticipationModeDto> GetActiveVsPassiveRateAsync(
             DateTime from,
             DateTime to)
         {
-            // Distinct users who joined at least one room in the window.
-            var joined = await _context.UserEvents
+            // Distinct users who joined at least one room in the window
+            var joinedEvents = await _context.UserEvents
                 .AsNoTracking()
                 .Where(e => e.EventType == EventTypes.RoomJoined
                          && e.OccurredAtUtc >= from && e.OccurredAtUtc <= to
                          && e.UserId != null)
-                .Select(e => e.UserId)
-                .Distinct()
+                .Select(e => new { e.UserId, e.RoomId })
                 .ToListAsync();
 
-            int total = joined.Count;
+            // Load host map for rooms in the events to perform host exclusion
+            var roomIds = joinedEvents.Where(e => e.RoomId != null).Select(e => e.RoomId!.Value).Distinct().ToList();
+            var roomHostMap = await _context.Rooms
+                .AsNoTracking()
+                .Where(r => roomIds.Contains(r.Id))
+                .ToDictionaryAsync(r => r.Id, r => r.HostId);
+
+            var nonHostJoiners = joinedEvents
+                .Where(e => e.RoomId == null || !roomHostMap.TryGetValue(e.RoomId.Value, out var hostId) || e.UserId != hostId)
+                .Select(e => e.UserId!.Value)
+                .Distinct()
+                .ToList();
+
+            int total = nonHostJoiners.Count;
             if (total == 0)
             {
                 return new ParticipationModeDto { From = from, To = to };
             }
 
-            // Of those joiners, how many ever activated the mic in the window.
-            int speakers = await _context.UserEvents
+            var micEvents = await _context.UserEvents
                 .AsNoTracking()
                 .Where(e => e.EventType == EventTypes.MicActivated
                          && e.OccurredAtUtc >= from && e.OccurredAtUtc <= to
-                         && e.UserId != null && joined.Contains(e.UserId))
-                .Select(e => e.UserId)
+                         && e.UserId != null
+                         && nonHostJoiners.Contains(e.UserId.Value))
+                .Select(e => new { e.UserId, e.RoomId })
+                .ToListAsync();
+
+            var nonHostSpeakers = micEvents
+                .Where(e => e.RoomId == null || !roomHostMap.TryGetValue(e.RoomId.Value, out var hostId) || e.UserId != hostId)
+                .Select(e => e.UserId!.Value)
                 .Distinct()
-                .CountAsync();
+                .Count();
+
+            int passive = Math.Max(0, total - nonHostSpeakers);
 
             return new ParticipationModeDto
             {
                 From = from,
                 To = to,
                 TotalParticipants = total,
-                ActiveSpeakers = speakers,
-                PassiveListeners = total - speakers,
-                ActiveRate = Math.Round((double)speakers / total * 100, 2)
+                ActiveSpeakers = nonHostSpeakers,
+                PassiveListeners = passive,
+                ActiveRate = Math.Round((double)nonHostSpeakers / total * 100, 2)
             };
         }
     }

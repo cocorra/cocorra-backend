@@ -7,6 +7,15 @@ namespace Cocorra.DAL.Models
     {
         public long Id { get; set; } // bigint identity — high volume
 
+        /// <summary>Unique idempotency key assigned at enqueue time. Indexed uniquely.</summary>
+        public Guid EventId { get; set; } = Guid.NewGuid();
+
+        /// <summary>Schema version of the event payload (starts at 1).</summary>
+        public byte SchemaVersion { get; set; } = 1;
+
+        /// <summary>Optional correlation key to link related causal chains across events.</summary>
+        public Guid? CorrelationId { get; set; }
+
         /// <summary>Nullable: some events (e.g. registration failure) have no user yet.</summary>
         public Guid? UserId { get; set; }
         public virtual ApplicationUser? User { get; set; }

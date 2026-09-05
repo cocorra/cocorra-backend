@@ -191,7 +191,7 @@ public class FcmTokenLifecycleTests
         );
 
         // Act
-        var result = await adminService.ChangeUserStatusAsync(userId, UserStatus.Banned);
+        var result = await adminService.ChangeUserStatusAsync(userId, UserStatus.Banned, Guid.NewGuid());
 
         // Assert
         Assert.True(result.Succeeded);

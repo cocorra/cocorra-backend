@@ -1,5 +1,6 @@
 using Cocorra.API.Controllers;
 using Cocorra.BLL.Base;
+using Cocorra.BLL.Services.Analytics;
 using Cocorra.BLL.Services.AnalyticsService;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Microsoft.AspNetCore.Mvc;
@@ -11,10 +12,16 @@ namespace Cocorra.Tests;
 public class AnalyticsControllerTests
 {
     private readonly Mock<IAnalyticsService> _analyticsServiceMock = new();
+    private readonly IMetricRegistry _metricRegistry = new MetricRegistry();
 
     private AnalyticsController CreateController()
     {
-        return new AnalyticsController(_analyticsServiceMock.Object);
+        return new AnalyticsController(
+            _analyticsServiceMock.Object,
+            _metricRegistry,
+            Mock.Of<IPipelineHealthService>(),
+            Mock.Of<IAnalyticsBackfillService>(),
+            Mock.Of<IDecisionCenterService>());
     }
 
     [Fact]
@@ -43,21 +50,6 @@ public class AnalyticsControllerTests
     }
 
     [Fact]
-    public async Task GetUserGrowth_InvalidLimit_ReturnsBadRequest()
-    {
-        // Arrange
-        var controller = CreateController();
-
-        // Act
-        var resultZero = await controller.GetUserGrowth("monthly", null, null, 0);
-        var resultTooBig = await controller.GetUserGrowth("monthly", null, null, 101);
-
-        // Assert
-        Assert.IsType<BadRequestObjectResult>(resultZero);
-        Assert.IsType<BadRequestObjectResult>(resultTooBig);
-    }
-
-    [Fact]
     public async Task GetUserGrowth_Success_ReturnsOk()
     {
         // Arrange
@@ -69,13 +61,13 @@ public class AnalyticsControllerTests
             Data = growthDto
         };
 
-        _analyticsServiceMock.Setup(s => s.GetUserGrowthAsync("monthly", null, null, 10))
+        _analyticsServiceMock.Setup(s => s.GetUserGrowthAsync("monthly", null, null))
             .ReturnsAsync(response);
 
         var controller = CreateController();
 
         // Act
-        var result = await controller.GetUserGrowth("monthly", null, null, 10);
+        var result = await controller.GetUserGrowth("monthly", null, null);
 
         // Assert
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -111,14 +103,6 @@ public class AnalyticsControllerTests
     }
 
     [Fact]
-    public async Task GetParticipationStats_InvalidLimit_ReturnsBadRequest()
-    {
-        var controller = CreateController();
-        var result = await controller.GetParticipationStats(null, null, 105);
-        Assert.IsType<BadRequestObjectResult>(result);
-    }
-
-    [Fact]
     public async Task GetParticipationStats_Success_ReturnsOk()
     {
         var response = new Response<ParticipationStatsDto>
@@ -128,11 +112,11 @@ public class AnalyticsControllerTests
             Data = new ParticipationStatsDto()
         };
 
-        _analyticsServiceMock.Setup(s => s.GetParticipationStatsAsync(null, null, 10))
+        _analyticsServiceMock.Setup(s => s.GetParticipationStatsAsync(null, null))
             .ReturnsAsync(response);
 
         var controller = CreateController();
-        var result = await controller.GetParticipationStats(null, null, 10);
+        var result = await controller.GetParticipationStats(null, null);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(response, ok.Value);

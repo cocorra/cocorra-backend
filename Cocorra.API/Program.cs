@@ -40,7 +40,7 @@ using Cocorra.BLL.Services.UploadService;
 using Cocorra.API.Middleware;
 using Cocorra.DAL.Repository.AnalyticsRepository;
 using Cocorra.BLL.Services.EventTracking;
-using Cocorra.DAL.Models;
+using Cocorra.BLL.Services.Analytics;
 using Amazon.S3;
 using Google.Apis.Auth.OAuth2;
 
@@ -195,9 +195,25 @@ builder.Services.Configure<LiveKitSettings>(builder.Configuration.GetSection("Li
 builder.Services.AddScoped<ILiveKitService, LiveKitService>();
 
 // Analytics — Data-Driven Decisions
+builder.Services.Configure<EventTrackingOptions>(builder.Configuration.GetSection(EventTrackingOptions.SectionName));
+
+// AN-042: opt-in structured log sink. Registered only when Analytics:StructuredLogPath is set,
+// so the default deployment keeps exactly its current stdout-only behaviour.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Analytics:StructuredLogPath"]))
+{
+    builder.Services.AddSingleton<ILoggerProvider, StructuredFileLoggerProvider>();
+}
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IAnalyticsRepository, AnalyticsRepository>();
 builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
+builder.Services.AddSingleton<IMetricRegistry, MetricRegistry>();
+builder.Services.AddSingleton<EventPipelineMetrics>();
+builder.Services.AddSingleton<IPipelineHealthService, PipelineHealthService>();
+builder.Services.AddSingleton<IDecisionCenterService, DecisionCenterService>();
+builder.Services.AddScoped<IAnalyticsBackfillService, AnalyticsBackfillService>();
+builder.Services.AddSingleton<StateSnapshotService>();
+builder.Services.AddSingleton<IStateSnapshotService>(sp => sp.GetRequiredService<StateSnapshotService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StateSnapshotService>());
 
 // Event tracking backbone
 // Fail fast if the IP-hash salt is missing: without it, IP pseudonymization would
@@ -207,11 +223,26 @@ if (string.IsNullOrWhiteSpace(builder.Configuration["Analytics:IpHashSalt"]))
         "Analytics:IpHashSalt is not configured. Set a secret salt (env var or secrets store) before starting.");
 
 builder.Services.AddHttpContextAccessor();
+// Capacity comes from Analytics:EventChannelCapacity so the bound can be raised before the
+// high-frequency events land. The channel is constructed at registration time, so this reads
+// configuration directly rather than IOptions.
+var eventChannelCapacity = builder.Configuration.GetValue<int?>("Analytics:EventChannelCapacity") ?? 10_000;
+if (eventChannelCapacity <= 0)
+    throw new InvalidOperationException("Analytics:EventChannelCapacity must be greater than zero.");
+
+// FullMode is Wait, NOT DropWrite, even though the behaviour we want is "drop on overflow".
+//
+// With DropWrite the channel silently discards the incoming item and TryWrite still returns
+// TRUE, so the existing `if (!TryWrite(evt))` drop warning could never fire — the drop was not
+// merely easy to miss in logs, it was unlogged and unmeasurable. With Wait, TryWrite returns
+// false immediately when the channel is full (only WriteAsync actually waits), so the producer
+// stays non-blocking and the drop becomes observable and countable.
 builder.Services.AddSingleton(System.Threading.Channels.Channel.CreateBounded<UserEvent>(
-    new System.Threading.Channels.BoundedChannelOptions(10_000) { FullMode = System.Threading.Channels.BoundedChannelFullMode.DropWrite }));
+    new System.Threading.Channels.BoundedChannelOptions(eventChannelCapacity) { FullMode = System.Threading.Channels.BoundedChannelFullMode.Wait }));
 builder.Services.AddSingleton<IEventTracker, EventTracker>();
 builder.Services.AddHostedService<EventFlushService>();
 builder.Services.AddHostedService<EventCleanupService>();
+builder.Services.AddHostedService<AnalyticsAggregationService>();
 #endregion
 
 #region Add Minio

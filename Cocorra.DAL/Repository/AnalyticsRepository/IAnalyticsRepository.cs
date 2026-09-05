@@ -10,12 +10,10 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
         /// <param name="granularity">"daily" | "monthly"</param>
         /// <param name="from">Start date (UTC). Defaults to 30 days ago.</param>
         /// <param name="to">End date (UTC). Defaults to UtcNow.</param>
-        /// <param name="topN">Number of top entries to return for sub-lists.</param>
         Task<UserGrowthDto> GetUserGrowthAsync(
             string granularity,
             DateTime from,
-            DateTime to,
-            int topN = 10);
+            DateTime to);
 
         /// <summary>
         /// Room creation, category breakdown and top-room rankings.
@@ -26,12 +24,12 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             int topN = 10);
 
         /// <summary>
-        /// Participation metrics: spoken time, top speakers, peak hours.
+        /// Participation metrics: spoken time, distinct speakers, peak hours.
+        /// Host-excluded (AN-005). Top speakers and hand-raise counts are removed, not zeroed.
         /// </summary>
         Task<ParticipationStatsDto> GetParticipationStatsAsync(
             DateTime from,
-            DateTime to,
-            int topN = 10);
+            DateTime to);
 
         /// <summary>
         /// Report summary: categories, status breakdown, most reported users.
@@ -51,6 +49,52 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
 
         /// <summary>
         /// Computes user retention metrics for a cohort defined by a cohort event and return events.
+        /// </summary>
+        /// <summary>
+        /// AN-020 / M-200..M-204: supply-side health — active hosts, host retention,
+        /// concentration and schedule. Entirely from Rooms, which is never purged.
+        /// </summary>
+        Task<SupplyHealthDto> GetSupplyHealthAsync(string granularity, DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>AN-021 / M-301: reports per 1,000 joins, by room category.</summary>
+        Task<ReportRateInsightsDto> GetReportRateByCategoryAsync(DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>AN-022 / M-302: voice-verification review latency percentiles. No mean.</summary>
+        Task<ReviewLatencyDto> GetReviewLatencyAsync(DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>AN-029 / M-701: social graph reciprocity and message volume.</summary>
+        Task<SocialGraphDto> GetSocialGraphAsync(DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>AN-037 / M-702: MBTI tested as four dichotomies, not sixteen types.</summary>
+        Task<MbtiAnalysisDto> GetMbtiDichotomyAnalysisAsync(DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>AN-038 / M-103: weekly cohort retention grid. Needs ~8 weeks to be readable.</summary>
+        Task<CohortGridDto> GetCohortGridAsync(DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>AN-023 / M-601: support ticket and chat analytics.</summary>
+        Task<SupportAnalyticsDto> GetSupportAnalyticsAsync(DateTime fromUtc, DateTime toUtc);
+
+        /// <summary>
+        /// AN-007 / M-507: sequential activation funnel with median and p90 elapsed time
+        /// between consecutive steps.
+        /// </summary>
+        Task<ActivationFunnelDto> GetActivationFunnelAsync(
+            string[] steps,
+            DateTime fromUtc,
+            DateTime toUtc);
+
+        /// <summary>
+        /// AN-006 / M-102: of non-host users who joined a room in week N, the share who joined
+        /// again in any later week. Server-authoritative; reads no session_started rows.
+        /// </summary>
+        Task<WeeklyReturnRateDto> GetWeeklyReturnRateAsync(
+            DateTime fromUtc,
+            DateTime toUtc);
+
+        /// <summary>
+        /// DEPRECATED (M-102-LEGACY, graded UNRELIABLE): exact-day cohort matching over a
+        /// caller-supplied activity signal that defaults to the cookie-derived session_started.
+        /// Retained until the dashboard cuts over to GetWeeklyReturnRateAsync.
         /// </summary>
         Task<Dictionary<int, double>> GetRetentionCohortAsync(
             string cohortEvent,
