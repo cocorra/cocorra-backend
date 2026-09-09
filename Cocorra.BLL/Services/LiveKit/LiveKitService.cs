@@ -45,7 +45,8 @@ public class LiveKitService : ILiveKitService
                 CanPublish = canPublish,
                 CanSubscribe = true
             })
-            .WithTtl(TimeSpan.FromHours(4)); // Covers max 3h room + 1h buffer
+            // See LiveKitSettings.TokenTtlMinutes — this bounds reconnection, not session length.
+            .WithTtl(TimeSpan.FromMinutes(Math.Max(1, _settings.TokenTtlMinutes)));
 
         var jwt = token.ToJwt();
         LogIssuedToken(jwt, roomId, userId, participantName);
@@ -142,6 +143,51 @@ public class LiveKitService : ILiveKitService
                 "[LIVEKIT-PERM-AUDIT] UpdateParticipant FAILED. Room={Room} Identity={Identity} " +
                 "CanPublish={CanPublish}. The participant's publish permission was NOT changed on the media server.",
                 roomId, userId, canPublish);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task CloseRoomAsync(Guid roomId)
+    {
+        try
+        {
+            await _roomServiceClient.DeleteRoom(new DeleteRoomRequest
+            {
+                Room = roomId.ToString()
+            });
+
+            _logger?.LogInformation(
+                "[LIVEKIT] DeleteRoom OK. Room={Room} — all media connections terminated.", roomId);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex,
+                "[LIVEKIT] DeleteRoom FAILED. Room={Room}. The room is ended in the database but " +
+                "participants may still be connected to the audio bridge.", roomId);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveParticipantAsync(Guid roomId, Guid userId)
+    {
+        try
+        {
+            await _roomServiceClient.RemoveParticipant(new RoomParticipantIdentity
+            {
+                Room = roomId.ToString(),
+                Identity = userId.ToString()
+            });
+
+            _logger?.LogInformation(
+                "[LIVEKIT] RemoveParticipant OK. Room={Room} Identity={Identity}", roomId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex,
+                "[LIVEKIT] RemoveParticipant FAILED. Room={Room} Identity={Identity}. " +
+                "They may still be connected to the audio bridge.", roomId, userId);
             throw;
         }
     }

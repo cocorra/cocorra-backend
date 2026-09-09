@@ -57,5 +57,15 @@ namespace Cocorra.BLL.Services.EventTracking
 
         /// <summary>Minimum level written to the structured sink.</summary>
         public string StructuredLogMinimumLevel { get; set; } = "Warning";
+
+        /// <summary>
+        /// AN-036. Minutes to add to a UTC hour to reach the audience's predominant local hour.
+        /// Surfaced on every analytics response as <c>Meta.display.suggestedDisplayOffsetMinutes</c>.
+        ///
+        /// Server-side computation stays in UTC regardless of this value — it is a display hint,
+        /// not a bucketing instruction. Changing it changes what clients render, never what is
+        /// stored or aggregated.
+        /// </summary>
+        public int DisplayTimeZoneOffsetMinutes { get; set; } = 180;
     }
 }

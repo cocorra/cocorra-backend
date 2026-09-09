@@ -14,6 +14,21 @@ namespace Cocorra.BLL.Services.NotificationService
 {
     public class PushNotificationService : IPushNotificationService
     {
+        /// <summary>
+        /// notification.body is rendered verbatim by the Android and iOS system trays when the
+        /// app is closed — Flutter's handlers never run, so nothing downstream can reformat it.
+        /// A body that is really a serialized payload therefore reaches the user as raw JSON.
+        /// Structured data belongs in Data, which Flutter parses; this is the last guard
+        /// before the wire, for call sites that pass through content they do not control.
+        /// </summary>
+        internal const string OpaqueBodyFallback = "You have a new notification.";
+
+        /// <summary>
+        /// FCM caps the whole payload at 4 KB and neither tray collapses gracefully past a
+        /// couple of lines, so a long chat message is truncated rather than sent whole.
+        /// </summary>
+        internal const int MaxBodyLength = 240;
+
         private readonly ILogger<PushNotificationService> _logger;
         private readonly IEventTracker? _eventTracker;
 
@@ -74,13 +89,30 @@ namespace Cocorra.BLL.Services.NotificationService
                 return;
             }
 
+            // Never let a serialized payload reach the tray. See OpaqueBodyFallback.
+            var displayBody = BuildDisplayBody(body, type);
+
             // An alert payload changes how both platforms must be addressed, so decide once.
-            var hasAlert = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(body);
+            var hasAlert = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(displayBody);
+
+            // Mirror the alert text into Data so the app can render its own notification from
+            // the data payload alone — in the foreground, and if these pushes are ever moved
+            // to data-only. Copied first: callers reuse a single dictionary across recipients
+            // (RoomService's reminder loop), so mutating the argument would leak between sends.
+            var payloadData = data is null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(data);
+
+            if (hasAlert)
+            {
+                payloadData["title"] = title ?? string.Empty;
+                payloadData["body"] = displayBody ?? string.Empty;
+            }
 
             var message = new Message()
             {
                 Token = fcmToken,
-                Data = data,
+                Data = payloadData,
 
                 // High priority so the message is not deferred while the device is in Doze.
                 Android = new AndroidConfig()
@@ -116,7 +148,7 @@ namespace Cocorra.BLL.Services.NotificationService
                 message.Notification = new Notification()
                 {
                     Title = title,
-                    Body = body
+                    Body = displayBody
                 };
             }
 
@@ -167,6 +199,49 @@ namespace Cocorra.BLL.Services.NotificationService
                 // Catch-all so callers can await this without their own try/catch.
                 _logger.LogError(ex, "FCM push FAILED with unexpected exception. Type: {Type}", type);
             }
+        }
+
+        /// <summary>
+        /// Returns a body safe to hand to the OS tray: prose, never a serialized payload,
+        /// never longer than <see cref="MaxBodyLength"/>.
+        ///
+        /// A caller that forwards content it does not control — chat is the one that does —
+        /// can hand us a JSON envelope. When the app is closed the tray prints
+        /// notification.body as-is, so that envelope becomes what the user reads. Callers are
+        /// expected to build their own preview (ChatService does); this only catches the ones
+        /// that do not, and is deliberately conservative: it looks at the shape of the string
+        /// rather than parsing, so a message that merely mentions braces is left alone.
+        /// </summary>
+        internal string? BuildDisplayBody(string? body, string type)
+        {
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                return body;
+            }
+
+            var trimmed = body.Trim();
+
+            if (LooksLikeSerializedPayload(trimmed))
+            {
+                // Warn rather than fail: the notification is still worth delivering, but a
+                // call site reaching this point is a bug at that call site, not here.
+                _logger.LogWarning(
+                    "FCM body looked like a serialized payload and was replaced with a generic " +
+                    "message. The structured value is still available in Data. Type: {Type}", type);
+
+                return OpaqueBodyFallback;
+            }
+
+            return trimmed.Length > MaxBodyLength
+                ? string.Concat(trimmed.AsSpan(0, MaxBodyLength - 1).TrimEnd(), "…")
+                : trimmed;
+        }
+
+        private static bool LooksLikeSerializedPayload(string trimmedBody)
+        {
+            return trimmedBody.Length > 1
+                   && ((trimmedBody[0] == '{' && trimmedBody[^1] == '}')
+                       || (trimmedBody[0] == '[' && trimmedBody[^1] == ']'));
         }
 
         private void TrackAttempt(Guid? userId, Guid correlationId, string type)

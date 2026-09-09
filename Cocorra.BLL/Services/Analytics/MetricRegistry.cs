@@ -20,7 +20,9 @@ namespace Cocorra.BLL.Services.Analytics
         public const string SpeakingConversion = "M-101";
         public const string WeeklyReturnRate = "M-102";
         public const string LegacyRetentionCohort = "M-102-LEGACY";
+        public const string LegacyIndependentFunnel = "M-507-LEGACY";
         public const string ActiveHosts = "M-200";
+        public const string RoomsGoneLive = "M-205";
         public const string ReportRate = "M-300";
         public const string OpenReportBacklog = "M-303";
         public const string PlatformSummary = "M-500";
@@ -40,6 +42,7 @@ namespace Cocorra.BLL.Services.Analytics
         public const string SocialGraph = "M-701";
         public const string MbtiSpeakingAssociation = "M-702";
         public const string CohortGrid = "M-103";
+        public const string StageFunnel = "M-400";
 
         private static readonly Dictionary<string, MetricContract> Contracts = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -89,14 +92,43 @@ namespace Cocorra.BLL.Services.Analytics
                 ActiveHosts, new MetricContract
                 {
                     MetricKey = ActiveHosts,
+                    Name = "Distinct Active Hosts",
+                    BusinessPurpose = "Cocorra's leading indicator. Demand cannot exceed supply: if hosts stop running rooms, every downstream participation metric falls with a lag, so this moves first.",
+                    TechnicalDefinition = "Distinct Rooms.HostId with at least one room created in each period of the window.",
+                    Formula = "COUNT(DISTINCT Rooms.HostId) GROUP BY period(Rooms.CreatedAt)",
+                    TrustLevel = MetricTrustLevel.Verified,
+                    Exclusions = { "Hosts with no room in the period: absence is the signal, not a gap to fill" },
+                    Limitations =
+                    {
+                        "Counts hosts who created a room, not hosts who ran a good one: a created-and-abandoned room counts the same as a full session",
+                        "On /Analytics/Platform/Health the multi-day figure is the MAX of the daily distinct counts, which is a LOWER BOUND on the window's true distinct host count: summing daily distincts would double-count a host active on two days",
+                        "Derived from Rooms, which is relational and never purged, so this reaches back to the platform's first day"
+                    },
+                    ValidationMethod = "Distinct host count reconciles against DailyHostMetrics and against Rooms grouped by HostId for the same period."
+                }
+            },
+            {
+                // Split out of M-200 during the Phase-1 reconciliation. M-200 was attached to
+                // both /Analytics/Supply/Health (whose headline series is DistinctHosts) and
+                // /Analytics/Rooms (which has no host count at all), while its contract text
+                // described a room count. One key cannot mean both; a reader of the trust
+                // envelope on supply health was being told the platform's leading indicator
+                // counts rooms.
+                RoomsGoneLive, new MetricContract
+                {
+                    MetricKey = RoomsGoneLive,
                     Name = "Rooms Gone Live",
-                    BusinessPurpose = "Measures platform voice supply and coach activity.",
-                    TechnicalDefinition = "Total count of rooms that transitioned to Live status in the window.",
+                    BusinessPurpose = "Volume of voice supply actually delivered, as opposed to scheduled.",
+                    TechnicalDefinition = "Count of rooms created in the window whose status is anything other than Scheduled.",
                     Formula = "COUNT(Rooms) WHERE Status != Scheduled AND CreatedAt IN window",
                     TrustLevel = MetricTrustLevel.Verified,
                     Exclusions = { "Scheduled rooms that were cancelled before starting" },
-                    Limitations = { "Derived from Rooms.CreatedAt, which is relational and never purged, so history is complete" },
-                    ValidationMethod = "Exact count from Rooms table where Status != Scheduled."
+                    Limitations =
+                    {
+                        "Inferred from terminal status rather than observed at go-live: room_went_live (AN-017) is the direct signal and is behind Analytics:EnableNewEventEmission",
+                        "Derived from Rooms.CreatedAt, which is relational and never purged, so history is complete"
+                    },
+                    ValidationMethod = "Exact count from Rooms where Status != Scheduled; reconciles against DailyPlatformMetrics.RoomsGoneLive."
                 }
             },
             {
@@ -199,10 +231,17 @@ namespace Cocorra.BLL.Services.Analytics
                     BusinessPurpose = "Supply-side view of how many rooms are created and how many go live.",
                     TechnicalDefinition = "Rooms bucketed by CreatedAt with status and category breakdowns.",
                     Formula = "COUNT(*) GROUP BY bucket(CreatedAt), Status, Category",
+                    // Still CONDITIONALLY RELIABLE after the duration removal, and not because of
+                    // it: room status is read as-of-now while rooms are bucketed by CreatedAt, so
+                    // historical buckets are re-labelled as rooms end. Same defect class as D-3.
                     TrustLevel = MetricTrustLevel.ConditionallyReliable,
                     Exclusions = { "None" },
-                    Limitations = { "AvgDurationHours derives from the scheduled StartDate rather than the actual go-live time, so it measures schedule length, not airtime" },
-                    ValidationMethod = "Room counts reconcile against DailyPlatformMetrics.RoomsCreated."
+                    Limitations =
+                    {
+                        "Status counts are CURRENT, not as-at-period: a room created Live and later Ended counts as Ended in every historical bucket, so the Live/Ended split of a past period changes over time",
+                        "AvgDurationHours was REMOVED from this response (TRUST-09): it averaged Room.DurationHours, a host-typed scheduling field defaulting to 2, not an observed duration. Room airtime stays unmeasured until room_ended.actualDurationSeconds (AN-019) has history"
+                    },
+                    ValidationMethod = "Room counts reconcile against DailyPlatformMetrics.RoomsCreated; response asserted to contain no duration field."
                 }
             },
             {
@@ -278,6 +317,30 @@ namespace Cocorra.BLL.Services.Analytics
                         "Superseded by M-102. Do not use for decisions"
                     },
                     ValidationMethod = "None. This metric is graded UNRELIABLE and is retained only for continuity; validate against M-102 instead."
+                }
+            },
+            {
+                // GET /Analytics/Funnel previously declared M-507, the SEQUENTIAL funnel, while
+                // computing the non-sequential one. That is the same defect class as the M-200
+                // mis-attachment: a complete, well-formed contract describing something the
+                // endpoint does not do — and here it described the CORRECTED behaviour, so the
+                // trust envelope was certifying the defect as fixed on the route that still has it.
+                LegacyIndependentFunnel, new MetricContract
+                {
+                    MetricKey = LegacyIndependentFunnel,
+                    Name = "Legacy Independent-Step Funnel (deprecated)",
+                    BusinessPurpose = "Retained only so existing dashboard panels keep rendering until the M-507 cutover.",
+                    TechnicalDefinition = "Count of distinct users per step, each step counted INDEPENDENTLY with no ordering constraint between them.",
+                    Formula = "per step: COUNT(DISTINCT UserId) WHERE EventType = step",
+                    TrustLevel = MetricTrustLevel.Unreliable,
+                    Exclusions = { "Events with no UserId" },
+                    Limitations =
+                    {
+                        "NOT A FUNNEL: steps are counted independently, so the result can WIDEN downward — a later step may report more users than an earlier one (defect D-5)",
+                        "No ordering is enforced, so a user who performed step 3 before step 1 counts at both",
+                        "Superseded by M-507 on GET /Analytics/Activation/Funnel. Do not use for decisions"
+                    },
+                    ValidationMethod = "None. Graded UNRELIABLE and retained only for continuity; validate against M-507 instead."
                 }
             },
             {
@@ -421,6 +484,31 @@ namespace Cocorra.BLL.Services.Analytics
                         "Hard deletes remove non-returners, biasing every row upward until AN-013 lands"
                     },
                     ValidationMethod = "Every cohort's first cell is 100%; each user appears in exactly one cohort."
+                }
+            },
+            {
+                StageFunnel, new MetricContract
+                {
+                    MetricKey = StageFunnel,
+                    Name = "Stage Participation Funnel",
+                    BusinessPurpose = "Locates where the listener-to-speaker journey breaks. This is the product's central unanswered question: Cocorra's value depends on participants speaking, and until now nothing showed which control point stops them.",
+                    TechnicalDefinition = "Sequential per-(room, participant) progression across room_joined, hand_raised, stage_promoted and mic_activated, scoped to a single RoomId, with time ordering enforced and room hosts excluded.",
+                    Formula = "Per (RoomId, UserId): first(step_1) <= first(step_2) <= ... <= first(step_N); count of pairs satisfying the prefix through step N",
+                    TrustLevel = MetricTrustLevel.Experimental,
+                    Exclusions =
+                    {
+                        "Room hosts: a host is on stage by construction and would complete every step spuriously",
+                        "Events with no RoomId: a participation cannot be placed in a journey without a room",
+                        "Repeat events within a step: only the first occurrence per (room, participant) counts toward the funnel"
+                    },
+                    Limitations =
+                    {
+                        "CANNOT BE BACKFILLED: hand_raised and stage_promoted were never captured before AN-017/AN-018, so the series starts at the deployment date, not at the start of the requested window",
+                        "Steps 2 and 3 are behind Analytics:EnableHighFrequencyEvents and Analytics:EnableNewEventEmission, both defaulting to off. While either is off the step returns null with isMeasured=false and MUST render as a visible gap, never as 0",
+                        "A participant promoted directly by the host without raising a hand drops out at step 2 by construction; that population is reported separately as directPromotionsWithoutHandRaise so the drop is not misread",
+                        "Rates are not segmented by SelectionMode, so automatic and manual stage rooms are pooled: two different mechanisms averaged into one figure"
+                    },
+                    ValidationMethod = "(1) Monotonicity across all four steps for any input. (2) A mic_activated with no preceding stage_promoted in the same room does not count at step 4. (3) An uninstrumented step returns null with a NotMeasuredReason, never 0. (4) Repeated hand raises by one participant count once in Count and twice in TotalEvents."
                 }
             }
         };

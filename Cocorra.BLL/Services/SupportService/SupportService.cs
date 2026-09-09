@@ -16,6 +16,7 @@ using Cocorra.DAL.Repository.SupportRepository;
 using Microsoft.AspNetCore.Identity;
 using Cocorra.BLL.Services.NotificationService;
 using Cocorra.BLL.Services.EventTracking;
+using Microsoft.Extensions.Logging;
 
 namespace Cocorra.BLL.Services.SupportService
 {
@@ -28,6 +29,7 @@ namespace Cocorra.BLL.Services.SupportService
         private readonly IRealTimeNotifier _realTimeNotifier;
         private readonly IPushNotificationService _pushService;
         private readonly IEventTracker _eventTracker;
+        private readonly ILogger<SupportService> _logger;
 
         public SupportService(
             ISupportRepository supportRepo,
@@ -36,7 +38,8 @@ namespace Cocorra.BLL.Services.SupportService
             INotificationRepository notificationRepo,
             IRealTimeNotifier realTimeNotifier,
             IPushNotificationService pushService,
-            IEventTracker eventTracker)
+            IEventTracker eventTracker,
+            ILogger<SupportService> logger)
         {
             _supportRepo = supportRepo;
             _uploadImage = uploadImage;
@@ -45,6 +48,7 @@ namespace Cocorra.BLL.Services.SupportService
             _realTimeNotifier = realTimeNotifier;
             _pushService = pushService;
             _eventTracker = eventTracker;
+            _logger = logger;
         }
 
         public async Task<Response<string>> SubmitTicketAsync(Guid? userId, SubmitSupportTicketDto dto)
@@ -185,8 +189,12 @@ namespace Cocorra.BLL.Services.SupportService
                     var muteUser = await _userManager.FindByIdAsync(report.ReportedUserId.Value.ToString());
                     if (muteUser == null) return NotFound<string>("Reported user not found.");
 
+                    // Held in a variable rather than recomputed: the push below sends this
+                    // exact instant to the app, and two calls to UtcNow would not agree.
+                    var muteLockoutEnd = DateTimeOffset.UtcNow.AddHours(24);
+
                     await _userManager.SetLockoutEnabledAsync(muteUser, true);
-                    await _userManager.SetLockoutEndDateAsync(muteUser, DateTimeOffset.UtcNow.AddHours(24));
+                    await _userManager.SetLockoutEndDateAsync(muteUser, muteLockoutEnd);
 
                     // Force kick from any active room via SignalR
                     await _realTimeNotifier.ForceLogoutAsync(
@@ -207,9 +215,19 @@ namespace Cocorra.BLL.Services.SupportService
 
                     if (!string.IsNullOrEmpty(muteUser?.FcmToken))
                     {
-                        var data = new Dictionary<string, string> { { "type", "account_locked" } };
+                        // Data-only, per the account_locked contract: empty title and body are
+                        // what stop Firebase attaching a Notification object, so the app handles
+                        // the redirect to BannedScreen itself instead of the OS showing a pop-up.
+                        // lockout_end is how the app tells a 24h mute from a permanent ban now
+                        // that there is no body to read it from; muteNotification is still
+                        // persisted, so the wording survives in the notifications list.
+                        var data = new Dictionary<string, string>
+                        {
+                            { "type", "account_locked" },
+                            { "lockout_end", muteLockoutEnd.ToString("o") }
+                        };
                         await _pushService.SendPushNotificationAsync(
-                            muteUser.FcmToken, muteNotification.Title, muteNotification.Message, data);
+                            muteUser.FcmToken, "", "", data);
                     }
 
                     report.Status = "Resolved";
@@ -304,7 +322,53 @@ namespace Cocorra.BLL.Services.SupportService
         }
 
         // --- Chat Support Methods ---
-        
+
+        /// <summary>
+        /// Pushes a support message to the other party, so it still arrives when the app is
+        /// backgrounded, locked or terminated — SignalR only reaches a live connection.
+        ///
+        /// data.type is "support_chat", which is what tells the app to deep-link to the
+        /// messaging screen, and chatId lets it open this conversation rather than the list.
+        /// The app mutes the notification itself when the chat is already on screen.
+        ///
+        /// Never throws: a failed push must not fail the message that was already written.
+        /// </summary>
+        private async Task SendSupportChatPushAsync(
+            string? recipientUserId, Guid chatId, string title, string content)
+        {
+            if (string.IsNullOrEmpty(recipientUserId))
+            {
+                return;
+            }
+
+            try
+            {
+                var recipient = await _userManager.FindByIdAsync(recipientUserId);
+                if (string.IsNullOrEmpty(recipient?.FcmToken))
+                {
+                    return;
+                }
+
+                var data = new Dictionary<string, string>
+                {
+                    { "type", "support_chat" },
+                    { "chatId", chatId.ToString() }
+                };
+
+                // Content is client-supplied and may be a JSON envelope; the tray would
+                // print it verbatim. See MessagePreview.
+                await _pushService.SendPushNotificationAsync(
+                    recipient.FcmToken, title, MessagePreview.ForNotificationBody(content), data);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Support chat push failed. ChatId: {ChatId}, RecipientId: {RecipientId}",
+                    chatId, recipientUserId);
+            }
+        }
+
+
         public async Task<Response<SendMessageResultDto>> SendMessageAsync(string userId, SendMessageDto dto)
         {
             var chat = await _supportRepo.GetUserOpenChatAsync(userId);
@@ -359,6 +423,24 @@ namespace Cocorra.BLL.Services.SupportService
                 Message = messageDto,
                 IsNewChat = isNew
             };
+
+            // Only an Active chat has a counterpart to push to. While the chat is Pending it
+            // belongs to no one, so the admins' dashboard alert (NewPendingChatAlert over
+            // SignalR) stays the only signal — pushing to every admin would notify people
+            // about a conversation none of them owns yet.
+            if (!string.IsNullOrEmpty(chat.AdminId))
+            {
+                var sender = await _userManager.FindByIdAsync(userId);
+                var senderName = sender is null
+                    ? "Support request"
+                    : $"{sender.FirstName} {sender.LastName}".Trim();
+
+                await SendSupportChatPushAsync(
+                    chat.AdminId,
+                    chat.Id,
+                    string.IsNullOrWhiteSpace(senderName) ? "Support request" : senderName,
+                    dto.Content);
+            }
 
             return Success(resultDto);
         }
@@ -424,6 +506,10 @@ namespace Cocorra.BLL.Services.SupportService
                 Message = messageDto,
                 UserId = chat.UserId
             };
+
+            // "Cocorra Support" rather than the admin's name: which admin claimed the chat
+            // is not something the user is shown anywhere else in the product.
+            await SendSupportChatPushAsync(chat.UserId, chat.Id, "Cocorra Support", dto.Content);
 
             return Success(resultDto);
         }

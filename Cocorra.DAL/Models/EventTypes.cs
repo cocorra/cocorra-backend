@@ -128,9 +128,31 @@ namespace Cocorra.DAL.Models
         // ── P3: failure paths and media telemetry ───────────────────────────
 
         /// <summary>
-        /// AN-041. A user-facing operation failed. Cocorra has no error tracking of any kind,
-        /// so every funnel currently measures only the happy path: a drop-off caused by a bug
-        /// is indistinguishable from a user changing their mind.
+        /// AN-041, REDEFINED. A user-initiated <b>core-loop operation did not complete</b>,
+        /// carrying a reason code from a closed set.
+        ///
+        /// <para>
+        /// The original framing was "failure-path events" for general error tracking. That
+        /// scope was rejected: general error tracking needs an APM or a log sink (AN-042), not
+        /// a row in an analytics table with 180-day retention, and an event emitted from
+        /// wherever an exception happens to be thrown produces an unqueryable pile rather than
+        /// a metric. What survives is the part that actually serves a decision — the points
+        /// where a funnel step is refused, which are today indistinguishable from a user
+        /// simply not proceeding.
+        /// </para>
+        ///
+        /// <para>
+        /// Emitted ONLY from the sites enumerated in <see cref="TrackedOperations"/>, with a
+        /// reason from <see cref="OperationFailureReasons"/>, immediately before the rejection
+        /// is thrown — the rejection IS the fact being recorded, so emitting afterwards would
+        /// mean never emitting at all. Same pattern as <see cref="SpeakerTimeExhausted"/>.
+        /// </para>
+        ///
+        /// <para>
+        /// Not idempotent by design: a user retrying a join three times produces three events.
+        /// Collapsing them would hide that retrying was necessary, which is the more severe
+        /// experience.
+        /// </para>
         /// </summary>
         public const string OperationFailed             = "operation_failed";
 

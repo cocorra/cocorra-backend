@@ -41,7 +41,9 @@ PAGE → DECISIONS SUPPORTED → QUESTIONS ANSWERED → METRICS
 
 **Drill-down** — Each signal links directly to the page that diagnoses it.
 
-**Gating requirement (RECOMMENDATION)** — this page must not ship until **4–6 weeks of stable read-model history exist**.
+**Gating requirement (RECOMMENDATION)** — this page must not ship until a baseline exists.
+
+> **SUPERSEDED IN PART (2026-09-02).** This blueprint assumed 4–6 weeks of *forward* accumulation. The shipped `DecisionCenterService` requires **4 complete weeks present in `DailyPlatformMetrics`**, which the backfill can supply retroactively. Gate the page on `hasBaseline` from `GET /Analytics/Decisions`, not on elapsed time. See `28-production-analytics-activation.md` §5.
 
 **INFERENCE** — detection requires a baseline. **FACT** — no baseline exists for any Cocorra metric, and raw history is capped at 180 days. Shipping change detection without one produces alerts on ordinary variance; a dashboard that cries wolf in its first month is ignored permanently, and that outcome is harder to reverse than a delayed launch.
 

@@ -74,7 +74,7 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
         /// (UTC+3). Returned rather than applied server-side so the caller decides how to
         /// present it and the underlying figure stays unambiguous.
         /// </summary>
-        public int SuggestedDisplayOffsetMinutes { get; set; } = 180;
+        public int SuggestedDisplayOffsetMinutes { get; set; } = AnalyticsDisplayDefaults.TimeZoneOffsetMinutes;
 
         /// <summary>
         /// Earliest room creation backing this series. Rooms are relational and never purged,

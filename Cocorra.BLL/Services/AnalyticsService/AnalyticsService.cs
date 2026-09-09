@@ -1,8 +1,10 @@
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.Analytics;
+using Cocorra.BLL.Services.EventTracking;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Repository.AnalyticsRepository;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace Cocorra.BLL.Services.AnalyticsService
 {
@@ -30,14 +32,29 @@ namespace Cocorra.BLL.Services.AnalyticsService
         // Cache TTL: 10 minutes — balances freshness vs. DB load.
         private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
+        /// <summary>
+        /// AN-036. Minutes to add to any UTC hour in a response to reach the audience's local
+        /// hour. Read from configuration once, with the shared default as the fallback.
+        /// </summary>
+        private readonly int _displayOffsetMinutes;
+
+        /// <summary>
+        /// <paramref name="options"/> is optional so existing construction sites — including
+        /// the unit tests — keep working unchanged. A missing configuration section yields the
+        /// documented default rather than a zero offset, because silently falling back to UTC
+        /// is the failure this option exists to prevent.
+        /// </summary>
         public AnalyticsService(
             IAnalyticsRepository analyticsRepository,
             IMemoryCache cache,
-            IMetricRegistry metricRegistry)
+            IMetricRegistry metricRegistry,
+            IOptions<EventTrackingOptions>? options = null)
         {
             _analyticsRepository = analyticsRepository;
             _cache = cache;
             _metricRegistry = metricRegistry;
+            _displayOffsetMinutes = options?.Value.DisplayTimeZoneOffsetMinutes
+                                    ?? AnalyticsDisplayDefaults.TimeZoneOffsetMinutes;
         }
 
         /// <summary>
@@ -76,7 +93,16 @@ namespace Cocorra.BLL.Services.AnalyticsService
                 trustLevel = contracts.Count == 0
                     ? MetricTrustLevel.Unreliable.ToString()
                     : contracts.Max(c => Enum.Parse<MetricTrustLevel>(c.trustLevel)).ToString(),
-                metrics = contracts
+                metrics = contracts,
+                // AN-036. Every timestamp and hour bucket in the payload is UTC. This is the
+                // offset a client applies for display, and it is on the envelope rather than on
+                // individual DTOs so a caller cannot receive an hour-of-day series without it.
+                // Applying it server-side was rejected: the stored figure must stay unambiguous.
+                display = new
+                {
+                    timeZone = "UTC",
+                    suggestedDisplayOffsetMinutes = _displayOffsetMinutes
+                }
             };
         }
 
@@ -184,7 +210,9 @@ namespace Cocorra.BLL.Services.AnalyticsService
             var result = await GetOrCreateWithLockAsync(_cache, key, _roomLock, () =>
                 _analyticsRepository.GetRoomAnalyticsAsync(fromUtc, toUtc, topN));
 
-            return Success(result, BuildMeta(MetricRegistry.RoomAnalytics, MetricRegistry.ActiveHosts));
+            // M-205, not M-200: this payload counts rooms and carries no host figure. M-200 is
+            // Distinct Active Hosts and belongs to /Analytics/Supply/Health.
+            return Success(result, BuildMeta(MetricRegistry.RoomAnalytics, MetricRegistry.RoomsGoneLive));
         }
 
         private static readonly SemaphoreSlim _socialLock = new(1, 1);
@@ -296,6 +324,90 @@ namespace Cocorra.BLL.Services.AnalyticsService
             return Success(result, BuildMeta(MetricRegistry.SupportVolume));
         }
 
+        private static readonly SemaphoreSlim _platformHealthLock = new(1, 1);
+
+        /// <summary>
+        /// A-1 — Platform Health.
+        ///
+        /// Defaults to a rolling 7 days rather than the service-wide 30, because the north star
+        /// M-100 is defined over a 7-day window. Serving it over 30 days by default would return
+        /// a figure that is not the metric its contract describes.
+        /// </summary>
+        public async Task<Response<PlatformHealthDto>> GetPlatformHealthAsync(
+            DateTime? from = null,
+            DateTime? to = null,
+            string? compareTo = "previous_period")
+        {
+            var toUtc = ResolveTo(to);
+            var fromUtc = from?.ToUniversalTime() ?? toUtc.Date.AddDays(-6);
+
+            if (fromUtc > toUtc)
+            {
+                return BadRequest<PlatformHealthDto>("'from' must be earlier than or equal to 'to'.");
+            }
+
+            // Only one comparison mode is supported. An unrecognised value is rejected rather
+            // than silently ignored: a caller asking for compareTo=previous_year and receiving a
+            // previous-week comparison without complaint would draw wrong conclusions from a
+            // response that looked correct.
+            bool compare;
+            if (string.IsNullOrWhiteSpace(compareTo) || compareTo.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                compare = false;
+            }
+            else if (compareTo.Equals("previous_period", StringComparison.OrdinalIgnoreCase))
+            {
+                compare = true;
+            }
+            else
+            {
+                return BadRequest<PlatformHealthDto>(
+                    "'compareTo' must be 'previous_period' or 'none'.");
+            }
+
+            var key = $"analytics:platformhealth:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}:{compare}";
+
+            var result = await GetOrCreateWithLockAsync(_cache, key, _platformHealthLock, () =>
+                _analyticsRepository.GetPlatformHealthAsync(fromUtc, toUtc, compare));
+
+            return Success(result, BuildMeta(
+                MetricRegistry.WeeklyParticipatingUsers,
+                MetricRegistry.SpeakingConversion,
+                MetricRegistry.ActiveHosts,
+                MetricRegistry.RoomsGoneLive,
+                MetricRegistry.VoiceVerificationFunnel,
+                MetricRegistry.UserRegistrations));
+        }
+
+        private static readonly SemaphoreSlim _stageFunnelLock = new(1, 1);
+
+        /// <summary>
+        /// AN-027 / M-400 — stage participation funnel.
+        ///
+        /// The date range is validated rather than silently swapped: a caller asking for a
+        /// backwards window has a bug, and returning an empty funnel would hide it behind a
+        /// number that looks like "nobody participated".
+        /// </summary>
+        public async Task<Response<StageFunnelDto>> GetStageFunnelAsync(
+            DateTime? from = null,
+            DateTime? to = null)
+        {
+            var fromUtc = ResolveFrom(from);
+            var toUtc = ResolveTo(to);
+
+            if (fromUtc > toUtc)
+            {
+                return BadRequest<StageFunnelDto>("'from' must be earlier than or equal to 'to'.");
+            }
+
+            var key = $"analytics:stagefunnel:{fromUtc:yyyyMMddHH}:{toUtc:yyyyMMddHH}";
+
+            var result = await GetOrCreateWithLockAsync(_cache, key, _stageFunnelLock, () =>
+                _analyticsRepository.GetStageFunnelAsync(fromUtc, toUtc));
+
+            return Success(result, BuildMeta(MetricRegistry.StageFunnel));
+        }
+
         /// <summary>Default onboarding sequence for M-507.</summary>
         private static readonly string[] DefaultActivationSteps =
         {
@@ -385,7 +497,10 @@ namespace Cocorra.BLL.Services.AnalyticsService
             var result = await GetOrCreateWithLockAsync(_cache, key, _funnelLock, () =>
                 _analyticsRepository.GetFunnelAsync(steps, fromUtc, toUtc));
 
-            return Success(result, BuildMeta(MetricRegistry.ActivationFunnel));
+            // M-507-LEGACY, not M-507. This route counts each step independently, so the result
+            // can widen downward (D-5). Declaring the sequential contract here would have the
+            // trust envelope certify the defect as fixed on the one route that still has it.
+            return Success(result, BuildMeta(MetricRegistry.LegacyIndependentFunnel));
         }
 
         public async Task<Response<Dictionary<int, double>>> GetRetentionCohortAsync(

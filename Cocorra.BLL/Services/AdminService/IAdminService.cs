@@ -17,6 +17,11 @@ namespace Cocorra.BLL.Services.AdminService
         /// </summary>
         Task<Response<string>> ChangeUserStatusAsync(Guid userId, UserStatus newStatus, Guid adminId, bool isBulk = false);
         Task<Response<BulkChangeStatusResultDto>> BulkChangeUserStatusAsync(BulkChangeStatusDto model, Guid adminId);
-        Task<Response<string>> BlockDeviceAndEmailAsync(BlockDeviceAndEmailDto model);
+        /// <summary>
+        /// Hard ban: bans the account behind the email and blocks every device the registry
+        /// has seen that account authenticate from. Takes no device input by design — see
+        /// <see cref="BlockDeviceAndEmailDto"/>. adminId is required for attribution (AN-011).
+        /// </summary>
+        Task<Response<BlockDeviceAndEmailResultDto>> BlockDeviceAndEmailAsync(BlockDeviceAndEmailDto model, Guid adminId);
     }
 }

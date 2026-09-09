@@ -176,7 +176,7 @@ parallel:  AN-003 → AN-004 → AN-017 → AN-018 → AN-027
 | **B-1** | Runtime measurement (AN-001) | External observation | Log grep + 2 read-only queries |
 | **B-2** | `EventId` unique constraint | Schema | **Hard.** Retry without it creates duplicates instead of preventing loss |
 | **B-3** | **Data-protection decision** | **Non-engineering** | **Cost of delay is irreversible** — raise on day one |
-| **B-4** | History accumulation | Time | 4–6 weeks; compressible only by starting earlier |
+| **B-4** | History accumulation | Time | 4–6 weeks *as planned*. **Partly superseded**: read-model history is backfillable, so the Decision Center gate is satisfiable without waiting. Only the AN-017/AN-018 event clocks and RM-5 snapshots genuinely accumulate forward. See `28-` §5 |
 | **B-5** | Test provider | One project line | `EFCore.InMemory` does not enforce unique indexes — idempotency tests would pass vacuously |
 
 ---

@@ -10,6 +10,7 @@ using MediatR;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Cocorra.BLL.Services.NotificationService;
 using Microsoft.AspNetCore.Identity;
@@ -28,6 +29,7 @@ public class RoomService : ResponseHandler, IRoomService
     private readonly ILiveKitService _liveKitService;
     private readonly LiveKitSettings _liveKitSettings;
     private readonly IEventTracker _eventTracker;
+    private readonly ILogger<RoomService> _logger;
 
     private static readonly HashSet<int> AllowedDurations = new() { 2, 3 };
 
@@ -40,7 +42,8 @@ public class RoomService : ResponseHandler, IRoomService
         UserManager<ApplicationUser> userManager,
         ILiveKitService liveKitService,
         IOptions<LiveKitSettings> liveKitSettings,
-        IEventTracker eventTracker)
+        IEventTracker eventTracker,
+        ILogger<RoomService> logger)
     {
         _roomRepo = roomRepo;
         _mediator = mediator;
@@ -51,6 +54,7 @@ public class RoomService : ResponseHandler, IRoomService
         _liveKitService = liveKitService;
         _liveKitSettings = liveKitSettings.Value;
         _eventTracker = eventTracker;
+        _logger = logger;
     }
 
     private string? BuildFullUrl(string? relativePath)
@@ -335,6 +339,16 @@ public class RoomService : ResponseHandler, IRoomService
         var room = await _roomRepo.GetByIdAsync(roomId);
         if (room == null) return NotFound<RoomStateDto>("Room not found.");
 
+        // This method mints a LiveKit token, and GET /Room/{id}/Token exists solely to call it,
+        // so room status is an authorization check here and not merely a state read. It used to
+        // rely on participants being flipped to Left by EndRoomAsync to keep credentials away
+        // from a finished room — an indirect guard that any future end path could bypass, as
+        // DeleteAccountAsync did. Check the room's own status instead.
+        if (room.Status != RoomStatus.Live)
+        {
+            return BadRequest<RoomStateDto>("This room is not live.");
+        }
+
         var currentParticipant = await _roomRepo.GetParticipantAsync(roomId, currentUserId);
         if (currentParticipant == null || currentParticipant.Status != ParticipantStatus.Active)
         {
@@ -574,7 +588,8 @@ public class RoomService : ResponseHandler, IRoomService
         }
     }
 
-    public async Task<Response<string>> EndRoomAsync(Guid roomId, Guid hostId)
+    public async Task<Response<string>> EndRoomAsync(
+        Guid roomId, Guid hostId, string endReason = RoomEndReasons.HostEnded)
     {
         var room = await _roomRepo.GetByIdAsync(roomId);
         if (room == null) return NotFound<string>("Room not found.");
@@ -586,6 +601,10 @@ public class RoomService : ResponseHandler, IRoomService
             return BadRequest<string>("This room has already ended.");
 
         room.Status = RoomStatus.Ended;
+
+        // The room is terminal now, so the grace window is moot. Cleared so a stale timestamp
+        // cannot make an ended room look reapable to HostReconnectGraceService.
+        room.HostDisconnectedAt = null;
         await _roomRepo.UpdateAsync(room);
 
         var participants = await _roomRepo.GetRoomParticipantsAsync(roomId);
@@ -635,7 +654,7 @@ public class RoomService : ResponseHandler, IRoomService
                 durationHours = (DateTime.UtcNow - room.StartDate).TotalHours,
                 participantCount = participants.Count,
                 actualDurationSeconds = Math.Round((DateTime.UtcNow - room.StartDate).TotalSeconds),
-                endReason = "host_ended",
+                endReason,
                 peakParticipants = participants.Count,
                 category = room.Category.ToString()
             },
@@ -649,7 +668,81 @@ public class RoomService : ResponseHandler, IRoomService
             }
         }
 
+        // Tear down the media plane last, once the end is committed. Ending the room in the
+        // database and broadcasting RoomEnded only asks clients to leave — anyone who ignores
+        // that, or never receives it, stays on the audio bridge and can still be heard. Every
+        // end path reaches this method, so this is the one place it needs to happen.
+        try
+        {
+            await _liveKitService.CloseRoomAsync(roomId);
+        }
+        catch (Exception ex)
+        {
+            // Logged, not thrown: the room IS ended, and failing the caller here would tell a
+            // host their end did not work when it did. LiveKit's own empty-room timeout is the
+            // backstop if this call never succeeds.
+            _logger.LogError(ex,
+                "Room {RoomId} was ended but the LiveKit room could not be deleted. " +
+                "Participants may remain on the audio bridge until LiveKit times the room out.",
+                roomId);
+        }
+
         return Success("Room has been ended successfully.");
+    }
+
+    public async Task<bool> MarkHostDisconnectedAsync(Guid roomId, Guid hostId)
+    {
+        var room = await _roomRepo.GetByIdAsync(roomId);
+
+        if (room is null || room.HostId != hostId || room.Status != RoomStatus.Live)
+            return false;
+
+        // Already counting down. Re-stamping would let a host whose connection is flapping
+        // renew the deadline indefinitely, so the audience would never learn the room is dead.
+        if (room.HostDisconnectedAt.HasValue)
+            return false;
+
+        room.HostDisconnectedAt = DateTime.UtcNow;
+        await _roomRepo.UpdateAsync(room);
+        await _roomRepo.SaveChangesAsync();
+
+        return true;
+    }
+
+    public async Task<bool> ClearHostDisconnectedAsync(Guid roomId, Guid hostId)
+    {
+        var room = await _roomRepo.GetByIdAsync(roomId);
+
+        if (room is null || room.HostId != hostId || !room.HostDisconnectedAt.HasValue)
+            return false;
+
+        room.HostDisconnectedAt = null;
+        await _roomRepo.UpdateAsync(room);
+        await _roomRepo.SaveChangesAsync();
+
+        return true;
+    }
+
+    public async Task<IReadOnlyList<Guid>> EndRoomsWithExpiredHostGraceAsync(DateTime disconnectedBefore)
+    {
+        var expired = await _roomRepo.GetRoomsWithExpiredHostGraceAsync(disconnectedBefore);
+        if (expired.Count == 0)
+            return Array.Empty<Guid>();
+
+        var ended = new List<Guid>(expired.Count);
+
+        foreach (var room in expired)
+        {
+            // Through EndRoomAsync rather than setting Status directly: it is what closes the
+            // open mic segments and emits the speaking-time events, and a second implementation
+            // of "end a room" would drift from this one within a release.
+            var result = await EndRoomAsync(room.Id, room.HostId, RoomEndReasons.HostDisconnected);
+
+            if (result.Succeeded)
+                ended.Add(room.Id);
+        }
+
+        return ended;
     }
 
     public async Task LeaveRoomCleanupAsync(Guid roomId, Guid userId)

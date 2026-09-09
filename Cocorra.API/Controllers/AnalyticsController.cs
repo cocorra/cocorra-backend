@@ -94,7 +94,10 @@ namespace Cocorra.API.Controllers
         }
 
         /// <summary>
-        /// Participation metrics: spoken time totals, top speakers, peak join hours (UTC).
+        /// Participation metrics: spoken-time totals, distinct non-host speakers, peak join
+        /// hours (UTC). Top speakers and hand-raise counts are deliberately absent — AN-005
+        /// removed them from the contract rather than zeroing them, because neither is
+        /// measurable from current data and a 0 would read as a fact.
         /// </summary>
         /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
         /// <param name="to">UTC end date (optional, default = now).</param>
@@ -104,6 +107,64 @@ namespace Cocorra.API.Controllers
             [FromQuery] DateTime? to = null)
         {
             var result = await _analyticsService.GetParticipationStatsAsync(from, to);
+            return Ok(result);
+        }
+
+        /// <summary>
+        /// A-1: Platform Health — the north star (M-100 Weekly Participating Users) and its
+        /// supporting inputs in one call, each with an equal-length preceding window.
+        ///
+        /// Supersedes <c>GET /Analytics/Summary</c>, which bundles components of differing trust
+        /// and reports one aggregate verdict over them. Here every figure carries its own trust
+        /// contract in <c>Meta.metrics</c> and its own drill-down route.
+        ///
+        /// Read from the read models (RM-1), so until <c>AnalyticsAggregationService</c> has run
+        /// in production every metric returns <c>isMeasured: false</c> with a reason — the value
+        /// is unknown, not zero. <b>Clients must render that as a labelled gap.</b>
+        /// </summary>
+        /// <param name="from">UTC start date (optional, default = 7 days ago — M-100's own window).</param>
+        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="compareTo">"previous_period" (default) or "none".</param>
+        [HttpGet(Router.AnalyticsRouting.PlatformHealth)]
+        public async Task<IActionResult> GetPlatformHealth(
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] string? compareTo = "previous_period")
+        {
+            var result = await _analyticsService.GetPlatformHealthAsync(from, to, compareTo);
+            if (!result.Succeeded)
+                return BadRequest(result);
+
+            return Ok(result);
+        }
+
+        /// <summary>
+        /// AN-027 / M-400: the stage participation funnel —
+        /// joined room → raised hand → promoted to stage → activated microphone —
+        /// scoped per (room, participant), non-host, strictly time-ordered.
+        ///
+        /// Steps 2 and 3 are behind <c>Analytics:EnableHighFrequencyEvents</c> and
+        /// <c>Analytics:EnableNewEventEmission</c>. While either flag is off the corresponding
+        /// step returns <c>count: null</c> with <c>isMeasured: false</c> and a
+        /// <c>notMeasuredReason</c>.
+        ///
+        /// <b>Clients must render an unmeasured step as a visible, labelled gap — never as 0.</b>
+        /// A zero here reads as "nobody raised their hand", which is a fabricated finding and
+        /// the exact failure this metric exists to avoid. <c>observedParticipations</c> carries
+        /// whatever the step genuinely saw, so a partially instrumented funnel still shows real
+        /// numbers where it has them.
+        /// </summary>
+        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
+        /// <param name="to">UTC end date (optional, default = now).</param>
+        [HttpGet(Router.AnalyticsRouting.StageFunnel)]
+        public async Task<IActionResult> GetStageFunnel(
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
+        {
+            var result = await _analyticsService.GetStageFunnelAsync(from, to);
+            if (!result.Succeeded)
+                return BadRequest(result);
+
             return Ok(result);
         }
 

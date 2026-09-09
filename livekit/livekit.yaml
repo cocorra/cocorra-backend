@@ -15,6 +15,23 @@ logging:
   json: false
   level: info
 
+# ==============================================================================
+# Webhooks — REQUIRED, not optional telemetry.
+#
+# participant_joined is what lets the backend evict someone whose LiveKit token no
+# longer matches the database (a kicked user, or anyone holding a credential for a
+# room that has ended). LiveKit access tokens are stateless and cannot be revoked,
+# so without this feed the only limit on a kicked user rejoining is the token's own
+# expiry. See Cocorra.API/Controllers/LiveKitWebhookController.cs.
+#
+# api_key must name one of the keys above; LiveKit signs each delivery with the
+# matching secret and the backend verifies it via the SDK's WebhookReceiver.
+# ==============================================================================
+webhook:
+  api_key: APIbnoqt7M8yCA4
+  urls:
+    - https://api.cocorraapp.com/Api/V1/Webhooks/LiveKit
+
 # WebRTC & Media Engine Configuration
 rtc:
   # TCP fallback port when UDP is blocked

@@ -23,12 +23,13 @@ namespace Cocorra.API.Hubs
         private readonly ILiveKitService _liveKitService;
         private readonly LiveKitSettings _liveKitSettings;
         private readonly IEventTracker _eventTracker;
+        private readonly RoomLifecycleSettings _roomLifecycle;
         private readonly ILogger<RoomHub> _logger;
 
         // Thread-safe mapping: ConnectionId → (UserId, RoomId)
         private static readonly ConcurrentDictionary<string, (Guid UserId, Guid RoomId)> _connections = new();
 
-        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker, ILogger<RoomHub> logger)
+        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker, IOptions<RoomLifecycleSettings> roomLifecycle, ILogger<RoomHub> logger)
         {
             _roomRepo = roomRepo;
             _roomService = roomService;
@@ -36,6 +37,7 @@ namespace Cocorra.API.Hubs
             _liveKitService = liveKitService;
             _liveKitSettings = liveKitSettings.Value;
             _eventTracker = eventTracker;
+            _roomLifecycle = roomLifecycle.Value;
             _logger = logger;
         }
 
@@ -77,22 +79,43 @@ namespace Cocorra.API.Hubs
                 try
                 {
                     _eventTracker.Track(EventTypes.RoomLeft, mapping.UserId, new { roomId = mapping.RoomId });
-                    // Check if this user is the host — if so, end the room entirely
                     var room = await _roomRepo.GetByIdAsync(mapping.RoomId);
+
+                    // The host dropping does NOT end the room. A socket drop is indistinguishable
+                    // here from a lift, a tunnel or a Wi-Fi handoff, and ending on it was fatal:
+                    // an Ended room refuses every rejoin, including the host's own. Instead the
+                    // grace window starts and HostReconnectGraceService closes the room only if
+                    // the host really is gone. A deliberate end still goes through EndRoom.
                     if (room != null && room.HostId == mapping.UserId && room.Status == RoomStatus.Live)
                     {
-                        // Host disconnected — end the room for everyone
-                        await _roomService.EndRoomAsync(mapping.RoomId, mapping.UserId);
+                        var graceStarted = await _roomService.MarkHostDisconnectedAsync(
+                            mapping.RoomId, mapping.UserId);
+
+                        // The host's own mic segment is closed and their row goes to Left, the
+                        // same as any participant — JoinRoom re-activates it when they return.
+                        await _roomService.LeaveRoomCleanupAsync(mapping.RoomId, mapping.UserId);
 
                         var roomIdStr = mapping.RoomId.ToString();
-                        await Clients.Group(roomIdStr).SendAsync("RoomEnded", new
-                        {
-                            RoomId = mapping.RoomId,
-                            Message = "The host has disconnected. This room has been ended."
-                        });
+                        await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomIdStr);
 
-                        // Purge all connections for this room
-                        PurgeRoomConnections(mapping.RoomId);
+                        if (graceStarted)
+                        {
+                            // ReconnectDeadline lets the app show a countdown instead of a
+                            // frozen room, and is absolute so a slow client cannot drift.
+                            await Clients.Group(roomIdStr).SendAsync("HostDisconnected", new
+                            {
+                                RoomId = mapping.RoomId,
+                                GraceSeconds = _roomLifecycle.HostReconnectGraceSeconds,
+                                ReconnectDeadline = DateTime.UtcNow
+                                    .AddSeconds(_roomLifecycle.HostReconnectGraceSeconds)
+                            });
+                        }
+
+                        _logger.LogInformation(
+                            "[HUB-TRACE] Host disconnected, room held open. RoomId={RoomId} HostId={HostId} " +
+                            "GraceStarted={GraceStarted} GraceSeconds={GraceSeconds} Ts={Ts}",
+                            mapping.RoomId, mapping.UserId, graceStarted,
+                            _roomLifecycle.HostReconnectGraceSeconds, Now());
                     }
                     else
                     {
@@ -133,6 +156,41 @@ namespace Cocorra.API.Hubs
             if (!Guid.TryParse(value, out Guid result))
                 throw new HubException($"Invalid {fieldName}.");
             return result;
+        }
+
+        /// <summary>
+        /// AN-041 — records that a core-loop operation did not complete.
+        ///
+        /// Funnelled through one helper on purpose. Five call sites emitting an event inline
+        /// would drift: someone would pass an exception message, someone else would invent a
+        /// reason string, and the closed vocabulary that makes the event queryable would be
+        /// gone within two changes. The only way to emit this event is to name a
+        /// <see cref="TrackedOperations"/> value and an <see cref="OperationFailureReasons"/>
+        /// value, both of which are constants.
+        ///
+        /// Behind <c>Analytics:EnableNewEventEmission</c>: this is low-frequency by nature (a
+        /// refused join is rare next to a successful one), so it belongs in the AN-017
+        /// increment rather than the high-frequency one.
+        /// </summary>
+        private void TrackOperationFailed(
+            string operation,
+            string reason,
+            Guid userId,
+            Guid roomId,
+            object? extra = null)
+        {
+            if (!_eventTracker.NewEventEmissionEnabled)
+            {
+                return;
+            }
+
+            _eventTracker.Track(EventTypes.OperationFailed, userId, new
+            {
+                operation,
+                reason,
+                roomId,
+                extra
+            });
         }
 
         /// <summary>
@@ -202,6 +260,10 @@ namespace Cocorra.API.Hubs
                     "RoomId={RoomId} RoomFound={RoomFound} Status={Status} Ts={Ts}",
                     Context.ConnectionId, userId, roomGuid, room != null,
                     room?.Status.ToString() ?? "(null)", Now());
+
+                // AN-041, site 1 of 5. Before the throw: the rejection is the fact.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.RoomNotLive, userId, roomGuid);
+
                 throw new HubException("Room is not live yet or has ended.");
             }
 
@@ -214,6 +276,11 @@ namespace Cocorra.API.Hubs
                     "[JOINROOM-TRACE] EXIT-B ABORT: no RoomParticipant row (client did not call POST /Room/{{id}}/Join first). " +
                     "ConnectionId={ConnectionId} UserId={UserId} RoomId={RoomId} Ts={Ts}",
                     Context.ConnectionId, userId, roomGuid, Now());
+
+                // AN-041, site 2 of 5. The only reason in the set that indicates a client
+                // sequencing bug rather than a product state — worth being able to count.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.NotAParticipant, userId, roomGuid);
+
                 throw new HubException("You are not a member of this room. Please join via the REST API first.");
             }
             if (participant.Status == ParticipantStatus.PendingApproval)
@@ -223,6 +290,11 @@ namespace Cocorra.API.Hubs
                     "[JOINROOM-TRACE] EXIT-C ABORT: participant PendingApproval. ConnectionId={ConnectionId} " +
                     "UserId={UserId} RoomId={RoomId} Ts={Ts}",
                     Context.ConnectionId, userId, roomGuid, Now());
+
+                // AN-041, site 3 of 5. Nothing errored — the operation simply did not complete,
+                // which is the distinction the event name has to carry.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.PendingHostApproval, userId, roomGuid);
+
                 throw new HubException("Your request is still pending approval from the host.");
             }
             if (participant.Status == ParticipantStatus.Kicked || participant.Status == ParticipantStatus.Rejected)
@@ -232,6 +304,10 @@ namespace Cocorra.API.Hubs
                     "[JOINROOM-TRACE] EXIT-D ABORT: participant {Status}. ConnectionId={ConnectionId} " +
                     "UserId={UserId} RoomId={RoomId} Ts={Ts}",
                     participant.Status, Context.ConnectionId, userId, roomGuid, Now());
+
+                // AN-041, site 4 of 5. An enforcement outcome, and a funnel drop.
+                TrackOperationFailed(TrackedOperations.RoomJoin, OperationFailureReasons.BlockedFromRoom, userId, roomGuid);
+
                 throw new HubException("You are not allowed to join this room.");
             }
 
@@ -259,6 +335,26 @@ namespace Cocorra.API.Hubs
                 participant.IsHandRaised = false;
                 await _roomRepo.UpdateParticipantAsync(participant);
                 await _roomRepo.SaveChangesAsync();
+            }
+
+            // The host is back inside the grace window — cancel the countdown before anything
+            // else, so a slow tail of this method cannot race the sweep into ending the room.
+            if (room.HostId == userId)
+            {
+                var graceCancelled = await _roomService.ClearHostDisconnectedAsync(roomGuid, userId);
+
+                if (graceCancelled)
+                {
+                    await Clients.Group(roomId).SendAsync("HostReconnected", new
+                    {
+                        RoomId = roomGuid
+                    });
+
+                    _logger.LogInformation(
+                        "[HUB-TRACE] Host reconnected within grace window, room continues. " +
+                        "RoomId={RoomId} HostId={HostId} Ts={Ts}",
+                        roomGuid, userId, Now());
+                }
             }
 
             // If this user already has an old connection tracked, remove it first
@@ -482,7 +578,21 @@ namespace Cocorra.API.Hubs
 
             var stageSpeakers = await _roomRepo.GetStageSpeakersAsync(roomGuid);
             if (stageSpeakers.Count >= room.StageCapacity)
+            {
+                // AN-041, site 5 of 5 — the highest-value one. M-400 shows hands raised that
+                // never became promotions; this is what separates "the host ignored them" from
+                // "the host could not act", and those have different fixes (host tooling versus
+                // raising StageCapacity). Tracked against the PARTICIPANT who did not get the
+                // stage, matching stage_promoted's convention rather than room_join_approved's.
+                TrackOperationFailed(
+                    TrackedOperations.StagePromotion,
+                    OperationFailureReasons.StageAtCapacity,
+                    targetGuid,
+                    roomGuid,
+                    new { stageCapacity = room.StageCapacity, stageOccupancy = stageSpeakers.Count });
+
                 throw new HubException("Stage is full. Someone must leave the stage first.");
+            }
 
             var participant = await _roomRepo.GetParticipantAsync(roomGuid, targetGuid);
             if (participant == null) throw new HubException("User not found in room.");
@@ -790,6 +900,22 @@ namespace Cocorra.API.Hubs
                     kickedByHostId = hostId,
                     wasOnStage = participant.IsOnStage
                 });
+            }
+
+            // Disconnect them from the media server too. Marking the row Kicked and telling
+            // the group only stops them going through our hub again — it does nothing to the
+            // audio connection they already hold, so without this a kicked user keeps
+            // listening to the room they were just removed from.
+            try
+            {
+                await _liveKitService.RemoveParticipantAsync(roomGuid, targetGuid);
+            }
+            catch (Exception ex)
+            {
+                // The kick itself is committed; surfacing this would tell the host it failed.
+                _logger.LogError(ex,
+                    "Kicked user {TargetUserId} from room {RoomId} but could not disconnect them " +
+                    "from LiveKit. They may still be receiving audio.", targetGuid, roomGuid);
             }
 
             await Clients.Group(roomId).SendAsync("UserKicked", new

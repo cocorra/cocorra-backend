@@ -67,8 +67,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     RoomId = r.Id,
                     RoomTitle = r.RoomTitle,
                     Category = r.Category.ToString(),
-                    ParticipantCount = r.ParticipantCount,
-                    DurationHours = r.DurationHours
+                    ParticipantCount = r.ParticipantCount
                 })
                 .ToList();
 
@@ -82,8 +81,11 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 EndedRooms = rooms.Count(r => r.Status == RoomStatus.Ended),
                 PrivateRooms = rooms.Count(r => r.IsPrivate),
                 PublicRooms = rooms.Count(r => !r.IsPrivate),
+                // M-205, matching the contract's formula exactly.
+                RoomsGoneLive = rooms.Count(r => r.Status != RoomStatus.Scheduled),
                 AvgParticipantsPerRoom = Math.Round(rooms.Average(r => (double)r.ParticipantCount), 2),
-                AvgDurationHours = Math.Round(rooms.Average(r => (double)r.DurationHours), 2),
+                // TRUST-09: AvgDurationHours removed — Room.DurationHours is a host-typed
+                // scheduling field, not an observed duration. See RoomAnalyticsDto.
                 RoomsByCategory = categoryGroups,
                 TopRooms = topRooms
             };

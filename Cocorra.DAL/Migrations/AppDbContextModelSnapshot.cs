@@ -437,6 +437,9 @@ namespace Cocorra.DAL.Migrations
                     b.Property<Guid>("ApplicationUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("BlockedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -458,15 +461,20 @@ namespace Cocorra.DAL.Migrations
                     b.Property<bool>("IsBlocked")
                         .HasColumnType("bit");
 
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("UpdateAt");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApplicationUserId");
-
                     b.HasIndex("DeviceId");
+
+                    b.HasIndex("ApplicationUserId", "DeviceId")
+                        .IsUnique()
+                        .HasFilter("[DeviceId] IS NOT NULL");
 
                     b.ToTable("BlockedDevices");
                 });
@@ -663,6 +671,9 @@ namespace Cocorra.DAL.Migrations
 
                     b.Property<int>("DurationHours")
                         .HasColumnType("int");
+
+                    b.Property<DateTime?>("HostDisconnectedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("HostId")
                         .HasColumnType("uniqueidentifier");

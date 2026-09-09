@@ -136,15 +136,34 @@ namespace Cocorra.API.Controllers
         [Authorize(Roles = "Admin")]
         public async Task<IActionResult> BlockDeviceAndEmail([FromBody] BlockDeviceAndEmailDto model)
         {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             var adminEmail = User.FindFirstValue(ClaimTypes.Email);
             if (string.Equals(adminEmail, model.Email, StringComparison.OrdinalIgnoreCase))
             {
                 return BadRequest(new { succeeded = false, message = "You cannot perform this action on yourself." });
             }
 
-            var result = await _adminService.BlockDeviceAndEmailAsync(model);
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var adminGuid))
+            {
+                return BadRequest(new { succeeded = false, message = "Could not resolve the acting admin identity." });
+            }
+
+            var result = await _adminService.BlockDeviceAndEmailAsync(model, adminGuid);
             if (!result.Succeeded)
-                return BadRequest(result);
+                return StatusCode((int)result.StatusCode, result);
+
+            // SECURITY: mirror ChangeStatus — the JWT is stateless and cannot be revoked, so
+            // sever the transport to boot the banned user out of any active room immediately.
+            var bannedUserId = result.Data!.UserId;
+            var connectionIds = RoomHub.GetConnectionsForUser(bannedUserId);
+            foreach (var connId in connectionIds)
+            {
+                await _roomHubContext.Clients.Client(connId)
+                    .SendAsync("ForceDisconnect", new { Reason = "Your account has been banned." });
+            }
+            RoomHub.PurgeUserConnections(bannedUserId);
 
             return Ok(result);
         }

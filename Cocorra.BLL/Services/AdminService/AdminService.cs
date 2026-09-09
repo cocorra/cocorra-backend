@@ -418,19 +418,22 @@ namespace Cocorra.BLL.Services.AdminService
             return Success(stats);
         }
 
-        public async Task<Response<string>> BlockDeviceAndEmailAsync(BlockDeviceAndEmailDto model)
+        public async Task<Response<BlockDeviceAndEmailResultDto>> BlockDeviceAndEmailAsync(
+            BlockDeviceAndEmailDto model, Guid adminId)
         {
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                return NotFound<string>("User not found with the provided email.");
+                return NotFound<BlockDeviceAndEmailResultDto>("User not found with the provided email.");
             }
+
+            var oldStatus = user.Status;
 
             // 1. Change user status to Banned and lockout
             user.Status = UserStatus.Banned;
             await _userManager.SetLockoutEnabledAsync(user, true);
             await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
-            
+
             // SECURITY: Invalidate refresh token and clear FCM token to prevent session resurrection or stale pushes.
             user.RefreshToken = null;
             user.RefreshTokenExpiryTime = DateTime.UtcNow;
@@ -438,32 +441,40 @@ namespace Cocorra.BLL.Services.AdminService
 
             await _userManager.UpdateAsync(user);
 
-            // 2. Add device to BlockedDevices table
-            var existingDevice = await _blockedDevicesRepository.GetByDeviceIdAsync(model.DeviceId);
-            if (existingDevice != null)
-            {
-                if (!existingDevice.IsBlocked)
-                {
-                    existingDevice.IsBlocked = true;
-                    await _blockedDevicesRepository.UpdateBlockedDeviceAsync(existingDevice);
-                }
-            }
-            else
-            {
-                var blockedDevice = new Cocorra.DAL.Models.BlockedDevices
-                {
-                    DeviceId = model.DeviceId,
-                    DeviceName = model.DeviceName,
-                    DeviceModel = model.DeviceModel,
-                    DeviceType = model.DeviceType,
-                    DeviceOs = model.DeviceOs,
-                    IsBlocked = true,
-                    ApplicationUserId = user.Id
-                };
-                await _blockedDevicesRepository.AddBlockedDeviceAsync(blockedDevice);
-            }
+            // 2. Block every device this user was seen on. The device ids come from the
+            // registry written at their login — never from the request, which could only
+            // ever carry the acting admin's own device.
+            var devicesBlocked = await _blockedDevicesRepository.BlockAllDevicesForUserAsync(user.Id);
 
-            return Success("User email and device have been permanently blocked.");
+            // AN-011: a hard ban is a moderation action, so it gets the same attribution
+            // as an ordinary status change rather than vanishing from the audit trail.
+            _eventTracker.Track(
+                EventTypes.UserStatusChanged,
+                user.Id,
+                new
+                {
+                    fromStatus = oldStatus.ToString(),
+                    toStatus = UserStatus.Banned.ToString(),
+                    changedByAdminId = adminId,
+                    isBulkOperation = false,
+                    devicesBlocked
+                });
+
+            var result = new BlockDeviceAndEmailResultDto
+            {
+                UserId = user.Id,
+                Email = user.Email!,
+                AccountBanned = true,
+                DevicesBlocked = devicesBlocked
+            };
+
+            // The message stays honest when the registry had nothing for this user, which
+            // happens whenever they only ever used a client that omits X-Device-Id.
+            var message = devicesBlocked > 0
+                ? $"Account permanently banned and {devicesBlocked} registered device(s) blocked."
+                : "Account permanently banned. No registered devices were found for this user.";
+
+            return Success(result, message: message);
         }
     }
 }

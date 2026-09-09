@@ -62,7 +62,20 @@ namespace Cocorra.Tests
         [Fact]
         public async Task AggregationService_RollsUpPlatformMetrics_AndAdvancesWatermark()
         {
-            var today = DateTime.UtcNow.Date;
+            // Every row must sit behind AnalyticsAggregationService's safety lag, which holds
+            // back the most recent AggregationSafetyLagSeconds of inserts so in-flight
+            // transactions commit before their identity values are stepped over. Anchoring to
+            // today.AddHours(n) made this test pass or fail depending on the UTC hour it ran at:
+            // before 05:02 UTC the seeded events were still inside the lag window and the
+            // service correctly returned 0.
+            var anchor = DateTime.UtcNow.AddSeconds(-(AnalyticsAggregationService.AggregationSafetyLagSeconds + 60));
+            if (anchor.TimeOfDay < TimeSpan.FromMinutes(1))
+            {
+                // Keep the whole fixture inside one UTC day when the run lands on midnight.
+                anchor = anchor.AddMinutes(-2);
+            }
+
+            var today = anchor.Date;
             var hostId = Guid.NewGuid();
             var userId = Guid.NewGuid();
 
@@ -70,18 +83,18 @@ namespace Cocorra.Tests
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                db.Users.Add(new ApplicationUser { Id = hostId, UserName = "host", FirstName = "H", LastName = "U", CreatedAt = today.AddHours(1) });
-                db.Users.Add(new ApplicationUser { Id = userId, UserName = "user", FirstName = "U", LastName = "U", CreatedAt = today.AddHours(2) });
+                db.Users.Add(new ApplicationUser { Id = hostId, UserName = "host", FirstName = "H", LastName = "U", CreatedAt = anchor.AddSeconds(-5) });
+                db.Users.Add(new ApplicationUser { Id = userId, UserName = "user", FirstName = "U", LastName = "U", CreatedAt = anchor.AddSeconds(-5) });
 
-                var room = new Room { Id = Guid.NewGuid(), HostId = hostId, RoomTitle = "Agg Room", Status = RoomStatus.Live, CreatedAt = today.AddHours(3) };
+                var room = new Room { Id = Guid.NewGuid(), HostId = hostId, RoomTitle = "Agg Room", Status = RoomStatus.Live, CreatedAt = anchor.AddSeconds(-4) };
                 db.Rooms.Add(room);
 
-                db.RoomParticipants.Add(new RoomParticipant { RoomId = room.Id, UserId = hostId, JoinedAt = today.AddHours(3), TotalSpokenSeconds = 1000, Status = ParticipantStatus.Active });
-                db.RoomParticipants.Add(new RoomParticipant { RoomId = room.Id, UserId = userId, JoinedAt = today.AddHours(3), TotalSpokenSeconds = 300, Status = ParticipantStatus.Active });
+                db.RoomParticipants.Add(new RoomParticipant { RoomId = room.Id, UserId = hostId, JoinedAt = anchor.AddSeconds(-4), TotalSpokenSeconds = 1000, Status = ParticipantStatus.Active });
+                db.RoomParticipants.Add(new RoomParticipant { RoomId = room.Id, UserId = userId, JoinedAt = anchor.AddSeconds(-4), TotalSpokenSeconds = 300, Status = ParticipantStatus.Active });
 
                 // Add UserEvents that need rollup
-                db.UserEvents.Add(new UserEvent { EventId = Guid.NewGuid(), UserId = userId, EventType = EventTypes.VoiceVerificationSubmitted, OccurredAtUtc = today.AddHours(4) });
-                db.UserEvents.Add(new UserEvent { EventId = Guid.NewGuid(), UserId = userId, EventType = EventTypes.ActivationCompleted, OccurredAtUtc = today.AddHours(5) });
+                db.UserEvents.Add(new UserEvent { EventId = Guid.NewGuid(), UserId = userId, EventType = EventTypes.VoiceVerificationSubmitted, OccurredAtUtc = anchor.AddSeconds(-3) });
+                db.UserEvents.Add(new UserEvent { EventId = Guid.NewGuid(), UserId = userId, EventType = EventTypes.ActivationCompleted, OccurredAtUtc = anchor.AddSeconds(-2) });
 
                 await db.SaveChangesAsync();
             }

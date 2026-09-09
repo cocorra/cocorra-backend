@@ -19,4 +19,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- PushNotificationService's payload formatting runs after the Firebase-initialised
+         guard, so it is unreachable from a unit test through the public method. Exposed to
+         the test project rather than made public: it is not part of the service's contract. -->
+    <InternalsVisibleTo Include="Cocorra.Tests" />
+  </ItemGroup>
+
 </Project>
