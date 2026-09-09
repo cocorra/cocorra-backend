@@ -131,12 +131,60 @@ We'll bring a concrete, minimal spec to a joint sync before asking for any chang
 
 ---
 
+## 5. 🔒 `X-Device-Id` on login & refresh — **required for device bans to work**
+
+This one **is** a task, and it's the only thing gating a moderation feature that's otherwise
+finished on the backend.
+
+Admins can permanently ban an abusive account by email. The backend also blocks every **device**
+that account signed in from — that's what stops a banned user from making a fresh account on the
+same handset. The backend can only do that for devices it has on record, and it learns them from
+a header you send.
+
+### The contract
+
+Send these on **`POST /Api/V1/Authentication/Login`** and
+**`POST /Api/V1/Authentication/RefreshToken`** (sending them on every request is fine too):
+
+| Header | Required | Example | Notes |
+|---|:---:|---|---|
+| `X-Device-Id` | ✅ | `a3f1c9e2-...` | **Stable per physical install.** Everything below is optional decoration. |
+| `X-Device-Name` | — | `Kareem's Phone` | User-facing device name, if the OS exposes one. |
+| `X-Device-Model` | — | `Pixel 7` | |
+| `X-Device-Type` | — | `Android` / `iOS` | |
+| `X-Device-Os` | — | `14` | OS version. |
+
+### Rules for `X-Device-Id`
+
+- **Stable across app launches and logins.** If it changes every launch, the registry fills with
+  junk and a ban blocks a device id the user will never present again. On Android use a persisted
+  UUID (generate once, store in secure storage) rather than something that rotates; on iOS
+  `identifierForVendor` is fine.
+- **Same value on login and refresh.** They must agree or we'll record two devices for one phone.
+- **Max 200 chars**; longer values are truncated.
+- **Don't send the admin dashboard's device id when banning someone.** There's nothing to send —
+  the ban endpoint takes only an email now. (This was the original bug: the dashboard would have
+  banned the admin's own device.)
+
+### What happens if you don't send it
+
+Login still works — the header is optional and its absence is never an error. But the account ban
+will report `devicesBlocked: 0` and the user can immediately re-register on the same phone. So:
+**no header, no device ban.**
+
+> Honest limitation, worth knowing: this value is self-reported by the app, so a determined user
+> who tampers with the client can change or omit it. Device banning is a strong speed bump against
+> casual ban evasion, not a hard wall. Don't design UX that promises more than that.
+
+---
+
 ## ✅ Summary — your action items
 
 | Priority | Action |
 |---|---|
 | 🟢 Now | **Nothing** for core metrics — they're automatic. Just don't add duplicate analytics events. |
 | 🟢 Now | Double-check `roomId` passed to `JoinRoom` / `ToggleMic` / `LeaveRoom` is the canonical room GUID. |
+| 🔴 Now | **Send `X-Device-Id` on Login + RefreshToken** (§5). Device bans do nothing until this ships. |
 | 🟡 Soon | Adopt `POST /api/events/track` for pure UI events (`feature_viewed`, `notification_opened`). No rush. |
 | 🔵 Later | Session-Id header + device context — we'll spec it together. |
 

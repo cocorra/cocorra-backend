@@ -203,8 +203,18 @@ namespace Cocorra.DAL.Data
                 .HasForeignKey(bd => bd.ApplicationUserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Deliberately NOT unique: one physical device legitimately hosts several
+            // accounts over time, and banning a device that a ban-evader re-registered on
+            // is the whole point. Enforcement uses AnyAsync, so duplicates are fine.
             builder.Entity<BlockedDevices>()
                 .HasIndex(bd => bd.DeviceId);
+
+            // One registry row per (user, device) — makes the login-time upsert safe
+            // and stops repeated logins from growing the table without bound.
+            builder.Entity<BlockedDevices>()
+                .HasIndex(bd => new { bd.ApplicationUserId, bd.DeviceId })
+                .IsUnique()
+                .HasFilter("[DeviceId] IS NOT NULL");
 
             // ============================================================
             // Analytics Indexes — support fast time-windowed aggregate queries

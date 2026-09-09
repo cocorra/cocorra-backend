@@ -484,6 +484,7 @@ public class ProductionReadinessTests
                     ApiSecret = "s"
                 }),
                 _tracker.Object,
+                Options.Create(new RoomLifecycleSettings()),
                 NullLogger<RoomHub>.Instance);
 
             Hub.Clients = _clients.Object;

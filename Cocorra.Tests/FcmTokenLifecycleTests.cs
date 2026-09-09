@@ -1,9 +1,11 @@
 using Cocorra.BLL.Services.AdminService;
 using Cocorra.BLL.Services.AuthServices;
+using Cocorra.BLL.Services.BlockedDevicesService;
 using Cocorra.BLL.Services.ChatService;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.NotificationService;
+using Cocorra.BLL.Services.RoomService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.AdminDto;
@@ -60,7 +62,9 @@ public class FcmTokenLifecycleTests
             new Mock<IUploadImage>().Object,
             null!,
             new Mock<IRoomRepository>().Object,
-            new Mock<IEventTracker>().Object
+            new Mock<IEventTracker>().Object,
+            new Mock<IRoomService>().Object,
+            new Mock<IBlockedDevicesService>().Object
         );
 
         // Act
@@ -99,7 +103,9 @@ public class FcmTokenLifecycleTests
             new Mock<IUploadImage>().Object,
             null!,
             new Mock<IRoomRepository>().Object,
-            new Mock<IEventTracker>().Object
+            new Mock<IEventTracker>().Object,
+            new Mock<IRoomService>().Object,
+            new Mock<IBlockedDevicesService>().Object
         );
 
         // Act
@@ -224,7 +230,7 @@ public class FcmTokenLifecycleTests
         userManagerMock.Setup(m => m.SetLockoutEndDateAsync(user, It.IsAny<DateTimeOffset?>())).ReturnsAsync(IdentityResult.Success);
 
         var blockedDevicesRepoMock = new Mock<IBlockedDevicesRepository>();
-        blockedDevicesRepoMock.Setup(b => b.GetByDeviceIdAsync(It.IsAny<string>())).ReturnsAsync((BlockedDevices?)null);
+        blockedDevicesRepoMock.Setup(b => b.BlockAllDevicesForUserAsync(user.Id)).ReturnsAsync(2);
 
         var configMock = new Mock<IConfiguration>();
         configMock.Setup(c => c["AppSettings:BaseUrl"]).Returns("https://api.test.com");
@@ -242,23 +248,16 @@ public class FcmTokenLifecycleTests
             new Mock<INotificationRepository>().Object
         );
 
-        var dto = new BlockDeviceAndEmailDto
-        {
-            Email = email,
-            DeviceId = "device_xyz_123",
-            DeviceName = "Pixel 7",
-            DeviceModel = "Google",
-            DeviceType = "Android",
-            DeviceOs = "14"
-        };
+        var dto = new BlockDeviceAndEmailDto { Email = email };
 
         // Act
-        var result = await adminService.BlockDeviceAndEmailAsync(dto);
+        var result = await adminService.BlockDeviceAndEmailAsync(dto, Guid.NewGuid());
 
         // Assert
         Assert.True(result.Succeeded);
         Assert.Null(user.FcmToken);
         Assert.Null(user.RefreshToken);
         Assert.Equal(UserStatus.Banned, user.Status);
+        Assert.Equal(2, result.Data!.DevicesBlocked);
     }
 }

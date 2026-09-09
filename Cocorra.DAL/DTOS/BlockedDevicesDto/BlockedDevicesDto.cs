@@ -14,5 +14,8 @@ namespace Cocorra.DAL.DTOS.BlockedDevicesDto
         public string DeviceOs { get; set; } = null!;
         public Guid ApplicationUserId { get; set; }
         public DateTime BlockedAt { get; set; }
+
+        /// <summary>Last login/refresh seen from this device. Null for pre-registry rows.</summary>
+        public DateTime? LastSeenAt { get; set; }
     }
 }

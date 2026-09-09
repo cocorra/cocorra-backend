@@ -124,7 +124,11 @@ namespace Cocorra.BLL.Services.ChatService
                 if (!string.IsNullOrEmpty(receiver?.FcmToken))
                 {
                     var data = new Dictionary<string, string> { { "type", "chat" }, { "senderId", senderId.ToString() } };
-                    await _pushService.SendPushNotificationAsync(receiver.FcmToken, senderName, content, data);
+
+                    // Not `content`: when the app is closed the OS tray prints the body
+                    // verbatim, so it has to be prose. See MessagePreview.
+                    await _pushService.SendPushNotificationAsync(
+                        receiver.FcmToken, senderName, MessagePreview.ForNotificationBody(content), data);
                 }
             }
             catch (Exception ex)

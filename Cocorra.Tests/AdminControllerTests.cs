@@ -286,11 +286,7 @@ public class AdminControllerTests
         var adminEmail = "admin@example.com";
         var controller = CreateController(adminEmail: adminEmail);
 
-        var model = new BlockDeviceAndEmailDto
-        {
-            Email = adminEmail,
-            DeviceId = "device123"
-        };
+        var model = new BlockDeviceAndEmailDto { Email = adminEmail };
 
         // Act
         var result = await controller.BlockDeviceAndEmail(model);
@@ -298,6 +294,11 @@ public class AdminControllerTests
         // Assert
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.NotNull(badRequest.Value);
+        // The service must not be reached at all — the whole point of the guard is that the
+        // admin never lands in a state where their own account/device could be blocked.
+        _adminServiceMock.Verify(
+            s => s.BlockDeviceAndEmailAsync(It.IsAny<BlockDeviceAndEmailDto>(), It.IsAny<Guid>()),
+            Times.Never);
     }
 
     [Fact]
@@ -306,20 +307,24 @@ public class AdminControllerTests
         // Arrange
         var controller = CreateController(adminEmail: "admin@example.com");
 
-        var model = new BlockDeviceAndEmailDto
-        {
-            Email = "baduser@example.com",
-            DeviceId = "device123"
-        };
+        var model = new BlockDeviceAndEmailDto { Email = "baduser@example.com" };
 
-        var serviceResponse = new Response<string>
+        var serviceResponse = new Response<BlockDeviceAndEmailResultDto>
         {
             Succeeded = true,
             StatusCode = System.Net.HttpStatusCode.OK,
-            Data = "Device and email blocked successfully."
+            Data = new BlockDeviceAndEmailResultDto
+            {
+                UserId = Guid.NewGuid(),
+                Email = model.Email,
+                AccountBanned = true,
+                DevicesBlocked = 3
+            }
         };
 
-        _adminServiceMock.Setup(s => s.BlockDeviceAndEmailAsync(model)).ReturnsAsync(serviceResponse);
+        _adminServiceMock
+            .Setup(s => s.BlockDeviceAndEmailAsync(model, It.IsAny<Guid>()))
+            .ReturnsAsync(serviceResponse);
 
         // Act
         var result = await controller.BlockDeviceAndEmail(model);
@@ -327,5 +332,54 @@ public class AdminControllerTests
         // Assert
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(serviceResponse, ok.Value);
+    }
+
+    [Fact]
+    public async Task BlockDeviceAndEmail_ForwardsActingAdminId()
+    {
+        // Arrange
+        var adminId = Guid.NewGuid();
+        var controller = CreateController(adminId: adminId, adminEmail: "admin@example.com");
+
+        var model = new BlockDeviceAndEmailDto { Email = "baduser@example.com" };
+
+        _adminServiceMock
+            .Setup(s => s.BlockDeviceAndEmailAsync(model, It.IsAny<Guid>()))
+            .ReturnsAsync(new Response<BlockDeviceAndEmailResultDto>
+            {
+                Succeeded = true,
+                StatusCode = System.Net.HttpStatusCode.OK,
+                Data = new BlockDeviceAndEmailResultDto { UserId = Guid.NewGuid(), Email = model.Email }
+            });
+
+        // Act
+        await controller.BlockDeviceAndEmail(model);
+
+        // Assert — AN-011: a hard ban has to be attributable to the admin who ordered it.
+        _adminServiceMock.Verify(s => s.BlockDeviceAndEmailAsync(model, adminId), Times.Once);
+    }
+
+    [Fact]
+    public async Task BlockDeviceAndEmail_UserNotFound_PropagatesNotFoundStatus()
+    {
+        // Arrange
+        var controller = CreateController(adminEmail: "admin@example.com");
+        var model = new BlockDeviceAndEmailDto { Email = "ghost@example.com" };
+
+        _adminServiceMock
+            .Setup(s => s.BlockDeviceAndEmailAsync(model, It.IsAny<Guid>()))
+            .ReturnsAsync(new Response<BlockDeviceAndEmailResultDto>
+            {
+                Succeeded = false,
+                StatusCode = System.Net.HttpStatusCode.NotFound,
+                Message = "User not found with the provided email."
+            });
+
+        // Act
+        var result = await controller.BlockDeviceAndEmail(model);
+
+        // Assert — the handoff doc promises 404 here; the endpoint used to flatten it to 400.
+        var status = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(404, status.StatusCode);
     }
 }

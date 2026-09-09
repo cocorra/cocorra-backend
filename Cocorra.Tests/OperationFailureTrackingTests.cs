@@ -70,6 +70,7 @@ public class OperationFailureTrackingTests
             _liveKitServiceMock.Object,
             Options.Create(_settings),
             _eventTrackerMock.Object,
+            Options.Create(new RoomLifecycleSettings()),
             NullLogger<RoomHub>.Instance);
 
         var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "TestAuth");

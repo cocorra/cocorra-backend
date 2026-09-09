@@ -51,7 +51,8 @@ public class RoomServiceTests
             userManager.Object,
             _liveKitServiceMock.Object,
             Options.Create(_liveKitSettings),
-            _eventTrackerMock.Object
+            _eventTrackerMock.Object,
+            new Mock<Microsoft.Extensions.Logging.ILogger<RoomService>>().Object
         );
     }
 

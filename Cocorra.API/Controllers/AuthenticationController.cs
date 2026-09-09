@@ -1,3 +1,4 @@
+using Cocorra.API.Extensions;
 using Cocorra.BLL.DTOS.Auth;
 using Cocorra.BLL.Services.Auth;
 using Cocorra.BLL.Services.OTPService;
@@ -40,7 +41,7 @@ namespace Cocorra.API.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var result = await _authServices.LoginAsync(dto);
+            var result = await _authServices.LoginAsync(dto, Request.GetDeviceInfo());
             if (!result.Succeeded) return StatusCode((int)result.StatusCode, result);
 
             return Ok(result);
@@ -151,7 +152,7 @@ namespace Cocorra.API.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var result = await _authServices.RefreshTokenAsync(dto);
+            var result = await _authServices.RefreshTokenAsync(dto, Request.GetDeviceInfo());
             if (!result.Succeeded) return StatusCode((int)result.StatusCode, result);
 
             return Ok(result);

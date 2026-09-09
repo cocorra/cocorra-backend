@@ -8,6 +8,7 @@ using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Repository.RoomRepository;
 using Cocorra.BLL.Base;
+using Cocorra.BLL.Services.RoomService;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -21,6 +22,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
 using Cocorra.BLL.Services.EventTracking;
+using Cocorra.BLL.Services.BlockedDevicesService;
 
 namespace Cocorra.BLL.Services.AuthServices
 {
@@ -35,6 +37,8 @@ namespace Cocorra.BLL.Services.AuthServices
         private readonly IUploadImage _uploadImage;
         private readonly IRoomRepository _roomRepository;
         private readonly IEventTracker _eventTracker;
+        private readonly IRoomService _roomService;
+        private readonly IBlockedDevicesService _blockedDevicesService;
 
         public AuthServices(
             UserManager<ApplicationUser> userManager,
@@ -45,8 +49,11 @@ namespace Cocorra.BLL.Services.AuthServices
             IUploadImage uploadImage,
             AppDbContext context,
             IRoomRepository roomRepository,
-            IEventTracker eventTracker)
+            IEventTracker eventTracker,
+            IRoomService roomService,
+            IBlockedDevicesService blockedDevicesService)
         {
+            _blockedDevicesService = blockedDevicesService;
             _uploadImage = uploadImage;
             _context = context;
             _uploadVoice = uploadVoice;
@@ -56,6 +63,7 @@ namespace Cocorra.BLL.Services.AuthServices
             _configuration = configuration;
             _roomRepository = roomRepository;
             _eventTracker = eventTracker;
+            _roomService = roomService;
         }
 
         public async Task<Response<object>> RegisterAsync(RegisterDto dto)
@@ -155,7 +163,7 @@ namespace Cocorra.BLL.Services.AuthServices
             });
         }
 
-        public async Task<Response<object>> LoginAsync(LoginDto dto)
+        public async Task<Response<object>> LoginAsync(LoginDto dto, DeviceInfoDto? device = null)
         {
             var user = await _userManager.FindByEmailAsync(dto.Email!);
             if (user == null)
@@ -197,6 +205,11 @@ namespace Cocorra.BLL.Services.AuthServices
                     user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
                     await _userManager.UpdateAsync(user);
 
+                    // Register here too: verification-stage users hold a real (restricted)
+                    // session, and they are exactly the cohort that gets banned for a bad
+                    // voice sample. Skipping them would leave their devices unbannable.
+                    await _blockedDevicesService.RegisterDeviceAsync(user.Id, device);
+
                     var restrictedAuth = new AuthModel
                     {
                         Email = user.Email,
@@ -224,6 +237,8 @@ namespace Cocorra.BLL.Services.AuthServices
             user.RefreshToken = refreshToken;
             user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
             await _userManager.UpdateAsync(user);
+
+            await _blockedDevicesService.RegisterDeviceAsync(user.Id, device);
 
             var authModel = new AuthModel
             {
@@ -526,21 +541,23 @@ namespace Cocorra.BLL.Services.AuthServices
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null) return BadRequest<string>("User not found.");
 
-            // End any Active/Live rooms hosted by this user to prevent ghost rooms
-            var activeRooms = await _context.Rooms
+            // End any Live/Scheduled rooms hosted by this user to prevent ghost rooms.
+            //
+            // Through EndRoomAsync, not by writing Status here. Setting the column directly
+            // skipped everything else that ending a room means: the LiveKit room was never
+            // deleted, so the audio bridge kept running; participants stayed Active, which
+            // left GET /Room/{id}/Token minting fresh 4-hour credentials for a room that had
+            // already ended; and no room_ended event was emitted, so the closure was invisible
+            // to analytics.
+            var hostedRoomIds = await _context.Rooms
                 .Where(r => r.HostId == userId &&
                        (r.Status == RoomStatus.Live || r.Status == RoomStatus.Scheduled))
+                .Select(r => r.Id)
                 .ToListAsync();
 
-            foreach (var room in activeRooms)
+            foreach (var roomId in hostedRoomIds)
             {
-                room.Status = RoomStatus.Ended;
-                room.UpdatedAt = DateTime.UtcNow;
-            }
-
-            if (activeRooms.Any())
-            {
-                await _context.SaveChangesAsync();
+                await _roomService.EndRoomAsync(roomId, userId, RoomEndReasons.HostAccountDeleted);
             }
 
             // Clean up all Restrict-FK rows to allow user deletion
@@ -587,7 +604,7 @@ namespace Cocorra.BLL.Services.AuthServices
             return Convert.ToBase64String(randomNumber);
         }
 
-        public async Task<Response<AuthModel>> RefreshTokenAsync(RefreshTokenDto dto)
+        public async Task<Response<AuthModel>> RefreshTokenAsync(RefreshTokenDto dto, DeviceInfoDto? device = null)
         {
             var user = await _userManager.Users
                 .SingleOrDefaultAsync(u => u.RefreshToken == dto.RefreshToken);
@@ -612,6 +629,10 @@ namespace Cocorra.BLL.Services.AuthServices
             user.RefreshToken = newRefreshToken;
             user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
             await _userManager.UpdateAsync(user);
+
+            // Refresh is the only auth traffic a long-lived session generates, so this is
+            // what keeps LastSeenAt current and catches devices added after the last login.
+            await _blockedDevicesService.RegisterDeviceAsync(user.Id, device);
 
             return Success(new AuthModel
             {

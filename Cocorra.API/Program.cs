@@ -194,6 +194,12 @@ builder.Services.AddScoped<Cocorra.BLL.Services.RealTimeNotifier.IRealTimeNotifi
 builder.Services.Configure<LiveKitSettings>(builder.Configuration.GetSection("LiveKit"));
 builder.Services.AddScoped<ILiveKitService, LiveKitService>();
 
+// Holds a Live room open while a disconnected host reconnects; the hosted service below
+// closes the ones whose host never comes back.
+builder.Services.Configure<RoomLifecycleSettings>(
+    builder.Configuration.GetSection(RoomLifecycleSettings.SectionName));
+builder.Services.AddHostedService<HostReconnectGraceService>();
+
 // Analytics — Data-Driven Decisions
 builder.Services.Configure<EventTrackingOptions>(builder.Configuration.GetSection(EventTrackingOptions.SectionName));
 

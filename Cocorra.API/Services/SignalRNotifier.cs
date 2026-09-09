@@ -32,5 +32,20 @@ namespace Cocorra.API.Services
             }
             catch { /* SignalR broadcast failure must not block admin actions */ }
         }
+
+        public async Task RoomEndedAsync(Guid roomId, string message)
+        {
+            try
+            {
+                await _roomHubContext.Clients.Group(roomId.ToString())
+                    .SendAsync("RoomEnded", new
+                    {
+                        RoomId = roomId,
+                        Message = message
+                    });
+            }
+            catch { /* The room is already ended in the database; a failed broadcast
+                       must not stop the sweep from moving on to the next room. */ }
+        }
     }
 }

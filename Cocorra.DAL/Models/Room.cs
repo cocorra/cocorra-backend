@@ -51,4 +51,16 @@ public class Room : BaseEntity
 
     [Required]
     public RoomCategory Category { get; set; }
+
+    /// <summary>
+    /// When the host's connection dropped while the room was Live, or null if the host is
+    /// connected. A dropped socket no longer ends the room: the session is held open until
+    /// this is older than the configured grace window, at which point HostReconnectGraceService
+    /// ends it. Cleared when the host rejoins.
+    ///
+    /// Persisted rather than held in memory because RoomHub's connection map is static and
+    /// per-process — it does not survive a restart and is wrong across multiple instances,
+    /// so an in-memory timer would silently strand rooms on deploy.
+    /// </summary>
+    public DateTime? HostDisconnectedAt { get; set; }
 }

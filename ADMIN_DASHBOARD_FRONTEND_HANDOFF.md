@@ -53,7 +53,7 @@ Two roles gate this module. Authorization is enforced at the controller/action l
 - Report moderation, support chat, and role management are **`Admin`-only** and must not appear in the `Coach` nav at all.
 - **Self-action guards (server-enforced, mirror on client):**
   - An admin **cannot change their own status** — `ChangeStatus` returns `400` if `route id == caller's NameIdentifier claim`.
-  - An admin **cannot block their own device/email** — `BlockDeviceAndEmail` returns `400` if `model.Email == caller's email claim`.
+  - An admin **cannot block their own device/email** — `BlockDeviceAndEmail` returns `400` if `model.Email == caller's email claim`. The endpoint takes **no device fields**, so there is no longer any way for the dashboard to block the machine it is running on.
 - The role claim is in the JWT. Decode it once at login, store roles in the auth/state store, and drive both the route guards and the `*ngIf`/directive-level button visibility from it.
 
 ---
@@ -288,18 +288,36 @@ Auth: **`Admin` only**. Applies one status to many users in a single call.
 ### 5.3 Block device + email (hard ban) — `POST /Api/V1/Admin/BlockDeviceAndEmail`
 Auth: **`Admin` only**.
 
-**Payload (`BlockDeviceAndEmailDto`):**
+**Payload (`BlockDeviceAndEmailDto`) — email only:**
 ```json
 {
-  "email": "user@example.com",   // required, validated as email
-  "deviceId": "abc-123",         // required
-  "deviceName": "Unknown",
-  "deviceModel": "Unknown",
-  "deviceType": "Unknown",
-  "deviceOs": "Unknown"
+  "email": "user@example.com"    // required, validated as email
 }
 ```
-Sets user → Banned, locks out, invalidates refresh token, and blocks the device. **Errors:** self-block → `400`; user not found → `404` (`NotFound<string>`).
+
+> **Breaking change.** This endpoint used to *require* `deviceId` (plus `deviceName`/`deviceModel`/`deviceType`/`deviceOs`). Those fields are gone. Sending them anyway is harmless — unknown JSON properties are ignored — but remove them, because the only device id a dashboard could ever produce was the **admin's own**, and `DeviceBlockingMiddleware` would then 403 that admin out of the entire API on their next request. The devices to block are now resolved server-side from the device registry written when the offender themselves logged in.
+
+**Response (`Response<BlockDeviceAndEmailResultDto>`):**
+```json
+{
+  "succeeded": true,
+  "statusCode": 200,
+  "message": "Account permanently banned and 2 registered device(s) blocked.",
+  "data": {
+    "userId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "email": "user@example.com",
+    "accountBanned": true,
+    "devicesBlocked": 2
+  }
+}
+```
+
+Sets user → Banned, locks out, invalidates the refresh token, clears the FCM token, blocks every device in the registry for that user, and force-disconnects their live SignalR connections (`ForceDisconnect`, same as `ChangeStatus`).
+
+**Angular handling directives:**
+- Drive the toast off `data.devicesBlocked`, not off `succeeded` alone. **`devicesBlocked: 0` is a legitimate success** — it means that user only ever signed in from a client build that doesn't send `X-Device-Id`, so there was no device to block. The account ban still applied. Surface it as *"Account banned. No devices were on record."* rather than implying devices were blocked.
+- **Errors:** self-block → `400`; user not found → `404`; malformed/missing email → `400` with the ASP.NET `ModelState` shape.
+- Patch the row's `status` to `Banned` in the grid store on success.
 
 ### 5.4 Report moderation (Admin only)
 - **Update status** — `PUT /Api/V1/Support/admin/reports/{id}/status`, body `UpdateReportStatusDto { status }`.
@@ -350,7 +368,7 @@ Sets user → Banned, locks out, invalidates refresh token, and blocks the devic
 | GET | `/Api/V1/Admin/User/{id}` | Admin, Coach | User details |
 | PUT | `/Api/V1/Admin/User/ChangeStatus/{id}` | Admin | Change status (body `{newStatus:"Banned"}`) |
 | PUT | `/Api/V1/Admin/Users/BulkChangeStatus` | Admin | Bulk change status (partial success) |
-| POST | `/Api/V1/Admin/BlockDeviceAndEmail` | Admin | Hard ban device+email |
+| POST | `/Api/V1/Admin/BlockDeviceAndEmail` | Admin | Hard ban (body `{email}` **only** — see §5.3) |
 | GET | `/Api/V1/Admin/Dashboard/Stats` | Admin, Coach | KPI cards |
 | GET | `/Api/V1/Analytics/*` | Admin, Coach | Analytics (see §4) |
 | GET | `/Api/V1/Support/admin/reports?category=&status=` | Admin | Reports grid |

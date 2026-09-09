@@ -131,5 +131,16 @@ namespace Cocorra.DAL.Repository.RoomRepository
                 .Take(pageSize)
                 .ToListAsync();
         }
+
+        public async Task<List<Room>> GetRoomsWithExpiredHostGraceAsync(DateTime disconnectedBefore)
+        {
+            // Tracked, not AsNoTracking: the caller ends these rooms through the same context.
+            return await _dbContext.Rooms
+                .Where(r => r.Status == RoomStatus.Live
+                            && r.HostDisconnectedAt != null
+                            && r.HostDisconnectedAt < disconnectedBefore)
+                .OrderBy(r => r.HostDisconnectedAt)
+                .ToListAsync();
+        }
     }
 }

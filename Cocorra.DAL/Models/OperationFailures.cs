@@ -52,4 +52,37 @@ namespace Cocorra.DAL.Models
         /// </summary>
         public const string StageAtCapacity = "stage_at_capacity";
     }
+
+    /// <summary>
+    /// Why a room stopped being Live — the <c>endReason</c> property of
+    /// <see cref="EventTypes.RoomEnded"/>. Closed set, for the same reason as
+    /// <see cref="OperationFailureReasons"/>.
+    ///
+    /// <para>
+    /// This field previously carried the literal "host_ended" at its single call site, so a room
+    /// killed by a dropped socket was indistinguishable from one the coach chose to finish. Every
+    /// duration and completion metric read from this event inherited that conflation, and the
+    /// rate of accidental endings could not be measured at all — the data said it never happened.
+    /// </para>
+    /// </summary>
+    public static class RoomEndReasons
+    {
+        /// <summary>The host deliberately ended the room, via the hub or the REST endpoint.</summary>
+        public const string HostEnded = "host_ended";
+
+        /// <summary>
+        /// The host's connection dropped and did not come back inside the grace window, so
+        /// HostReconnectGraceService ended the room. Distinct from <see cref="HostEnded"/>: this
+        /// one is a session the coach did not choose to finish, and a rising count is a
+        /// connectivity problem, not a usage pattern.
+        /// </summary>
+        public const string HostDisconnected = "host_disconnected";
+
+        /// <summary>
+        /// The host deleted their account, so their rooms were closed with them. Neither a
+        /// choice to finish the session nor a connectivity failure, and counting it as either
+        /// would misattribute the cause.
+        /// </summary>
+        public const string HostAccountDeleted = "host_account_deleted";
+    }
 }

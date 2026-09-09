@@ -29,5 +29,12 @@ namespace Cocorra.DAL.Repository.RoomRepository
         Task RemoveRoomReminderAsync(RoomReminder reminder);
 
         Task<List<Room>> GetEndedRoomsAsync(int pageNumber = 1, int pageSize = 20);
+
+        /// <summary>
+        /// Live rooms whose host dropped before <paramref name="disconnectedBefore"/> — the
+        /// grace window has expired and the session should be closed. Ordered oldest first so
+        /// a backlog after a restart is cleared in the order the rooms were abandoned.
+        /// </summary>
+        Task<List<Room>> GetRoomsWithExpiredHostGraceAsync(DateTime disconnectedBefore);
     }
 }

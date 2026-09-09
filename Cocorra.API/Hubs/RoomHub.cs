@@ -23,12 +23,13 @@ namespace Cocorra.API.Hubs
         private readonly ILiveKitService _liveKitService;
         private readonly LiveKitSettings _liveKitSettings;
         private readonly IEventTracker _eventTracker;
+        private readonly RoomLifecycleSettings _roomLifecycle;
         private readonly ILogger<RoomHub> _logger;
 
         // Thread-safe mapping: ConnectionId → (UserId, RoomId)
         private static readonly ConcurrentDictionary<string, (Guid UserId, Guid RoomId)> _connections = new();
 
-        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker, ILogger<RoomHub> logger)
+        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker, IOptions<RoomLifecycleSettings> roomLifecycle, ILogger<RoomHub> logger)
         {
             _roomRepo = roomRepo;
             _roomService = roomService;
@@ -36,6 +37,7 @@ namespace Cocorra.API.Hubs
             _liveKitService = liveKitService;
             _liveKitSettings = liveKitSettings.Value;
             _eventTracker = eventTracker;
+            _roomLifecycle = roomLifecycle.Value;
             _logger = logger;
         }
 
@@ -77,22 +79,43 @@ namespace Cocorra.API.Hubs
                 try
                 {
                     _eventTracker.Track(EventTypes.RoomLeft, mapping.UserId, new { roomId = mapping.RoomId });
-                    // Check if this user is the host — if so, end the room entirely
                     var room = await _roomRepo.GetByIdAsync(mapping.RoomId);
+
+                    // The host dropping does NOT end the room. A socket drop is indistinguishable
+                    // here from a lift, a tunnel or a Wi-Fi handoff, and ending on it was fatal:
+                    // an Ended room refuses every rejoin, including the host's own. Instead the
+                    // grace window starts and HostReconnectGraceService closes the room only if
+                    // the host really is gone. A deliberate end still goes through EndRoom.
                     if (room != null && room.HostId == mapping.UserId && room.Status == RoomStatus.Live)
                     {
-                        // Host disconnected — end the room for everyone
-                        await _roomService.EndRoomAsync(mapping.RoomId, mapping.UserId);
+                        var graceStarted = await _roomService.MarkHostDisconnectedAsync(
+                            mapping.RoomId, mapping.UserId);
+
+                        // The host's own mic segment is closed and their row goes to Left, the
+                        // same as any participant — JoinRoom re-activates it when they return.
+                        await _roomService.LeaveRoomCleanupAsync(mapping.RoomId, mapping.UserId);
 
                         var roomIdStr = mapping.RoomId.ToString();
-                        await Clients.Group(roomIdStr).SendAsync("RoomEnded", new
-                        {
-                            RoomId = mapping.RoomId,
-                            Message = "The host has disconnected. This room has been ended."
-                        });
+                        await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomIdStr);
 
-                        // Purge all connections for this room
-                        PurgeRoomConnections(mapping.RoomId);
+                        if (graceStarted)
+                        {
+                            // ReconnectDeadline lets the app show a countdown instead of a
+                            // frozen room, and is absolute so a slow client cannot drift.
+                            await Clients.Group(roomIdStr).SendAsync("HostDisconnected", new
+                            {
+                                RoomId = mapping.RoomId,
+                                GraceSeconds = _roomLifecycle.HostReconnectGraceSeconds,
+                                ReconnectDeadline = DateTime.UtcNow
+                                    .AddSeconds(_roomLifecycle.HostReconnectGraceSeconds)
+                            });
+                        }
+
+                        _logger.LogInformation(
+                            "[HUB-TRACE] Host disconnected, room held open. RoomId={RoomId} HostId={HostId} " +
+                            "GraceStarted={GraceStarted} GraceSeconds={GraceSeconds} Ts={Ts}",
+                            mapping.RoomId, mapping.UserId, graceStarted,
+                            _roomLifecycle.HostReconnectGraceSeconds, Now());
                     }
                     else
                     {
@@ -312,6 +335,26 @@ namespace Cocorra.API.Hubs
                 participant.IsHandRaised = false;
                 await _roomRepo.UpdateParticipantAsync(participant);
                 await _roomRepo.SaveChangesAsync();
+            }
+
+            // The host is back inside the grace window — cancel the countdown before anything
+            // else, so a slow tail of this method cannot race the sweep into ending the room.
+            if (room.HostId == userId)
+            {
+                var graceCancelled = await _roomService.ClearHostDisconnectedAsync(roomGuid, userId);
+
+                if (graceCancelled)
+                {
+                    await Clients.Group(roomId).SendAsync("HostReconnected", new
+                    {
+                        RoomId = roomGuid
+                    });
+
+                    _logger.LogInformation(
+                        "[HUB-TRACE] Host reconnected within grace window, room continues. " +
+                        "RoomId={RoomId} HostId={HostId} Ts={Ts}",
+                        roomGuid, userId, Now());
+                }
             }
 
             // If this user already has an old connection tracked, remove it first
@@ -857,6 +900,22 @@ namespace Cocorra.API.Hubs
                     kickedByHostId = hostId,
                     wasOnStage = participant.IsOnStage
                 });
+            }
+
+            // Disconnect them from the media server too. Marking the row Kicked and telling
+            // the group only stops them going through our hub again — it does nothing to the
+            // audio connection they already hold, so without this a kicked user keeps
+            // listening to the room they were just removed from.
+            try
+            {
+                await _liveKitService.RemoveParticipantAsync(roomGuid, targetGuid);
+            }
+            catch (Exception ex)
+            {
+                // The kick itself is committed; surfacing this would tell the host it failed.
+                _logger.LogError(ex,
+                    "Kicked user {TargetUserId} from room {RoomId} but could not disconnect them " +
+                    "from LiveKit. They may still be receiving audio.", targetGuid, roomGuid);
             }
 
             await Clients.Group(roomId).SendAsync("UserKicked", new

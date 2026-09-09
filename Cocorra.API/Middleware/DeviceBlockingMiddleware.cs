@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using Cocorra.API.Extensions;
 using Cocorra.BLL.Services.BlockedDevicesService;
 
 namespace Cocorra.API.Middleware
@@ -16,7 +17,7 @@ namespace Cocorra.API.Middleware
         }
         public async Task InvokeAsync(HttpContext context, IBlockedDevicesService blockedDevicesService)
         {
-            if (context.Request.Headers.TryGetValue("X-Device-Id", out var deviceId))
+            if (context.Request.Headers.TryGetValue(DeviceHeaderExtensions.DeviceIdHeader, out var deviceId))
             {
                 string deviceIdValue = deviceId.ToString();
                 if (!string.IsNullOrWhiteSpace(deviceIdValue) && await blockedDevicesService.IsDeviceBlockedAsync(deviceIdValue))
