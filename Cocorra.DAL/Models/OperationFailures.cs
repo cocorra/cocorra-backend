@@ -84,5 +84,14 @@ namespace Cocorra.DAL.Models
         /// would misattribute the cause.
         /// </summary>
         public const string HostAccountDeleted = "host_account_deleted";
+
+        /// <summary>
+        /// The room ran past its booked DurationHours (plus the overtime allowance) and was
+        /// closed by RoomDurationLimitService. Separate from <see cref="HostEnded"/> because a
+        /// host who never ends their own room is a different behaviour to one who does, and
+        /// because a room left running is the only way a participant's LiveKit token can expire
+        /// mid-session — see LiveKitSettings.TokenTtlMinutes.
+        /// </summary>
+        public const string DurationElapsed = "duration_elapsed";
     }
 }

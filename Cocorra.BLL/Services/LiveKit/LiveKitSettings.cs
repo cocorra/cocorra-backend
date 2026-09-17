@@ -35,4 +35,24 @@ public class LiveKitSettings
     /// </para>
     /// </summary>
     public int TokenTtlMinutes { get; set; } = 240;
+
+    /// <summary>
+    /// How long the media server keeps a room that has nobody in it, applied when the room is
+    /// created at go-live.
+    ///
+    /// <para>
+    /// LiveKit's own default is five minutes, which is far too short here: the room is created
+    /// the moment it goes live, and any lull — before the first participant arrives, or while
+    /// everyone is briefly disconnected — would see it reaped. With <c>auto_create</c> still on
+    /// that is invisible, because the next join silently recreates it. With <c>auto_create</c>
+    /// off it means nobody can get back into a room that is still Live in the database.
+    /// </para>
+    ///
+    /// <para>
+    /// Must therefore exceed the longest room a host can book, including
+    /// RoomLifecycleSettings.RoomOvertimeGraceMinutes. Matching the token TTL is the simple
+    /// choice: a room cannot usefully outlive the credentials issued for it.
+    /// </para>
+    /// </summary>
+    public int RoomEmptyTimeoutMinutes { get; set; } = 240;
 }

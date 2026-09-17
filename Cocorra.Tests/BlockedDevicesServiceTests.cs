@@ -5,6 +5,7 @@ using Cocorra.BLL.Services.BlockedDevicesService;
 using Cocorra.DAL.DTOS.BlockedDevicesDto;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Repository.BlockedDevicesRepository;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -17,7 +18,8 @@ public class BlockedDevicesServiceTests
 
     public BlockedDevicesServiceTests()
     {
-        _service = new BlockedDevicesService(_repoMock.Object);
+        _service = new BlockedDevicesService(
+            _repoMock.Object, NullLogger<BlockedDevicesService>.Instance);
     }
 
     [Fact]
@@ -44,10 +46,13 @@ public class BlockedDevicesServiceTests
     public async Task BlockDeviceAsync_DeviceAlreadyBlocked_ReturnsTrueWithoutAdding()
     {
         var deviceId = "device-123";
+        var userId = Guid.NewGuid();
         var existing = new BlockedDevices { DeviceId = deviceId, IsBlocked = true };
-        _repoMock.Setup(r => r.GetByDeviceIdAsync(deviceId)).ReturnsAsync(existing);
+        // Scoped per user, not globally by device id — one phone can carry rows for several
+        // accounts, and banning one of them must not block the others.
+        _repoMock.Setup(r => r.GetByUserAndDeviceIdAsync(userId, deviceId)).ReturnsAsync(existing);
 
-        var dto = new BlockedDevicesDto { DeviceId = deviceId };
+        var dto = new BlockedDevicesDto { DeviceId = deviceId, ApplicationUserId = userId };
         var result = await _service.BlockDeviceAsync(dto);
 
         Assert.True(result);
@@ -59,11 +64,12 @@ public class BlockedDevicesServiceTests
     public async Task BlockDeviceAsync_DeviceExistsButUnblocked_UpdatesToBlocked()
     {
         var deviceId = "device-123";
+        var userId = Guid.NewGuid();
         var existing = new BlockedDevices { DeviceId = deviceId, IsBlocked = false };
-        _repoMock.Setup(r => r.GetByDeviceIdAsync(deviceId)).ReturnsAsync(existing);
+        _repoMock.Setup(r => r.GetByUserAndDeviceIdAsync(userId, deviceId)).ReturnsAsync(existing);
         _repoMock.Setup(r => r.UpdateBlockedDeviceAsync(existing)).ReturnsAsync(true);
 
-        var dto = new BlockedDevicesDto { DeviceId = deviceId };
+        var dto = new BlockedDevicesDto { DeviceId = deviceId, ApplicationUserId = userId };
         var result = await _service.BlockDeviceAsync(dto);
 
         Assert.True(result);
@@ -168,18 +174,18 @@ public class BlockedDevicesServiceTests
     {
         var result = await _service.UnblockDeviceAsync(deviceId!);
         Assert.False(result);
-        _repoMock.Verify(r => r.RemoveBlockedDeviceAsync(It.IsAny<string>()), Times.Never);
+        _repoMock.Verify(r => r.UnblockDeviceAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
     public async Task UnblockDeviceAsync_ValidDeviceId_CallsRepoAndReturnsTrue()
     {
         var deviceId = "dev-abc";
-        _repoMock.Setup(r => r.RemoveBlockedDeviceAsync(deviceId)).ReturnsAsync(true);
+        _repoMock.Setup(r => r.UnblockDeviceAsync(deviceId)).ReturnsAsync(true);
 
         var result = await _service.UnblockDeviceAsync(deviceId);
 
         Assert.True(result);
-        _repoMock.Verify(r => r.RemoveBlockedDeviceAsync(deviceId), Times.Once);
+        _repoMock.Verify(r => r.UnblockDeviceAsync(deviceId), Times.Once);
     }
 }

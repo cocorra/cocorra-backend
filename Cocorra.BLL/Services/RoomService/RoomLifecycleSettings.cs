@@ -27,5 +27,26 @@ namespace Cocorra.BLL.Services.RoomService
         /// short relative to the window.
         /// </summary>
         public int GraceSweepIntervalSeconds { get; set; } = 10;
+
+        /// <summary>
+        /// How long a room may overrun its booked DurationHours before it is closed for it.
+        ///
+        /// <para>
+        /// 15 minutes by default. Cutting a coaching session off at exactly the two-hour mark
+        /// would end it mid-sentence, and hosts routinely need a moment to wrap up; this is the
+        /// wrap-up allowance. It is a bounded one, though — the hard ceiling this produces
+        /// (3h booked + 15m = 3h15m) has to stay comfortably under
+        /// LiveKitSettings.TokenTtlMinutes, or participants start being unable to reconnect
+        /// before the room ends.
+        /// </para>
+        /// </summary>
+        public int RoomOvertimeGraceMinutes { get; set; } = 15;
+
+        /// <summary>
+        /// How often rooms are checked against their duration. A minute is ample precision for
+        /// a deadline measured in hours, and keeps the query off the hot path of the 10-second
+        /// host-reconnect sweep.
+        /// </summary>
+        public int DurationSweepIntervalSeconds { get; set; } = 60;
     }
 }

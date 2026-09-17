@@ -17,6 +17,7 @@ using Cocorra.DAL.Repository.SupportRepository;
 using Cocorra.Tests.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -43,7 +44,8 @@ public class SupportServiceTests
             _notificationRepoMock.Object,
             _realTimeNotifierMock.Object,
             _pushServiceMock.Object,
-            _eventTrackerMock.Object
+            _eventTrackerMock.Object,
+            NullLogger<SupportService>.Instance
         );
     }
 
