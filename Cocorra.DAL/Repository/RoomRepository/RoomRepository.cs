@@ -142,5 +142,16 @@ namespace Cocorra.DAL.Repository.RoomRepository
                 .OrderBy(r => r.HostDisconnectedAt)
                 .ToListAsync();
         }
+
+        public async Task<List<Room>> GetLiveRoomsStartedBeforeAsync(DateTime wentLiveBefore)
+        {
+            // Tracked, not AsNoTracking: the caller ends these rooms through the same context.
+            return await _dbContext.Rooms
+                .Where(r => r.Status == RoomStatus.Live
+                            && r.WentLiveAt != null
+                            && r.WentLiveAt < wentLiveBefore)
+                .OrderBy(r => r.WentLiveAt)
+                .ToListAsync();
+        }
     }
 }

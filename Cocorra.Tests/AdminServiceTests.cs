@@ -259,9 +259,9 @@ public class AdminServiceTests : IDisposable
         _userManagerMock.Setup(m => m.FindByEmailAsync("missing@cocorra.com")).ReturnsAsync((ApplicationUser?)null);
 
         var service = CreateService();
-        var dto = new BlockDeviceAndEmailDto { Email = "missing@cocorra.com", DeviceId = "dev-1" };
+        var dto = new BlockDeviceAndEmailDto { Email = "missing@cocorra.com" };
 
-        var result = await service.BlockDeviceAndEmailAsync(dto);
+        var result = await service.BlockDeviceAndEmailAsync(dto, Guid.NewGuid());
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
@@ -280,27 +280,78 @@ public class AdminServiceTests : IDisposable
         };
         _userManagerMock.Setup(m => m.FindByEmailAsync("spammer@cocorra.com")).ReturnsAsync(user);
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
-        _blockedDevicesRepoMock.Setup(b => b.AddBlockedDeviceAsync(It.IsAny<BlockedDevices>()))
-            .ReturnsAsync(true);
+        _blockedDevicesRepoMock.Setup(b => b.BlockAllDevicesForUserAsync(userId))
+            .ReturnsAsync(2);
 
         var service = CreateService();
-        var dto = new BlockDeviceAndEmailDto
-        {
-            Email = "spammer@cocorra.com",
-            DeviceId = "device_bad_123",
-            DeviceName = "RootedDevice"
-        };
+        var dto = new BlockDeviceAndEmailDto { Email = "spammer@cocorra.com" };
 
-        var result = await service.BlockDeviceAndEmailAsync(dto);
+        var result = await service.BlockDeviceAndEmailAsync(dto, Guid.NewGuid());
 
         Assert.True(result.Succeeded);
         Assert.Equal(UserStatus.Banned, user.Status);
         Assert.Null(user.RefreshToken);
         Assert.Null(user.FcmToken);
+        Assert.Equal(2, result.Data!.DevicesBlocked);
 
-        _blockedDevicesRepoMock.Verify(b => b.AddBlockedDeviceAsync(It.Is<BlockedDevices>(d =>
-            d.DeviceId == "device_bad_123" &&
-            d.IsBlocked == true &&
-            d.ApplicationUserId == userId)), Times.Once);
+        // The devices come from the login registry, not the request. This assertion used to
+        // check a device id carried on the DTO — which could only ever have been the acting
+        // admin's own, the reason those fields were removed.
+        _blockedDevicesRepoMock.Verify(b => b.BlockAllDevicesForUserAsync(userId), Times.Once);
+    }
+
+    [Fact]
+    public async Task BlockDeviceAndEmailAsync_ReportsHonestly_WhenUserHasNoRegisteredDevices()
+    {
+        var userId = Guid.NewGuid();
+        var user = new ApplicationUser { Id = userId, Email = "ghost@cocorra.com" };
+
+        _userManagerMock.Setup(m => m.FindByEmailAsync("ghost@cocorra.com")).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        _blockedDevicesRepoMock.Setup(b => b.BlockAllDevicesForUserAsync(userId)).ReturnsAsync(0);
+
+        var service = CreateService();
+
+        var result = await service.BlockDeviceAndEmailAsync(
+            new BlockDeviceAndEmailDto { Email = "ghost@cocorra.com" }, Guid.NewGuid());
+
+        // The ban still stands; only the device claim is withheld. A user who only ever signed
+        // in from a client that omits X-Device-Id has nothing in the registry.
+        Assert.True(result.Succeeded);
+        Assert.Equal(UserStatus.Banned, user.Status);
+        Assert.Equal(0, result.Data!.DevicesBlocked);
+        Assert.Contains("No registered devices", result.Message);
+    }
+
+    [Fact]
+    public async Task ChangeUserStatusAsync_TargetIsAdmin_ReturnsBadRequest()
+    {
+        var userId = Guid.NewGuid();
+        var user = new ApplicationUser { Id = userId, Status = UserStatus.Active };
+        _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(true);
+
+        var service = CreateService();
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, Guid.NewGuid());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Contains("Cannot perform actions on an Admin account", result.Message);
+    }
+
+    [Fact]
+    public async Task BlockDeviceAndEmailAsync_TargetIsAdmin_ReturnsBadRequest()
+    {
+        var user = new ApplicationUser { Id = Guid.NewGuid(), Email = "admin@cocorra.com" };
+        _userManagerMock.Setup(m => m.FindByEmailAsync("admin@cocorra.com")).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(true);
+
+        var service = CreateService();
+        var result = await service.BlockDeviceAndEmailAsync(
+            new BlockDeviceAndEmailDto { Email = "admin@cocorra.com" }, Guid.NewGuid());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Contains("Cannot perform actions on an Admin account", result.Message);
     }
 }

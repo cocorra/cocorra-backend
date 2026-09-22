@@ -200,6 +200,10 @@ builder.Services.Configure<RoomLifecycleSettings>(
     builder.Configuration.GetSection(RoomLifecycleSettings.SectionName));
 builder.Services.AddHostedService<HostReconnectGraceService>();
 
+// Enforces the DurationHours the room was booked for, which nothing did until now — a host who
+// never ended their room left it Live indefinitely.
+builder.Services.AddHostedService<RoomDurationLimitService>();
+
 // Analytics — Data-Driven Decisions
 builder.Services.Configure<EventTrackingOptions>(builder.Configuration.GetSection(EventTrackingOptions.SectionName));
 

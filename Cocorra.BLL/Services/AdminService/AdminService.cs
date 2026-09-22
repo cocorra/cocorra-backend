@@ -79,6 +79,9 @@ namespace Cocorra.BLL.Services.AdminService
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null) return BadRequest<string>("User not found");
 
+            if (await _userManager.IsInRoleAsync(user, "Admin"))
+                return BadRequest<string>("Cannot perform actions on an Admin account.");
+
             if (!Enum.IsDefined(typeof(UserStatus), newStatus))
                 return BadRequest<string>("Invalid status value.");
 
@@ -425,6 +428,11 @@ namespace Cocorra.BLL.Services.AdminService
             if (user == null)
             {
                 return NotFound<BlockDeviceAndEmailResultDto>("User not found with the provided email.");
+            }
+
+            if (await _userManager.IsInRoleAsync(user, "Admin"))
+            {
+                return BadRequest<BlockDeviceAndEmailResultDto>("Cannot perform actions on an Admin account.");
             }
 
             var oldStatus = user.Status;

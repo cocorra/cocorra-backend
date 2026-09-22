@@ -39,4 +39,18 @@ public interface IRoomService
     /// Returns the rooms it ended, so the caller can tell their participants.
     /// </summary>
     Task<IReadOnlyList<Guid>> EndRoomsWithExpiredHostGraceAsync(DateTime disconnectedBefore);
+
+    /// <summary>
+    /// Ends every Live room that has run past its booked DurationHours plus
+    /// <paramref name="overtimeAllowance"/>, measured from when it actually went live.
+    /// Returns the rooms it ended, so the caller can tell their participants.
+    ///
+    /// <para>
+    /// DurationHours was validated on creation and then never enforced, so a room the host
+    /// never ended stayed Live indefinitely. That is also the only way a participant's LiveKit
+    /// token can expire underneath them, since the TTL is longer than any bookable duration —
+    /// see LiveKitSettings.TokenTtlMinutes.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<Guid>> EndRoomsPastScheduledDurationAsync(DateTime now, TimeSpan overtimeAllowance);
 }

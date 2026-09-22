@@ -32,6 +32,37 @@ webhook:
   urls:
     - https://api.cocorraapp.com/Api/V1/Webhooks/LiveKit
 
+# ==============================================================================
+# Room creation policy.
+#
+# auto_create defaults to TRUE, which is what is in force today: the first valid
+# token to arrive brings the room into existence. That quietly undoes the teardown
+# in RoomService.EndRoomAsync — a participant holding an unexpired token who
+# reconnects to an ended room RECREATES it and is admitted, and two of them can
+# hear each other in a session the database considers over. The participant_joined
+# webhook above evicts them, but only after a round-trip and only while that feed
+# is healthy.
+#
+# The backend now creates rooms explicitly at go-live (LiveKitService
+# .EnsureRoomExistsAsync, called from both paths in RoomService), so turning this
+# off is survivable. DO NOT flip it until the rollout below is done, because with
+# auto_create off, any go-live that failed to create its room becomes a room
+# NOBODY CAN JOIN.
+#
+#   1. Deploy the backend that creates rooms explicitly. (Done — this commit.)
+#   2. Watch for "[LIVEKIT] CreateRoom OK" on every go-live, and for the paired
+#      warning "went live without being created on the media server". The warning
+#      must be absent for a full day of real traffic.
+#   3. Only then uncomment the block below and restart LiveKit.
+#   4. Roll back by re-commenting it; auto-creation resumes immediately.
+#
+# empty_timeout is set by the backend per room (LiveKit:RoomEmptyTimeoutMinutes,
+# 240m) rather than here, because LiveKit's 5-minute default would reap a room
+# during any lull before its first join.
+# ==============================================================================
+# room:
+#   auto_create: false
+
 # WebRTC & Media Engine Configuration
 rtc:
   # TCP fallback port when UDP is blocked

@@ -13,8 +13,8 @@ namespace Cocorra.API.Hubs
             var userId = Context.UserIdentifier;
             if (!string.IsNullOrEmpty(userId))
             {
-                // Assign admins to an "Admin" group for broadcasting
-                if (Context.User?.IsInRole("Admin") == true)
+                // Assign admins and moderators to an "Admins" group for broadcasting
+                if (Context.User?.IsInRole("Admin") == true || Context.User?.IsInRole("Moderator") == true)
                 {
                     await Groups.AddToGroupAsync(Context.ConnectionId, "Admins");
                 }

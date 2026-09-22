@@ -14,7 +14,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace Cocorra.API.Controllers
 {
     [ApiController]
-    [Authorize(Roles = "Admin,Coach")]
+    [Authorize(Roles = "Admin,Moderator")]
     public class AdminController : ControllerBase
     {
         private readonly IAdminService _adminService;
@@ -48,7 +48,6 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpPut(Router.AdminRouting.ChangeStatus)]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> ChangeStatus([FromRoute] Guid id,[FromBody] ChangeStatusDto model)
         {
             var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -90,7 +89,6 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpPut(Router.AdminRouting.BulkChangeStatus)]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> BulkChangeStatus([FromBody] BulkChangeStatusDto model)
         {
             if (!ModelState.IsValid)
@@ -133,7 +131,6 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpPost(Router.AdminRouting.Prefix + "/BlockDeviceAndEmail")]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> BlockDeviceAndEmail([FromBody] BlockDeviceAndEmailDto model)
         {
             if (!ModelState.IsValid)

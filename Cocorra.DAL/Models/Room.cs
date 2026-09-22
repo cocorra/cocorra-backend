@@ -63,4 +63,22 @@ public class Room : BaseEntity
     /// so an in-memory timer would silently strand rooms on deploy.
     /// </summary>
     public DateTime? HostDisconnectedAt { get; set; }
+
+    /// <summary>
+    /// When the room actually went Live, or null if it has not started yet.
+    ///
+    /// <para>
+    /// Distinct from <see cref="StartDate"/>, which is the <i>scheduled</i> start and is never
+    /// updated when a host starts late (see StartScheduledRoomAsync). Enforcing
+    /// <see cref="DurationHours"/> against StartDate would therefore end a late-started room
+    /// the instant it opened, so the deadline is measured from here instead.
+    /// </para>
+    ///
+    /// <para>
+    /// Null on rooms that were already Live when this column was added. Those are deliberately
+    /// exempt from duration enforcement rather than backfilled from StartDate, because a
+    /// backfill would have ended any late-started room mid-session on deploy.
+    /// </para>
+    /// </summary>
+    public DateTime? WentLiveAt { get; set; }
 }

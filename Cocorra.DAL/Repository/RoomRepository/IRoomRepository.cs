@@ -36,5 +36,23 @@ namespace Cocorra.DAL.Repository.RoomRepository
         /// a backlog after a restart is cleared in the order the rooms were abandoned.
         /// </summary>
         Task<List<Room>> GetRoomsWithExpiredHostGraceAsync(DateTime disconnectedBefore);
+
+        /// <summary>
+        /// Live rooms that went live before <paramref name="wentLiveBefore"/>, oldest first.
+        ///
+        /// <para>
+        /// A prefilter, not the answer: each room's real deadline depends on its own
+        /// DurationHours, so the caller passes the cutoff for the <i>shortest</i> bookable
+        /// duration and applies the per-room deadline itself. Deliberately a plain comparison
+        /// with no date arithmetic in the query — the arithmetic would have to be translated by
+        /// every provider, including the SQLite used in tests.
+        /// </para>
+        ///
+        /// <para>
+        /// Rooms with a null WentLiveAt are excluded; see Room.WentLiveAt for why those are
+        /// exempt rather than backfilled.
+        /// </para>
+        /// </summary>
+        Task<List<Room>> GetLiveRoomsStartedBeforeAsync(DateTime wentLiveBefore);
     }
 }

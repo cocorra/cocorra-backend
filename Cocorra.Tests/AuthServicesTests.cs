@@ -5,8 +5,10 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Cocorra.BLL.DTOS.Auth;
 using Cocorra.BLL.Services.AuthServices;
+using Cocorra.BLL.Services.BlockedDevicesService;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.EventTracking;
+using Cocorra.BLL.Services.RoomService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.Auth;
@@ -33,6 +35,8 @@ public class AuthServicesTests : IDisposable
     private readonly Mock<IUploadImage> _uploadImageMock = new();
     private readonly Mock<IRoomRepository> _roomRepoMock = new();
     private readonly Mock<IEventTracker> _eventTrackerMock = new();
+    private readonly Mock<IRoomService> _roomServiceMock = new();
+    private readonly Mock<IBlockedDevicesService> _blockedDevicesServiceMock = new();
 
     public AuthServicesTests()
     {
@@ -88,7 +92,9 @@ public class AuthServicesTests : IDisposable
             _uploadImageMock.Object,
             db,
             _roomRepoMock.Object,
-            _eventTrackerMock.Object
+            _eventTrackerMock.Object,
+            _roomServiceMock.Object,
+            _blockedDevicesServiceMock.Object
         );
 
         return (service, userMgr, roleMgr, db);

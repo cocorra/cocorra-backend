@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
 using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,8 +11,8 @@ namespace Cocorra.DAL.Data // عدل الـ namespace حسب مكان الكلا
         {
             var roleManager = serviceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
 
-            // الأدوار الأساسية في السيستم بتاعك
-            string[] roleNames = { "User", "Admin", "Coach" };
+            // الأدوار الأساسية في السيستم
+            string[] roleNames = { "User", "Admin", "Coach", "Moderator" };
 
             foreach (var roleName in roleNames)
             {

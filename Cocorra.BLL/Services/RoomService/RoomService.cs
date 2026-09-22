@@ -110,6 +110,9 @@ public class RoomService : ResponseHandler, IRoomService
                 HostId = hostId,
                 StartDate = dto.ScheduledStartDate ?? DateTime.UtcNow,
                 Status = status,
+                // Go-live path 1 of 2 — created directly as live. StartDate is the scheduled
+                // time and is not a substitute: see Room.WentLiveAt.
+                WentLiveAt = status == RoomStatus.Live ? DateTime.UtcNow : null,
                 CreatedAt = DateTime.UtcNow,
                 ImagePath = imagePath,
                 DurationHours = dto.DurationHours,
@@ -132,6 +135,13 @@ public class RoomService : ResponseHandler, IRoomService
 
             await _roomRepo.AddAsync(room);
             _eventTracker.Track(EventTypes.RoomCreated, hostId, new { roomId = room.Id, category = room.Category.ToString(), isPrivate = room.IsPrivate });
+
+            // Go-live path 1 of 2. Claims the room on the media server before any token for it
+            // is minted, so it exists rather than being conjured up by whoever connects first.
+            if (status == RoomStatus.Live)
+            {
+                await EnsureLiveKitRoomAsync(room.Id);
+            }
 
             // AN-017 / E-07, path 1 of 2: created directly as live. Emitting from only one of
             // the two start paths would undercount rooms gone live with no visible symptom.
@@ -465,7 +475,13 @@ public class RoomService : ResponseHandler, IRoomService
             return BadRequest<string>("This room is no longer available.");
 
         room.Status = RoomStatus.Live;
-        await _roomRepo.UpdateAsync(room); 
+        // Go-live path 2 of 2. This is the path StartDate is wrong for — the host may be
+        // starting hours after the scheduled time, and StartDate is never updated to match.
+        room.WentLiveAt = DateTime.UtcNow;
+        await _roomRepo.UpdateAsync(room);
+
+        // Go-live path 2 of 2.
+        await EnsureLiveKitRoomAsync(room.Id);
 
         // AN-017 / E-07, path 2 of 2: a scheduled room being started. startPath distinguishes
         // the two so "created live" and "scheduled then started" stay separable — they are
@@ -642,9 +658,14 @@ public class RoomService : ResponseHandler, IRoomService
         await _roomRepo.SaveChangesAsync();
 
         // AN-019: durationHours measures against the SCHEDULED StartDate, so for a room that
-        // started late it reports schedule length, not airtime. It is kept for continuity and
-        // actualDurationSeconds added alongside; the read side should prefer the latter, which
-        // is derivable from room_went_live -> room_ended once AN-017 is enabled.
+        // started late it reports schedule length, not airtime. It is kept unchanged for
+        // continuity of the existing series.
+        //
+        // actualDurationSeconds now measures from WentLiveAt, which is what the name always
+        // promised — it was computed from StartDate too, so on late-started rooms it reported
+        // the same wrong number as durationHours. Rooms that were already Live before
+        // WentLiveAt existed have no go-live stamp and fall back to the old behaviour.
+        var airtimeFrom = room.WentLiveAt ?? room.StartDate;
         _eventTracker.Track(
             EventTypes.RoomEnded,
             hostId,
@@ -653,7 +674,7 @@ public class RoomService : ResponseHandler, IRoomService
                 roomId,
                 durationHours = (DateTime.UtcNow - room.StartDate).TotalHours,
                 participantCount = participants.Count,
-                actualDurationSeconds = Math.Round((DateTime.UtcNow - room.StartDate).TotalSeconds),
+                actualDurationSeconds = Math.Round((DateTime.UtcNow - airtimeFrom).TotalSeconds),
                 endReason,
                 peakParticipants = participants.Count,
                 category = room.Category.ToString()
@@ -688,6 +709,31 @@ public class RoomService : ResponseHandler, IRoomService
         }
 
         return Success("Room has been ended successfully.");
+    }
+
+    /// <summary>
+    /// Claims the room on the media server as it goes live, so it is not left to LiveKit's
+    /// auto_create to conjure one up for whoever connects first. Both go-live paths call this.
+    ///
+    /// <para>
+    /// Deliberately best-effort. While auto_create is still enabled a failure here costs
+    /// nothing — the first join creates the room anyway — and failing a host's go-live over a
+    /// media-server hiccup would be a far worse outcome than the hardening is worth. The
+    /// warning is the signal to check before auto_create is turned off.
+    /// </para>
+    /// </summary>
+    private async Task EnsureLiveKitRoomAsync(Guid roomId)
+    {
+        var emptyTimeout = TimeSpan.FromMinutes(Math.Max(1, _liveKitSettings.RoomEmptyTimeoutMinutes));
+
+        var created = await _liveKitService.EnsureRoomExistsAsync(roomId, emptyTimeout);
+
+        if (!created)
+        {
+            _logger.LogWarning(
+                "Room {RoomId} went live without being created on the media server. It will " +
+                "work only while LiveKit auto_create is enabled.", roomId);
+        }
     }
 
     public async Task<bool> MarkHostDisconnectedAsync(Guid roomId, Guid hostId)
@@ -737,6 +783,46 @@ public class RoomService : ResponseHandler, IRoomService
             // open mic segments and emits the speaking-time events, and a second implementation
             // of "end a room" would drift from this one within a release.
             var result = await EndRoomAsync(room.Id, room.HostId, RoomEndReasons.HostDisconnected);
+
+            if (result.Succeeded)
+                ended.Add(room.Id);
+        }
+
+        return ended;
+    }
+
+    public async Task<IReadOnlyList<Guid>> EndRoomsPastScheduledDurationAsync(
+        DateTime now, TimeSpan overtimeAllowance)
+    {
+        // Every bookable duration is at least the shortest one, so nothing can be overdue
+        // before this cutoff. Narrowing in SQL keeps the sweep off the whole Live set; the
+        // real per-room deadline is applied below, because it depends on that room's own
+        // DurationHours and translating that arithmetic is provider-specific.
+        var earliestPossibleDeadline = now - TimeSpan.FromHours(AllowedDurations.Min()) - overtimeAllowance;
+
+        var candidates = await _roomRepo.GetLiveRoomsStartedBeforeAsync(earliestPossibleDeadline);
+        if (candidates.Count == 0)
+            return Array.Empty<Guid>();
+
+        var ended = new List<Guid>();
+
+        foreach (var room in candidates)
+        {
+            // GetLiveRoomsStartedBeforeAsync filters these out, but the deadline below would
+            // silently become "now" rather than "never" if that ever changed.
+            if (!room.WentLiveAt.HasValue)
+                continue;
+
+            var deadline = room.WentLiveAt.Value
+                .AddHours(room.DurationHours)
+                .Add(overtimeAllowance);
+
+            if (deadline > now)
+                continue;
+
+            // Through EndRoomAsync for the same reason the host-grace sweep does: it is what
+            // closes the mic segments, emits room_ended and deletes the LiveKit room.
+            var result = await EndRoomAsync(room.Id, room.HostId, RoomEndReasons.DurationElapsed);
 
             if (result.Succeeded)
                 ended.Add(room.Id);

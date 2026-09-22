@@ -32,29 +32,46 @@ The Admin Dashboard is the operator console for Cocorra (a voice-based social/ro
 
 ### Roles & Permissions
 
-Two roles gate this module. Authorization is enforced at the controller/action level via `[Authorize(Roles = ...)]` on JWT role claims.
+Three roles interact with system administration. Authorization is enforced at the controller/action level via `[Authorize(Roles = ...)]` on JWT role claims.
 
-| Capability | Endpoint(s) | `Admin` | `Coach` |
-|---|---|:---:|:---:|
-| View users list | `GET /Admin/Users` | ✅ | ✅ |
-| View user details (+ voice) | `GET /Admin/User/{id}` | ✅ | ✅ |
-| View dashboard stats | `GET /Admin/Dashboard/Stats` | ✅ | ✅ |
-| **Change user status** (verify/ban/reject/re-record) | `PUT /Admin/User/ChangeStatus/{id}` | ✅ | ❌ |
-| **Block device + email** (hard ban) | `POST /Admin/BlockDeviceAndEmail` | ✅ | ❌ |
-| View all analytics | `GET /Analytics/*` | ✅ | ✅ |
-| View / filter reports | `GET /Support/admin/reports` | ✅ | ❌ |
-| Update report status | `PUT /Support/admin/reports/{id}/status` | ✅ | ❌ |
-| Take action on report | `POST /Support/admin/reports/{id}/action` | ✅ | ❌ |
-| Support chat (claim/reply/close/pending) | `POST/GET /Support/chat/*` | ✅ | ❌ |
-| Role management (list/assign) | `/Roles/*` | ✅ | ❌ |
+| Capability | Endpoint(s) | `Admin` | `Moderator` | `Coach` |
+|---|---|:---:|:---:|:---:|
+| **Enter Admin Dashboard** | `/admin/**` | ✅ | ✅ | ❌ |
+| View dashboard stats | `GET /Admin/Dashboard/Stats` | ✅ | ✅ | ❌ |
+| View users list | `GET /Admin/Users` | ✅ | ✅ | ❌ |
+| View user details (+ voice) | `GET /Admin/User/{id}` | ✅ | ✅ | ❌ |
+| **Change user status** (verify/ban/reject/re-record) | `PUT /Admin/User/ChangeStatus/{id}` | ✅* | ✅* | ❌ |
+| **Bulk change user status** | `PUT /Admin/Users/BulkChangeStatus` | ✅* | ✅* | ❌ |
+| **Block device + email** (hard ban) | `POST /Admin/BlockDeviceAndEmail` | ✅* | ✅* | ❌ |
+| View / filter reports | `GET /Support/admin/reports` | ✅ | ✅ | ❌ |
+| Update report status | `PUT /Support/admin/reports/{id}/status` | ✅ | ✅ | ❌ |
+| Take action on report | `POST /Support/admin/reports/{id}/action` | ✅* | ✅* | ❌ |
+| Support chat (claim/reply/close/pending) | `POST/GET /Support/chat/*` | ✅ | ✅ | ❌ |
+| View platform analytics & health | `GET /Analytics/*` | ✅ | ❌ (403) | ❌ (403) |
+| Run historical backfill | `POST /Analytics/Backfill` | ✅ | ❌ (403) | ❌ (403) |
+| Role management (list/assign) | `/Roles/*` | ✅ | ❌ (403) | ❌ (403) |
+| Room archive history | `GET /Room/admin/history` | ✅ | ❌ (403) | ❌ (403) |
 
-**RBAC rules for the Angular team:**
-- **`Coach` is effectively read-only.** It can view the Users grid, user details, dashboard stats, and *all* analytics — but **every mutation is `Admin`-only**. Hide (don't just disable) all action buttons — Change Status, Block Device, Report actions, Role management, Support chat — when the current user is not `Admin`.
-- Report moderation, support chat, and role management are **`Admin`-only** and must not appear in the `Coach` nav at all.
-- **Self-action guards (server-enforced, mirror on client):**
-  - An admin **cannot change their own status** — `ChangeStatus` returns `400` if `route id == caller's NameIdentifier claim`.
-  - An admin **cannot block their own device/email** — `BlockDeviceAndEmail` returns `400` if `model.Email == caller's email claim`. The endpoint takes **no device fields**, so there is no longer any way for the dashboard to block the machine it is running on.
-- The role claim is in the JWT. Decode it once at login, store roles in the auth/state store, and drive both the route guards and the `*ngIf`/directive-level button visibility from it.
+*\* Governed by **Admin Immunity**: Neither a Moderator nor another Admin can modify or discipline an account holding the `Admin` role.*
+
+**RBAC rules for the Frontend team:**
+- **`Coach` has NO access to the Admin Dashboard.** All `/admin` endpoints return `403 Forbidden` for `Coach`. The route guard should reject `Coach` immediately.
+- **`Moderator` logs into the Admin Dashboard with scoped permissions:**
+  - Can view and manage Users (`/admin/users`), view user voice samples, change statuses, and block devices.
+  - Can view Dashboard home stats cards (`/admin/dashboard` - Total, Active, Pending, Banned, Rejected).
+  - Can triage Reports (`/admin/reports`) and handle live Support chat (`/admin/support`).
+  - **HIDE from Moderator navigation:**
+    - Analytics (`/admin/analytics`) — Admin-only.
+    - Role management (`/admin/roles`) — Admin-only.
+    - Room history archive — Admin-only.
+- **Admin Immunity (server-enforced, mirror on client):**
+  - If a target user in the Users list or Details page has the `Admin` role:
+    - Disable/hide the "Change Status" buttons.
+    - Disable/hide the "Block Device & Email" button.
+    - If a report targets an Admin user, disable disciplinary actions.
+  - Self-action guards:
+    - An admin cannot change their own status or block their own email.
+- The role claim is in the JWT. Decode it once at login, store roles in the auth/state store, and drive route guards and nav item visibility from it.
 
 ---
 
@@ -64,19 +81,19 @@ Two roles gate this module. Authorization is enforced at the controller/action l
 
 ```
 /admin                                  → AdminShellComponent (layout: sidebar + topbar)
-  /admin/dashboard                      → DashboardOverviewComponent   (stats cards + summary charts)
+  /admin/dashboard                      → DashboardOverviewComponent   (stats cards; analytics hidden for Moderator)
   /admin/users                          → UsersListComponent           (grid: search + pagination)
   /admin/users/:id                      → UserDetailsComponent         (profile, voice player, status actions)
-  /admin/analytics                      → AnalyticsComponent           (tabbed: growth/rooms/participation/reports/funnel/retention)
-  /admin/reports                        → ReportsListComponent         (Admin only)
-  /admin/reports/:id                    → ReportDetailComponent        (Admin only)
-  /admin/support                        → SupportInboxComponent        (Admin only, SignalR live)
-  /admin/roles                          → RolesComponent               (Admin only)
+  /admin/reports                        → ReportsListComponent         (Admin & Moderator)
+  /admin/reports/:id                    → ReportDetailComponent        (Admin & Moderator)
+  /admin/support                        → SupportInboxComponent        (Admin & Moderator, SignalR live)
+  /admin/analytics                      → AnalyticsComponent           (Admin ONLY - hide for Moderator)
+  /admin/roles                          → RolesComponent               (Admin ONLY - hide for Moderator)
 ```
 
 ### Route guards
 - `authGuard` (`CanActivate`) on `/admin` — valid JWT + `Active` verification status.
-- `roleGuard` (`CanActivate` / `CanMatch`) — require role `Admin` **or** `Coach` for `/admin/**`; require role `Admin` for `/admin/reports`, `/admin/support`, `/admin/roles`. Prefer `CanMatch` so the lazy chunk isn't even downloaded for unauthorized roles.
+- `roleGuard` (`CanActivate` / `CanMatch`) — require role `Admin` **or** `Moderator` for `/admin/**`; require role `Admin` for `/admin/analytics` and `/admin/roles`. Prefer `CanMatch` so unauthorized chunks are not even downloaded.
 - Use **`canDeactivate`** on `UserDetailsComponent` / report actions to warn on unsaved moderation decisions.
 
 ### Component architecture (Smart / Dumb split)

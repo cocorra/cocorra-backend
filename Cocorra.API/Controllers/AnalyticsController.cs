@@ -17,7 +17,7 @@ namespace Cocorra.API.Controllers
     ///   - Responses are cached for 10 minutes; simultaneous requests share one DB query.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "Admin,Coach")]
+    [Authorize(Roles = "Admin")]
     public class AnalyticsController : ControllerBase
     {
         private readonly IAnalyticsService _analyticsService;

@@ -47,4 +47,33 @@ public interface ILiveKitService
     /// connection intact.
     /// </summary>
     Task RemoveParticipantAsync(Guid roomId, Guid userId);
+
+    /// <summary>
+    /// Creates the room on the media server ahead of anyone connecting to it, and returns
+    /// whether that succeeded.
+    ///
+    /// <para>
+    /// LiveKit's <c>auto_create</c> defaults to true, which means the first valid token to
+    /// arrive conjures the room into existence. That quietly undoes <see cref="CloseRoomAsync"/>:
+    /// a participant holding an unexpired token who reconnects after a room has ended will
+    /// <i>recreate</i> it and be admitted, and if two of them do it they can hear each other in
+    /// a session the database considers over. The participant_joined webhook evicts them, but
+    /// only after a round-trip, and only while that feed is healthy.
+    /// </para>
+    ///
+    /// <para>
+    /// Creating rooms explicitly is what makes turning <c>auto_create</c> off survivable — with
+    /// it off, a token for a room that does not exist is simply refused, with no window and no
+    /// dependence on webhook delivery. Called at go-live so the room exists for the whole
+    /// session; <paramref name="emptyTimeout"/> has to outlast the longest bookable room, or
+    /// LiveKit reaps it during a quiet moment and nobody can get back in.
+    /// </para>
+    ///
+    /// <para>
+    /// Never throws — a failure here must not stop a room going live while
+    /// <c>auto_create</c> is still on, because auto-creation is still there to cover it. Check
+    /// the return value before relying on the room existing.
+    /// </para>
+    /// </summary>
+    Task<bool> EnsureRoomExistsAsync(Guid roomId, TimeSpan emptyTimeout);
 }

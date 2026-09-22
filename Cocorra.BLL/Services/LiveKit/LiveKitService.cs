@@ -170,6 +170,44 @@ public class LiveKitService : ILiveKitService
     }
 
     /// <inheritdoc />
+    public async Task<bool> EnsureRoomExistsAsync(Guid roomId, TimeSpan emptyTimeout)
+    {
+        try
+        {
+            // CreateRoom is idempotent on LiveKit's side: called for a room that already
+            // exists it returns the existing one rather than erroring, so this is safe to call
+            // on any go-live path including a retry.
+            await _roomServiceClient.CreateRoom(new CreateRoomRequest
+            {
+                Name = roomId.ToString(),
+                // Guards the reap-while-quiet failure mode. LiveKit's own default is five
+                // minutes, which a room would hit during any lull before its first join —
+                // with auto_create off that would leave the host unable to enter their own room.
+                EmptyTimeout = (uint)Math.Max(60, emptyTimeout.TotalSeconds)
+            });
+
+            _logger?.LogInformation(
+                "[LIVEKIT] CreateRoom OK. Room={Room} EmptyTimeoutSeconds={EmptyTimeout}",
+                roomId, (uint)emptyTimeout.TotalSeconds);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Swallowed by contract. While auto_create is on, auto-creation still covers the
+            // join, so failing the host's go-live over this would be a self-inflicted outage.
+            // Before auto_create is turned off, this log line is the signal to watch: it means
+            // rooms are relying on auto-creation, and flipping the flag would break them.
+            _logger?.LogError(ex,
+                "[LIVEKIT] CreateRoom FAILED. Room={Room}. Falling back to auto_create. " +
+                "If auto_create is disabled on the media server, joins to this room will be refused.",
+                roomId);
+
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task RemoveParticipantAsync(Guid roomId, Guid userId)
     {
         try
