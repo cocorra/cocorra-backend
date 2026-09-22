@@ -43,6 +43,9 @@ namespace Cocorra.BLL.Services.RolesService
             var user = await _userManager.FindByIdAsync(model.UserId.ToString());
             if (user == null) return BadRequest<string>("User not found");
 
+            if (await _userManager.IsInRoleAsync(user, "Admin"))
+                return BadRequest<string>("Cannot modify roles of an Admin account.");
+
             foreach (var role in model.Roles)
             {
                 if (role.Equals("Admin", StringComparison.OrdinalIgnoreCase))

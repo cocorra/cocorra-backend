@@ -322,4 +322,36 @@ public class AdminServiceTests : IDisposable
         Assert.Equal(0, result.Data!.DevicesBlocked);
         Assert.Contains("No registered devices", result.Message);
     }
+
+    [Fact]
+    public async Task ChangeUserStatusAsync_TargetIsAdmin_ReturnsBadRequest()
+    {
+        var userId = Guid.NewGuid();
+        var user = new ApplicationUser { Id = userId, Status = UserStatus.Active };
+        _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(true);
+
+        var service = CreateService();
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, Guid.NewGuid());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Contains("Cannot perform actions on an Admin account", result.Message);
+    }
+
+    [Fact]
+    public async Task BlockDeviceAndEmailAsync_TargetIsAdmin_ReturnsBadRequest()
+    {
+        var user = new ApplicationUser { Id = Guid.NewGuid(), Email = "admin@cocorra.com" };
+        _userManagerMock.Setup(m => m.FindByEmailAsync("admin@cocorra.com")).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(true);
+
+        var service = CreateService();
+        var result = await service.BlockDeviceAndEmailAsync(
+            new BlockDeviceAndEmailDto { Email = "admin@cocorra.com" }, Guid.NewGuid());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Contains("Cannot perform actions on an Admin account", result.Message);
+    }
 }

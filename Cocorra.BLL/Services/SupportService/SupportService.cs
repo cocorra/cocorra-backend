@@ -153,6 +153,15 @@ namespace Cocorra.BLL.Services.SupportService
             var report = await _supportRepo.GetReportByIdAsync(reportId);
             if (report == null) return NotFound<string>("Report not found.");
 
+            if (report.ReportedUserId != null)
+            {
+                var reportedUser = await _userManager.FindByIdAsync(report.ReportedUserId.Value.ToString());
+                if (reportedUser != null && await _userManager.IsInRoleAsync(reportedUser, "Admin"))
+                {
+                    return BadRequest<string>("Cannot take disciplinary actions on an Admin account.");
+                }
+            }
+
             switch (dto.Action)
             {
                 case AdminReportAction.WarnUser:
