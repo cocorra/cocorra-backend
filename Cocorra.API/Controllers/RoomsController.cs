@@ -29,6 +29,7 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpPost(Router.RoomRouting.Create)]
+        [Authorize(Roles = "Admin,Coach")]
         public async Task<IActionResult> Create([FromForm] CreateRoomDto dto, IFormFile? roomImage)
         {
             var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

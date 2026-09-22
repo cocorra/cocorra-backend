@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cocorra - دليل ومصفوفة الأدوار والصلاحيات</title>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 5mm 8mm 5mm 8mm;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, 'Cairo', sans-serif;
+            line-height: 1.25;
+            color: #1e293b;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 0;
+            font-size: 8.5px;
+        }
+
+        .header-container {
+            border-bottom: 2px solid #6366f1;
+            padding-bottom: 3px;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .title-area h1 {
+            color: #1e1b4b;
+            margin: 0 0 1px 0;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .title-area p {
+            color: #64748b;
+            margin: 0;
+            font-size: 8.5px;
+        }
+
+        .meta-tag {
+            background: #e0e7ff;
+            color: #3730a3;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 8px;
+            font-weight: 600;
+        }
+
+        h2 {
+            color: #0f172a;
+            font-size: 11px;
+            margin: 4px 0 3px 0;
+            padding-bottom: 2px;
+            border-bottom: 1.5px solid #cbd5e1;
+        }
+
+        h3 {
+            color: #1e293b;
+            font-size: 9.5px;
+            margin: 3px 0 2px 0;
+            background: #f1f5f9;
+            padding: 2px 5px;
+            border-right: 3px solid #6366f1;
+            border-radius: 2px;
+        }
+
+        p.intro {
+            font-size: 8.2px;
+            color: #334155;
+            margin: 0 0 4px 0;
+            line-height: 1.3;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 0px;
+            background-color: #ffffff;
+        }
+
+        tr {
+            page-break-inside: avoid;
+        }
+
+        th {
+            background: #1e293b;
+            color: #ffffff;
+            font-weight: 600;
+            text-align: right;
+            padding: 3px 5px;
+            font-size: 8.5px;
+            border: 1px solid #334155;
+        }
+
+        td {
+            padding: 2px 4px;
+            font-size: 8px;
+            border: 1px solid #cbd5e1;
+            vertical-align: middle;
+            line-height: 1.25;
+        }
+
+        .roles-table td {
+            vertical-align: top;
+            padding: 2px 4px;
+        }
+
+        tbody tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+
+        /* Role Badges */
+        .badge {
+            display: inline-block;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 700;
+            font-size: 8.5px;
+            margin-bottom: 1px;
+        }
+
+        .badge-admin {
+            background-color: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .badge-moderator {
+            background-color: #ccfbf1;
+            color: #0f766e;
+            border: 1px solid #99f6e4;
+        }
+
+        .badge-coach {
+            background-color: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
+        }
+
+        .badge-user {
+            background-color: #e0e7ff;
+            color: #3730a3;
+            border: 1px solid #c7d2fe;
+        }
+
+        .badge-host {
+            background-color: #ede9fe;
+            color: #5b21b6;
+            border: 1px solid #ddd6fe;
+        }
+
+        .badge-speaker {
+            background-color: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .badge-listener {
+            background-color: #f1f5f9;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+
+        .badge-pending {
+            background-color: #ffedd5;
+            color: #9a3412;
+            border: 1px solid #fed7aa;
+        }
+
+        .scope-sys {
+            background: #f1f5f9;
+            color: #0f172a;
+            font-weight: 600;
+            padding: 1px 3px;
+            border-radius: 3px;
+            font-size: 7.5px;
+            display: inline-block;
+        }
+
+        .scope-room {
+            background: #e0f2fe;
+            color: #0369a1;
+            font-weight: 600;
+            padding: 1px 3px;
+            border-radius: 3px;
+            font-size: 7.5px;
+            display: inline-block;
+        }
+
+        code {
+            font-family: 'Consolas', 'Courier New', monospace;
+            background-color: #f1f5f9;
+            color: #0f172a;
+            padding: 1px 3px;
+            border-radius: 3px;
+            font-size: 7.5px;
+            direction: ltr;
+            display: inline-block;
+        }
+
+        ul {
+            margin: 0;
+            padding-right: 10px;
+        }
+
+        li {
+            margin-bottom: 1px;
+        }
+
+        .status-ok {
+            color: #16a34a;
+            font-weight: bold;
+            font-size: 9px;
+        }
+
+        .status-no {
+            color: #dc2626;
+            font-weight: 600;
+            font-size: 8px;
+        }
+
+        .page-break {
+            page-break-before: always;
+            break-before: page;
+        }
+
+        .page-container {
+            height: 195mm;
+            max-height: 195mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+
+        .matrix-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 7px;
+            margin-top: 5px;
+        }
+
+        .card {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 6px 8px;
+        }
+
+        .card-title {
+            font-weight: 700;
+            font-size: 9.2px;
+            margin-bottom: 3px;
+            color: #0f172a;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 2px;
+        }
+
+        .card-body {
+            font-size: 7.8px;
+            color: #334155;
+            line-height: 1.35;
+        }
+
+        .footer {
+            margin-top: 3px;
+            padding-top: 2px;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+            font-size: 7.5px;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ======================================================== -->
+    <!-- PAGE 1: COMPREHENSIVE ROLES MATRIX                        -->
+    <!-- ======================================================== -->
+    <div class="page-container">
+        <div>
+            <div class="header-container">
+                <div class="title-area">
+                    <h1>Cocorra — دليل ومصفوفة الأدوار والصلاحيات (Roles & Permissions)</h1>
+                    <p>توثيق نظام الصلاحيات المطبق (RBAC)، حماية الأدمن والحصانة، التحكم في الغرف الصوتية، وعزل الوصول للـ API</p>
+                </div>
+                <div class="meta-tag">
+                    Backend: .NET 10 | Security Matrix v1.1
+                </div>
+            </div>
+
+            <p class="intro">
+                ينقسم نظام الصلاحيات في <strong>Cocorra</strong> إلى مستويين متكاملين:
+                <strong>(1) أدوار النظام (System Roles):</strong> صلاحيات الحساب على مستوى الـ API وقاعدة البيانات.
+                <strong>(2) أدوار الغرف الصوتية (Room Roles):</strong> صلاحيات المستخدم التفاعلية داخل الجلسات المباشرة عبر SignalR و LiveKit.
+            </p>
+
+            <h2>1. جدول الأدوار الشامل (Comprehensive Roles Matrix)</h2>
+            <table class="roles-table">
+                <thead>
+                    <tr>
+                        <th style="width: 13%;">الرول (Role)</th>
+                        <th style="width: 7%;">المستوى</th>
+                        <th style="width: 17%;">التعريف والدور في المنصة</th>
+                        <th style="width: 29%;">الصلاحيات والوظائف الأساسية</th>
+                        <th style="width: 20%;">أهم القيود والموانع</th>
+                        <th style="width: 14%;">آلية التعيين</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <span class="badge badge-admin">Admin</span><br>
+                            <strong>المدير العام</strong>
+                        </td>
+                        <td><span class="scope-sys">نظام (System)</span></td>
+                        <td>أعلى سلطة إدارية ورقابية في المنصة مع كامل الصلاحيات لإدارة المستخدمين والأمان والعمليات.</td>
+                        <td>
+                            <ul>
+                                <li>إدارة الحسابات وحالاتها (Active, Suspended, Banned, Rejected).</li>
+                                <li>حظر الأجهزة والبريد فورياً (<code>BlockDeviceAndEmail</code>).</li>
+                                <li>طرد اتصالات الـ SignalR النشطة فوراً للمحظورين (<code>ForceDisconnect</code>).</li>
+                                <li>إسناد وتعديل أدوار المستخدمين (<code>ManageUserRoles</code>).</li>
+                                <li>معالجة البلاغات وتطبيق العقوبات والدعم المباشر (<code>SupportHub</code>).</li>
+                                <li>استعراض سجل كافة الغرف السابقة (<code>admin/history</code>).</li>
+                                <li>تحليلات الأمان وصحة النظام والـ Backfill والـ MetricsRegistry.</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li><strong>حصانة الأدمن (Admin Immunity):</strong> لا يمكن لأي أدمن معاقبة أو حظر أو تعديل أدوار أدمن آخر.</li>
+                                <li>ممنوع من تعديل حالة حسابه بنفسه أو حظر أجهزته.</li>
+                                <li>لا يُمنح عبر الـ API العادي لمنع التصعيد الذاتي.</li>
+                            </ul>
+                        </td>
+                        <td>يُنشأ عبر <code>IdentitySeeder</code> عند أول تشغيل، أو يدوياً عبر قاعدة البيانات.</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="badge badge-moderator">Moderator</span><br>
+                            <strong>المشرف / المساعد</strong>
+                        </td>
+                        <td><span class="scope-sys">نظام (System)</span></td>
+                        <td>رول مساند للأدمن، مسؤول عن الرقابة التشغيلية، حظر المخالفين، فحص البلاغات، وإدارة الدعم الحي.</td>
+                        <td>
+                            <ul>
+                                <li>استعراض والبحث في قائمة المستخدمين وملفاتهم (<code>AdminController</code>).</li>
+                                <li>تعديل حالات المستخدمين (تنشيط، تجميد، حظر، رفض) وطرد اتصالاتهم فورياً.</li>
+                                <li>حظر الأجهزة والبريد فورياً (<code>BlockDeviceAndEmail</code>).</li>
+                                <li>مراجعة البلاغات وتحديث حالتها واتخاذ إجراءات العقوبة.</li>
+                                <li>استلام والرد على محادثات وتذاكر الدعم الفني الحي (<code>SupportHub</code>).</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li><strong>حصانة الأدمن (Admin Immunity):</strong> يمنع تماماً من اتخاذ أي إجراء عقابي أو حظر أو تعديل ضد أي Admin.</li>
+                                <li><strong>ممنوع</strong> من إدارة أدوار النظام (<code>RolesController</code>).</li>
+                                <li><strong>ممنوع</strong> من تحليلات المنصة والـ Backfill (<code>AnalyticsController</code>).</li>
+                                <li><strong>ممنوع</strong> من الاطلاع على أرشيف الغرف (<code>admin/history</code>).</li>
+                            </ul>
+                        </td>
+                        <td>يُسند للمستخدم بواسطة الـ <strong>Admin</strong> عبر <code>POST /Api/V1/Roles/ManageUser</code>.</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="badge badge-coach">Coach</span><br>
+                            <strong>المدرب / الكوتش</strong>
+                        </td>
+                        <td><span class="scope-sys">نظام (System)</span></td>
+                        <td>مستخدم معتمد ومقدم جلسات تدريبية، يمتلك صلاحية إنشاء وإدارة الغرف الصوتية.</td>
+                        <td>
+                            <ul>
+                                <li>إنشاء الغرف الصوتية العامة والخاصة (يصبح مضيفاً لها Host).</li>
+                                <li>استضافة الجلسات التدريبية وتلقي طلبات المواضيع الخاصة (<code>TargetCoachId</code>).</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li><strong>ممنوع تماماً من الوصول لمسارات لوحة الإدارة والتحليلات</strong> (<code>AdminController</code> و <code>AnalyticsController</code>).</li>
+                                <li><strong>ممنوع</strong> من تعديل حالات المستخدمين أو حظر الأجهزة والإيميلات.</li>
+                                <li><strong>ممنوع</strong> من إدارة أدوار النظام أو رؤية بلاغات الأمان السرية.</li>
+                            </ul>
+                        </td>
+                        <td>يُسند للحساب بواسطة الـ <strong>Admin</strong> عبر <code>POST /Api/V1/Roles/ManageUser</code>.</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="badge badge-user">User</span><br>
+                            <strong>المستخدم العادي</strong>
+                        </td>
+                        <td><span class="scope-sys">نظام (System)</span></td>
+                        <td>المستخدم الأساسي للمنصة وعضو المجتمع عبر تطبيق الموبايل.</td>
+                        <td>
+                            <ul>
+                                <li>التسجيل، التحقق بالـ OTP وعينة الصوت واختبار الـ MBTI.</li>
+                                <li>إدارة البروفايل، قائمة الأصدقاء، والمحادثات المباشرة (1-on-1 Chat).</li>
+                                <li>استعراض فيد الغرف الصوتية، تفعيل التنبيهات، والانضمام.</li>
+                                <li>إرسال البلاغات وتذاكر الدعم الفني وشات الدعم المباشر.</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li><strong>ممنوع من إنشاء الغرف الصوتية</strong> (محصورة على الكوتش والادمن فقط).</li>
+                                <li>ممنوع من مسارات لوحة الإدارة أو التحليلات نهائياً (403 Forbidden).</li>
+                                <li>ممنوع من استعراض أدوار النظام أو إدارتها.</li>
+                            </ul>
+                        </td>
+                        <td>يُمنح تلقائياً عند اكتمال التسجيل في <code>AuthServices.RegisterAsync</code>.</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="badge badge-host">Host / Coach</span><br>
+                            <strong>مضيف الغرفة الصوتية</strong>
+                        </td>
+                        <td><span class="scope-room">غرفة (Room)</span></td>
+                        <td>منشئ الغرفة أو الكوتش الذي بدأ الغرفة المجدولة، ويمتلك السيطرة الإدارية الكاملة على الجلسة.</td>
+                        <td>
+                            <ul>
+                                <li>قبول أو رفض طلبات دخول الغرف الخاصة (<code>ApproveUser</code>).</li>
+                                <li>تصعيد المستمعين للمنصة للتحدث (<code>ApproveToStage</code>).</li>
+                                <li>إنزال المتحدثين لمقاعد الجمهور (<code>MoveToAudience</code>).</li>
+                                <li>كتم صوت المتحدثين أو منح وقت إضافي (<code>GrantExtraTime</code>).</li>
+                                <li>طرد المشارك المسيء فورياً من الغرفة (<code>KickUser</code>).</li>
+                                <li>بدء الغرفة وإنهاؤها رسمياً للجميع (<code>Start</code> / <code>End</code>).</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li>مقيد بسعة المنصة وسعة الغرفة الكلية.</li>
+                                <li>يخضع لمهلة سماح (<code>GracePeriod</code>) عند انقطاع اتصاله.</li>
+                            </ul>
+                        </td>
+                        <td>من أنشأ الغرفة أو عُين كـ <code>HostId</code> عند إنشائها.</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="badge badge-speaker">Speaker</span><br>
+                            <strong>المتحدث على المنصة</strong>
+                        </td>
+                        <td><span class="scope-room">غرفة (Room)</span></td>
+                        <td>مشارك حصل على إذن وتواجد على منصة التحدث الصوتية (<code>IsOnStage = true</code>).</td>
+                        <td>
+                            <ul>
+                                <li>نشر الصوت والتحدث للجميع عبر LiveKit كـ Publisher.</li>
+                                <li>التحكم في فتح وكتم المايك الخاص به (<code>ToggleMic</code>).</li>
+                                <li>إرسال رسائل جماعية للغرفة أو همسات خاصة للمشاركين.</li>
+                                <li>النزول من المنصة والعودة للجمهور طواعية.</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li>مقيد بعداد وقت التحدث الافتراضي للغرفة.</li>
+                                <li>يمكن للهوست كتم صوته أو إنزاله في أي لحظة.</li>
+                            </ul>
+                        </td>
+                        <td>يتم تصعيده بقرار الهوست بعد رفع يده (<code>ApproveToStage</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="badge badge-listener">Listener</span><br>
+                            <strong>المستمع / الجمهور</strong>
+                        </td>
+                        <td><span class="scope-room">غرفة (Room)</span></td>
+                        <td>مشارك داخل الغرفة الصوتية في مقاعد الجمهور (<code>IsOnStage = false</code>).</td>
+                        <td>
+                            <ul>
+                                <li>الاستماع لصوت المتحدثين عبر LiveKit كـ Subscriber.</li>
+                                <li>رفع اليد لطلب التحدث (<code>RaiseHand</code>) أو خفضها.</li>
+                                <li>المشاركة في شات الغرفة أو إرسال همسات للمشاركين.</li>
+                                <li>مغادرة الغرفة في أي وقت (<code>LeaveRoom</code>).</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li>لا يمكنه فتح المايك أو بث الصوت نهائياً دون إذن.</li>
+                                <li>لا يملك أي صلاحيات طرد أو تحكم في الجلسة.</li>
+                            </ul>
+                        </td>
+                        <td>الحالة الافتراضية لأي مشارك ينضم للغرفة بنجاح.</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="badge badge-pending">Pending Approval</span><br>
+                            <strong>قيد انتظار الموافقة</strong>
+                        </td>
+                        <td><span class="scope-room">غرفة (Room)</span></td>
+                        <td>مستخدم يطلب الانضمام إلى غرفة صوتية خاصة (Private Room).</td>
+                        <td>
+                            <ul>
+                                <li>انتظار قرار الهوست في قائمة الطرق على الباب (Knocking).</li>
+                            </ul>
+                        </td>
+                        <td>
+                            <ul>
+                                <li>معزول تماماً عن الصوت والشات حتى قبول الهوست له.</li>
+                            </ul>
+                        </td>
+                        <td>تتولد تلقائياً عند محاولة دخول غرفة <code>IsPrivate = true</code>.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="footer">
+            الصفحة 1 من 3 • وثيقة الصلاحيات الرسمية لمنصة Cocorra
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- PAGE 2: ENDPOINT MATRICES                                 -->
+    <!-- ======================================================== -->
+    <div class="page-break"></div>
+
+    <div class="page-container">
+        <div>
+            <div class="header-container">
+                <div class="title-area">
+                    <h1>2. مصفوفة الصلاحيات حسب الـ Endpoints (Endpoint Access Matrix)</h1>
+                    <p>جدول توزيع الصلاحيات الدقيقة لكل مسار API و SignalR Hub مع توضيح حصانة الأدمن</p>
+                </div>
+                <div class="meta-tag">
+                    Page 2: API Endpoints
+                </div>
+            </div>
+
+            <div class="matrix-grid">
+                <!-- Column 1 -->
+                <div>
+                    <h3>أ. لوحة الإدارة (<code>AdminController</code>) — <code>/Api/V1/Admin/</code></h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 40%;">الـ Endpoint</th>
+                                <th style="width: 30%;">الوظيفة</th>
+                                <th style="width: 7.5%; text-align: center;">Admin</th>
+                                <th style="width: 7.5%; text-align: center;">Mod</th>
+                                <th style="width: 7.5%; text-align: center;">Coach</th>
+                                <th style="width: 7.5%; text-align: center;">User</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>GET /Users</code></td>
+                                <td>استعراض والبحث في المستخدمين</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /User/{id}</code></td>
+                                <td>عرض الملف الكامل لمستخدم</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /Dashboard/Stats</code></td>
+                                <td>إحصائيات لوحة القيادة العامة</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>PUT /User/ChangeStatus/{id}</code></td>
+                                <td>تغيير حالة مستخدم + طرد اتصاله</td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>PUT /Users/BulkChangeStatus</code></td>
+                                <td>تغيير جماعي لحالات مستخدمين</td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /BlockDeviceAndEmail</code></td>
+                                <td>حظر الجهاز والإيميل والحساب</td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p style="font-size: 7.2px; color: #64748b; margin: 2px 0 4px 0;">* خاضع لـ <strong>Admin Immunity</strong>: يرفض النظام برمجياً اتخاذ أي إجراء ضد أي حساب يحمل رول Admin.</p>
+
+                    <h3>ب. إدارة الأدوار (<code>RolesController</code>) — <code>/Api/V1/Roles/</code></h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 40%;">الـ Endpoint</th>
+                                <th style="width: 30%;">الوظيفة</th>
+                                <th style="width: 7.5%; text-align: center;">Admin</th>
+                                <th style="width: 7.5%; text-align: center;">Mod</th>
+                                <th style="width: 7.5%; text-align: center;">Coach</th>
+                                <th style="width: 7.5%; text-align: center;">User</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>GET /List</code></td>
+                                <td>عرض قائمة كافة أدوار النظام</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /{id}</code></td>
+                                <td>عرض تفاصيل دور محدد</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /ManageUser</code></td>
+                                <td>إسناد وإزالة أدوار للمستخدمين</td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /Users/{roleName}</code></td>
+                                <td>عرض المستخدمين في دور معين</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>ج. الغرف الصوتية (<code>RoomsController</code> & <code>RoomHub</code>)</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 44%;">الإجراء / المسار</th>
+                                <th style="width: 56%;">الصلاحية والمسؤول المسموح له</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>POST /Api/V1/Room/Create</code></td>
+                                <td><strong>Admin و Coach فقط</strong> (مستخدم عادي أو مشرف: 403 Forbidden).</td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /Start</code> & <code>POST /End</code></td>
+                                <td><strong>Host الغرفة فقط</strong> لبدء أو إنهاء الجلسة.</td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /admin/history</code></td>
+                                <td><strong>Admin النظام فقط</strong> لاستعراض أرشيف الغرف المنتهية.</td>
+                            </tr>
+                            <tr>
+                                <td><code>RoomHub.ApproveToStage / MoveToAudience</code></td>
+                                <td><strong>Host الغرفة فقط</strong> للتحكم في مقاعد المنصة.</td>
+                            </tr>
+                            <tr>
+                                <td><code>RoomHub.GrantExtraTime / KickUser</code></td>
+                                <td><strong>Host الغرفة فقط</strong> لمنح وقت أو طرد مشارك.</td>
+                            </tr>
+                            <tr>
+                                <td><code>RoomHub.ToggleMic</code></td>
+                                <td><strong>المتحدثين على المنصة أو الهوست فقط</strong>.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Column 2 -->
+                <div>
+                    <h3>د. تحليلات المنصة (<code>AnalyticsController</code>) — <code>/Api/V1/Analytics/</code></h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 40%;">الـ Endpoint</th>
+                                <th style="width: 30%;">الوظيفة</th>
+                                <th style="width: 7.5%; text-align: center;">Admin</th>
+                                <th style="width: 7.5%; text-align: center;">Mod</th>
+                                <th style="width: 7.5%; text-align: center;">Coach</th>
+                                <th style="width: 7.5%; text-align: center;">User</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>GET /Summary</code></td>
+                                <td>نظرة عامة على نشاط المنصة</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /Users/Growth</code></td>
+                                <td>نمو المستخدمين وتوزيع الحالات</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /Rooms</code></td>
+                                <td>إحصائيات الغرف الصوتية</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /CohortGrid</code></td>
+                                <td>شبكة الاحتفاظ الأسبوعية (Cohorts)</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /ReportRate</code></td>
+                                <td>معدل البلاغات لكل 1,000 انضمام</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /ReviewLatency</code></td>
+                                <td>سرعة مراجعة العينات الصوتية</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /Support</code></td>
+                                <td>إحصائيات التذاكر ومحادثات الدعم</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /SystemHealth</code></td>
+                                <td>فحص صحة خط معالجة البيانات</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /Backfill</code></td>
+                                <td>إعادة تجميع الأرقام التاريخية</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /MetricsRegistry</code></td>
+                                <td>سجل عقود وتعاريف المقاييس</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>هـ. البلاغات والدعم (<code>SupportController</code>) — <code>/Api/V1/Support/</code></h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 40%;">الـ Endpoint</th>
+                                <th style="width: 30%;">الوظيفة</th>
+                                <th style="width: 7.5%; text-align: center;">Admin</th>
+                                <th style="width: 7.5%; text-align: center;">Mod</th>
+                                <th style="width: 7.5%; text-align: center;">Coach</th>
+                                <th style="width: 7.5%; text-align: center;">User</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>POST /Report</code> & <code>/Ticket</code></td>
+                                <td>إرسال بلاغ أو تذكرة مساعدة</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /chat/send</code></td>
+                                <td>إرسال رسالة في شات الدعم الحي</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>GET /admin/reports</code></td>
+                                <td>استعراض وتصفية بلاغات المستخدمين</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /admin/reports/{id}/action</code></td>
+                                <td>اتخاذ عقوبة (تحذير، إيقاف، حظر)</td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅*</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /chat/{id}/claim & reply</code></td>
+                                <td>استلام شات الدعم والرد عليه</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>POST /chat/{id}/close</code></td>
+                                <td>إنهاء وإغلاق محادثة الدعم</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌ 403</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>SupportHub: Admins Group</code></td>
+                                <td>استقبال تنبيهات البلاغات الحية</td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-ok">✅</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌</span></td>
+                                <td style="text-align: center;"><span class="status-no">❌</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="footer">
+            الصفحة 2 من 3 • وثيقة الصلاحيات الرسمية لمنصة Cocorra
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- PAGE 3: SECURITY ARCHITECTURE                             -->
+    <!-- ======================================================== -->
+    <div class="page-break"></div>
+
+    <div class="page-container">
+        <div>
+            <div class="header-container">
+                <div class="title-area">
+                    <h1>3. القواعد والاعتبارات الأمنية (Security & Architecture Highlights)</h1>
+                    <p>السياسات الأمنية، حصانة الأدمن، آليات الرقابة، وإدارة الجلسات الحية في الباك إند</p>
+                </div>
+                <div class="meta-tag">
+                    Page 3: Security & Session Rules
+                </div>
+            </div>
+
+            <div class="card-grid">
+                <div class="card">
+                    <div class="card-title">🛡️ 1. منع التصعيد الذاتي (No Elevation)</div>
+                    <div class="card-body">
+                        <p>تم تحصين نقطة النهاية <code>ManageUserRolesAsync</code> برمجياً في الـ BLL بحيث ترفض صراحة إسناد رول <code>Admin</code> لأي حساب.</p>
+                        <ul>
+                            <li>تعيين <strong>Admin</strong> يتم حصرياً عبر <code>IdentitySeeder</code> عند إقلاع السيرفر أو يدوياً عبر قاعدة البيانات.</li>
+                            <li>يُمنع أي Admin من تعديل حالة حسابه بنفسه لمنع تعطيل الإدارة.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">⚡ 2. عزل الاتصالات الفوري (ForceDisconnect)</div>
+                    <div class="card-body">
+                        <p>نظراً لكون توكنات الـ JWT بطبيعتها عديمة الحالة (Stateless) ولا يمكن إبطالها لحظياً قبل انتهاء صلاحيتها:</p>
+                        <ul>
+                            <li>عند تغيير حالة أي مستخدم إلى <code>Banned</code> أو <code>Rejected</code>، أو طلب <code>BlockDeviceAndEmail</code>.</li>
+                            <li>يقوم النظام بحصر كافة اتصالات الـ SignalR في <code>RoomHub</code> وبث رسالة <code>ForceDisconnect</code> وقطع السوكيت فوراً لطرده.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">⚖️ 3. حصانة الأدمن (Admin Immunity)</div>
+                    <div class="card-body">
+                        <p>حماية صارمة على مستوى طبقة الخدمات (BLL) تمنع استهداف أي حساب يحمل رتبة <code>Admin</code>:</p>
+                        <ul>
+                            <li><strong>Moderator vs Admin:</strong> لا يستطيع المشرف حظر الأدمن أو تغيير حالته أو أجهزته أو اتخاذ إجراء ضده.</li>
+                            <li><strong>Admin vs Admin:</strong> لا يستطيع أي مدير معاقبة مدير آخر أو تعديل أدواره منعاً للنزاعات الداخلية.</li>
+                            <li>تم الفحص والتحقق عبر <code>IsInRoleAsync(user, "Admin")</code> في كافة الخدمات الإدارية.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">⏳ 4. حماية انقطاع الكوتش (Host Grace)</div>
+                    <div class="card-body">
+                        <p>في الغرف الصوتية، انقطاع اتصال الهوست مؤقتاً بسبب تذبذب الشبكة لا ينهي الغرفة فوراً:</p>
+                        <ul>
+                            <li>تدخل الغرفة في مهلة سماح <code>HostReconnectGraceSeconds</code> مع عد تنازلي للجمهور.</li>
+                            <li>إذا لم يعد الهوست قبل انتهاء المهلة، تقوم خدمة خلفية <code>HostReconnectGraceService</code> بإغلاق الغرفة تلقائياً لحماية الموارد.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 8px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 10px;">
+                <h4 style="margin: 0 0 4px 0; color: #0f172a; font-size: 9.5px;">📋 ملخص تدفق الصلاحيات حسب نوع الحساب (Identity Summary)</h4>
+                <table style="margin-bottom: 0;">
+                    <thead>
+                        <tr>
+                            <th style="width: 14%;">نوع الرول</th>
+                            <th style="width: 25%;">الوصول لبيانات التطبيق</th>
+                            <th style="width: 33%;">الوصول للوحة الإدارة (Admin Panel)</th>
+                            <th style="width: 28%;">التحكم في الغرف الصوتية</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge badge-admin">Admin</span></td>
+                            <td>كامل البيانات والتقارير والشكاوى الحساسة</td>
+                            <td>كامل الصلاحيات (حظر، تغيير حالات، أدوار، أجهزة) + خاضع لحصانة الأدمن</td>
+                            <td>أرشيف الغرف الشامل وإمكانية استضافة الغرف الصوتية</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-moderator">Moderator</span></td>
+                            <td>بيانات المستخدمين، البلاغات، محادثات وتذاكر الدعم</td>
+                            <td>صلاحيات إشرافية (حظر أجهزة ومستخدمين، بلاغات، دعم) + محمي بعدم المساس بالأدمن</td>
+                            <td>مشارك عادي في الغرف (لا ينشئ غرفاً إلا إذا امتلك رول Coach)</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-coach">Coach</span></td>
+                            <td>بياناته الشخصية، والغرف الخاصة به والجلسات</td>
+                            <td>ممنوع تماماً (403 Forbidden على جميع مسارات الإدارة والتحليلات)</td>
+                            <td>إنشاء وإدارة الغرف الخاصة به، تصعيد المتحدثين، طرد المسيء</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-user">User</span></td>
+                            <td>بياناته الشخصية، الأصدقاء، الغرف العامة</td>
+                            <td>ممنوع تماماً (403 Forbidden على جميع المسارات الإدارية)</td>
+                            <td>استماع، رفع اليد، التحدث عند القبول (ممنوع من إنشاء غرف)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="footer">
+            الصفحة 3 من 3 • وثيقة الصلاحيات الرسمية لمنصة Cocorra • تم التوليد آلياً ومطابق للكود المصدري الفعلي
+        </div>
+    </div>
+
+</body>
+</html>

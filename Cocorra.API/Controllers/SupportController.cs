@@ -52,7 +52,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpGet(Router.SupportRouting.AdminReports)]
         public async Task<IActionResult> GetReports([FromQuery] ReportCategory? category, [FromQuery] string? status)
         {
@@ -60,7 +60,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpPut(Router.SupportRouting.AdminUpdateReportStatus)]
         public async Task<IActionResult> UpdateReportStatus(Guid id, [FromBody] UpdateReportStatusDto dto)
         {
@@ -70,7 +70,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpPost(Router.SupportRouting.AdminTakeReportAction)]
         public async Task<IActionResult> TakeReportAction(Guid id, [FromBody] TakeReportActionDto dto)
         {
@@ -111,7 +111,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpPost(Router.SupportRouting.Prefix + "/chat/{chatId:guid}/claim")]
         public async Task<IActionResult> ClaimChat(Guid chatId)
         {
@@ -129,7 +129,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpPost(Router.SupportRouting.Prefix + "/chat/{chatId:guid}/reply")]
         public async Task<IActionResult> AdminReply(Guid chatId, [FromBody] SendMessageDto dto)
         {
@@ -149,7 +149,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpPost(Router.SupportRouting.Prefix + "/chat/{chatId:guid}/close")]
         public async Task<IActionResult> CloseChat(Guid chatId)
         {
@@ -160,7 +160,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpGet(Router.SupportRouting.Prefix + "/chat/pending")]
         public async Task<IActionResult> GetPendingChats([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
@@ -171,7 +171,7 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Moderator")]
         [HttpGet(Router.SupportRouting.Prefix + "/chat/active")]
         public async Task<IActionResult> GetAdminActiveChats([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
