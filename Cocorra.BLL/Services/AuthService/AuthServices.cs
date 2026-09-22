@@ -23,6 +23,7 @@ using System.Threading.Tasks;
 using System.Security.Cryptography;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.BlockedDevicesService;
+using Microsoft.Extensions.Logging;
 
 namespace Cocorra.BLL.Services.AuthServices
 {
@@ -39,6 +40,7 @@ namespace Cocorra.BLL.Services.AuthServices
         private readonly IEventTracker _eventTracker;
         private readonly IRoomService _roomService;
         private readonly IBlockedDevicesService _blockedDevicesService;
+        private readonly ILogger<AuthServices>? _logger;
 
         public AuthServices(
             UserManager<ApplicationUser> userManager,
@@ -51,7 +53,8 @@ namespace Cocorra.BLL.Services.AuthServices
             IRoomRepository roomRepository,
             IEventTracker eventTracker,
             IRoomService roomService,
-            IBlockedDevicesService blockedDevicesService)
+            IBlockedDevicesService blockedDevicesService,
+            ILogger<AuthServices>? logger = null)
         {
             _blockedDevicesService = blockedDevicesService;
             _uploadImage = uploadImage;
@@ -64,6 +67,7 @@ namespace Cocorra.BLL.Services.AuthServices
             _roomRepository = roomRepository;
             _eventTracker = eventTracker;
             _roomService = roomService;
+            _logger = logger;
         }
 
         public async Task<Response<object>> RegisterAsync(RegisterDto dto)
@@ -541,6 +545,16 @@ namespace Cocorra.BLL.Services.AuthServices
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null) return BadRequest<string>("User not found.");
 
+            // Guard against deleting the last remaining Administrator account (platform lockout protection)
+            if (await _userManager.IsInRoleAsync(user, "Admin"))
+            {
+                var admins = await _userManager.GetUsersInRoleAsync("Admin");
+                if (admins.Count <= 1)
+                {
+                    return BadRequest<string>("Cannot delete the last remaining Administrator account.");
+                }
+            }
+
             // End any Live/Scheduled rooms hosted by this user to prevent ghost rooms.
             //
             // Through EndRoomAsync, not by writing Status here. Setting the column directly
@@ -549,6 +563,11 @@ namespace Cocorra.BLL.Services.AuthServices
             // left GET /Room/{id}/Token minting fresh 4-hour credentials for a room that had
             // already ended; and no room_ended event was emitted, so the closure was invisible
             // to analytics.
+            //
+            // Outside the deletion transaction, because it makes outbound LiveKit calls: an
+            // unreachable LiveKit must not hold the transaction open or abort the deletion.
+            // The room ROWS are removed further down regardless, so a failure here can only
+            // strand a LiveKit session, never the account.
             var hostedRoomIds = await _context.Rooms
                 .Where(r => r.HostId == userId &&
                        (r.Status == RoomStatus.Live || r.Status == RoomStatus.Scheduled))
@@ -557,43 +576,183 @@ namespace Cocorra.BLL.Services.AuthServices
 
             foreach (var roomId in hostedRoomIds)
             {
-                await _roomService.EndRoomAsync(roomId, userId, RoomEndReasons.HostAccountDeleted);
-            }
-
-            // Clean up all Restrict-FK rows to allow user deletion
-            await _context.FriendRequests
-                .Where(fr => fr.SenderId == userId || fr.ReceiverId == userId)
-                .ExecuteDeleteAsync();
-
-            await _context.Messages
-                .Where(m => m.SenderId == userId || m.ReceiverId == userId)
-                .ExecuteDeleteAsync();
-
-            await _context.UserBlocks
-                .Where(ub => ub.BlockerId == userId || ub.BlockedId == userId)
-                .ExecuteDeleteAsync();
-
-            await _context.Notifications
-                .Where(n => n.UserId == userId)
-                .ExecuteDeleteAsync();
-
-            try
-            {
-                _eventTracker.Track(EventTypes.AccountDeleted, userId, new { reason = "User requested deletion" });
-                var result = await _userManager.DeleteAsync(user);
-
-                if (!result.Succeeded)
+                try
                 {
-                    var errors = string.Join(", ", result.Errors.Select(e => e.Description));
-                    return BadRequest<string>($"Account deletion failed: {errors}");
+                    await _roomService.EndRoomAsync(roomId, userId, RoomEndReasons.HostAccountDeleted);
                 }
+                catch (Exception)
+                {
+                    // Teardown is best-effort; the account still gets deleted.
+                }
+            }
 
-                return Success("Account deleted successfully.");
-            }
-            catch (DbUpdateException)
+            // Leave any live rooms where the user is currently participating as listener/speaker
+            var activeParticipatingRoomIds = await _context.RoomParticipants
+                .Where(p => p.UserId == userId && p.Room != null && p.Room.Status == RoomStatus.Live)
+                .Select(p => p.RoomId)
+                .ToListAsync();
+
+            foreach (var roomId in activeParticipatingRoomIds)
             {
-                return BadRequest<string>("Cannot delete account due to remaining database references. Please contact support.");
+                try
+                {
+                    await _roomService.LeaveRoomCleanupAsync(roomId, userId);
+                }
+                catch (Exception)
+                {
+                    // Teardown is best-effort; the account still gets deleted.
+                }
             }
+
+            // Assets live in MinIO, which is not transactional. Capture the paths now and
+            // delete the objects only once the database side has committed, so a rolled-back
+            // deletion can never leave a live account whose voice/photo have been destroyed.
+            var voicePathToDelete = user.VoiceVerificationPath;
+            var profilePicturePathToDelete = user.ProfilePicturePath;
+
+            var strategy = _context.Database.CreateExecutionStrategy();
+            var response = await strategy.ExecuteAsync(async () =>
+            {
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    // Every FK into AspNetUsers that is Restrict/NoAction has to be cleared by
+                    // hand — only Notifications, RoomReminders and BlockedDevices cascade, and
+                    // SupportTickets/UserEvents/Reports.ReportedUserId are SetNull. Previously
+                    // just the four below were handled, so anyone who had ever joined a room,
+                    // hosted one, voted on a topic or filed a report hit DbUpdateException and
+                    // was told to contact support — i.e. almost every real account.
+                    await _context.FriendRequests
+                        .Where(fr => fr.SenderId == userId || fr.ReceiverId == userId)
+                        .ExecuteDeleteAsync();
+
+                    await _context.Messages
+                        .Where(m => m.SenderId == userId || m.ReceiverId == userId)
+                        .ExecuteDeleteAsync();
+
+                    await _context.UserBlocks
+                        .Where(ub => ub.BlockerId == userId || ub.BlockedId == userId)
+                        .ExecuteDeleteAsync();
+
+                    await _context.Notifications
+                        .Where(n => n.UserId == userId)
+                        .ExecuteDeleteAsync();
+
+                    // TopicVotes.UserId is Restrict. Their own votes go first; votes cast by
+                    // OTHER users on this user's topic requests are cascaded by the delete below.
+                    await _context.TopicVotes
+                        .Where(v => v.UserId == userId)
+                        .ExecuteDeleteAsync();
+
+                    // RoomTopicRequests.RequesterId is Restrict and non-nullable, so the row
+                    // must go. TargetCoachId is Restrict but nullable — null it instead, so a
+                    // coach deleting their account does not destroy other users' topic requests.
+                    await _context.RoomTopicRequests
+                        .Where(tr => tr.RequesterId == userId)
+                        .ExecuteDeleteAsync();
+
+                    await _context.RoomTopicRequests
+                        .Where(tr => tr.TargetCoachId == userId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(tr => tr.TargetCoachId, (Guid?)null));
+
+                    // RoomParticipants.UserId is Restrict — this is the row almost every real
+                    // user has, and the single biggest reason deletion used to fail.
+                    await _context.RoomParticipants
+                        .Where(p => p.UserId == userId)
+                        .ExecuteDeleteAsync();
+
+                    // Close any open or pending support chats belonging to this user
+                    await _context.SupportChats
+                        .Where(sc => sc.UserId == userId.ToString() && sc.Status != SupportChatStatus.Closed)
+                        .ExecuteUpdateAsync(s => s.SetProperty(sc => sc.Status, SupportChatStatus.Closed)
+                                                  .SetProperty(sc => sc.ClosedAt, DateTime.UtcNow));
+
+                    // Reports.ReporterId is Restrict and non-nullable. (Reports AGAINST this
+                    // user are kept: ReportedUserId is SetNull, so moderation history survives
+                    // in anonymised form.)
+                    await _context.Reports
+                        .Where(r => r.ReporterId == userId)
+                        .ExecuteDeleteAsync();
+
+                    // Rooms.HostId is Restrict and non-nullable, so hosted rooms cannot outlive
+                    // their host and must be removed. Reports.ReportedRoomId is an optional FK
+                    // with no cascade configured (NO ACTION at the database), so it has to be
+                    // nulled first or the room delete fails. RoomParticipants and RoomReminders
+                    // cascade from Room and need no explicit cleanup.
+                    var allHostedRoomIds = await _context.Rooms
+                        .Where(r => r.HostId == userId)
+                        .Select(r => r.Id)
+                        .ToListAsync();
+
+                    if (allHostedRoomIds.Count > 0)
+                    {
+                        await _context.Reports
+                            .Where(r => r.ReportedRoomId != null && allHostedRoomIds.Contains(r.ReportedRoomId.Value))
+                            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ReportedRoomId, (Guid?)null));
+
+                        await _context.Rooms
+                            .Where(r => r.HostId == userId)
+                            .ExecuteDeleteAsync();
+                    }
+
+                    // Pass userId: null so background EventFlushService doesn't fail on FK constraint
+                    // once AspNetUsers row is committed as deleted.
+                    _eventTracker.Track(
+                        EventTypes.AccountDeleted,
+                        userId: null,
+                        properties: new { deletedUserId = userId, reason = "User requested deletion" });
+
+                    // The rows above were removed with ExecuteDeleteAsync, which goes straight
+                    // to the database and never updates the change tracker. Whatever
+                    // EndRoomAsync and the queries above loaded on this scoped context is
+                    // therefore still tracked, and still fixed up into the user's navigation
+                    // collections, all pointing at rows that no longer exist. Deleting the user
+                    // in that state makes EF cascade over the stale graph and abort with
+                    // "the association ... has been severed" before a single statement runs.
+                    //
+                    // Detaching alone is not enough: Remove() re-discovers the graph through the
+                    // navigations still hanging off the user instance, so those are emptied too.
+                    _context.ChangeTracker.Clear();
+                    user.RoomParticipations.Clear();
+                    user.OwnedRooms.Clear();
+                    user.BlockedDevices.Clear();
+
+                    var result = await _userManager.DeleteAsync(user);
+                    if (!result.Succeeded)
+                    {
+                        await transaction.RollbackAsync();
+                        var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+                        return BadRequest<string>($"Account deletion failed: {errors}");
+                    }
+
+                    await transaction.CommitAsync();
+                    return Success("Account deleted successfully.");
+                }
+                catch (DbUpdateException ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(ex, "DbUpdateException occurred while deleting account for user {UserId}.", userId);
+                    return BadRequest<string>("Cannot delete account due to remaining database references. Please contact support.");
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger?.LogError(ex, "Unexpected exception occurred while deleting account for user {UserId}.", userId);
+                    return BadRequest<string>("An unexpected error occurred during account deletion. Please try again.");
+                }
+            });
+
+            // PDPL treats the voice sample as biometric data, so erasure has to reach the
+            // object store too — previously the recording and photo outlived the account
+            // indefinitely. Best-effort: the account is already gone, and failing the request
+            // now would tell the user their deletion did not happen when it did.
+            if (response.Succeeded)
+            {
+                try { _uploadVoice.DeleteVoice(voicePathToDelete); } catch (Exception) { }
+                try { _uploadImage.DeleteImage(profilePicturePathToDelete); } catch (Exception) { }
+            }
+
+            return response;
         }
 
         private string GenerateRefreshToken()
