@@ -131,6 +131,34 @@ namespace Cocorra.DAL.Models
         /// </summary>
         public const string RoomFeedbackSubmitted       = "room_feedback_submitted";
 
+        // ── Room invite links ────────────────────────────────────────────────
+        // Every invite event carries roomId and inviteId. NEVER the invite code: it is a
+        // bearer secret, and anyone who can read the event table could otherwise join.
+
+        /// <summary>A host or active participant created an invite link. Carries expiresInHours.</summary>
+        public const string RoomInviteCreated           = "room_invite_created";
+
+        /// <summary>
+        /// An invite code was looked up (anonymous, so userId is null). Carries the invite's
+        /// effective status, so resolves of dead links are countable too.
+        /// </summary>
+        public const string RoomInviteResolved          = "room_invite_resolved";
+
+        /// <summary>A signed-in user tried to accept an invite that exists.</summary>
+        public const string RoomInviteAcceptAttempted   = "room_invite_accept_attempted";
+
+        /// <summary>
+        /// The accept joined the user. inviteConsumed is false when they were already in the
+        /// room, in which case the invite stays usable.
+        /// </summary>
+        public const string RoomInviteAccepted          = "room_invite_accepted";
+
+        /// <summary>The accept did not join the user. Carries a reason code.</summary>
+        public const string RoomInviteAcceptFailed      = "room_invite_accept_failed";
+
+        /// <summary>The inviter, the room host or an admin revoked an invite.</summary>
+        public const string RoomInviteRevoked           = "room_invite_revoked";
+
         // ── P3: failure paths and media telemetry ───────────────────────────
 
         /// <summary>

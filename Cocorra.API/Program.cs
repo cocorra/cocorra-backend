@@ -179,6 +179,10 @@ builder.Services.AddScoped<ISupportRepository, SupportRepository>();
 builder.Services.AddScoped<ISupportService, SupportService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.RoomFeedbackRepository.IRoomFeedbackRepository, Cocorra.DAL.Repository.RoomFeedbackRepository.RoomFeedbackRepository>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RoomFeedbackService.IRoomFeedbackService, Cocorra.BLL.Services.RoomFeedbackService.RoomFeedbackService>();
+builder.Services.Configure<Cocorra.BLL.Services.RoomInviteService.InviteSettings>(
+    builder.Configuration.GetSection(Cocorra.BLL.Services.RoomInviteService.InviteSettings.SectionName));
+builder.Services.AddScoped<Cocorra.DAL.Repository.RoomInviteRepository.IRoomInviteRepository, Cocorra.DAL.Repository.RoomInviteRepository.RoomInviteRepository>();
+builder.Services.AddScoped<Cocorra.BLL.Services.RoomInviteService.IRoomInviteService, Cocorra.BLL.Services.RoomInviteService.RoomInviteService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IOTPService, OTPService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.UserBlockRepository.IUserBlockRepository, Cocorra.DAL.Repository.UserBlockRepository.UserBlockRepository>();
@@ -410,6 +414,19 @@ builder.Services.AddRateLimiter(options =>
             {
                 AutoReplenishment = true,
                 PermitLimit = 100, // max 100 requests per minute per IP
+                QueueLimit = 0,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+
+    // Invite resolve/accept, on top of the global limit. Resolve is anonymous, so this is
+    // what bounds brute-force guessing of codes from a single address.
+    options.AddPolicy("invites", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? httpContext.Request.Headers.Host.ToString(),
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 30, // max 30 invite requests per minute per IP
                 QueueLimit = 0,
                 Window = TimeSpan.FromMinutes(1)
             }));

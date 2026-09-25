@@ -655,6 +655,21 @@ namespace Cocorra.BLL.Services.AuthServices
                         .Where(tr => tr.TargetCoachId == userId)
                         .ExecuteUpdateAsync(s => s.SetProperty(tr => tr.TargetCoachId, (Guid?)null));
 
+                    // RoomInvites.InviterUserId is Restrict and non-nullable, so their own
+                    // invites go. UsedByUserId/RevokedByUserId are NoAction but nullable — null
+                    // them so other users' invite history (and the stats) survive.
+                    await _context.RoomInvites
+                        .Where(i => i.InviterUserId == userId)
+                        .ExecuteDeleteAsync();
+
+                    await _context.RoomInvites
+                        .Where(i => i.UsedByUserId == userId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(i => i.UsedByUserId, (Guid?)null));
+
+                    await _context.RoomInvites
+                        .Where(i => i.RevokedByUserId == userId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(i => i.RevokedByUserId, (Guid?)null));
+
                     // RoomParticipants.UserId is Restrict — this is the row almost every real
                     // user has, and the single biggest reason deletion used to fail.
                     await _context.RoomParticipants

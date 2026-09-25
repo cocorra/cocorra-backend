@@ -24,6 +24,7 @@ namespace Cocorra.DAL.Data
         public DbSet<Report> Reports { get; set; }
         public DbSet<UserBlock> UserBlocks { get; set; }
         public DbSet<RoomFeedback> RoomFeedbacks { get; set; }
+        public DbSet<RoomInvite> RoomInvites { get; set; }
         public DbSet<SupportChat> SupportChats { get; set; }
         public DbSet<SupportMessage> SupportMessages { get; set; }
         public DbSet<BlockedDevices> BlockedDevices { get; set; }
@@ -224,6 +225,56 @@ namespace Cocorra.DAL.Data
                 // Admin listing is newest first.
                 e.HasIndex(f => f.CreatedAt)
                  .HasDatabaseName("IX_RoomFeedbacks_CreatedAt");
+            });
+
+            // ============================================================
+            // 6c. Room Invites
+            // ============================================================
+            // Invites go with their room. The three user FKs cannot cascade for the same
+            // multiple-cascade-path reason as RoomFeedback, so DeleteAccountAsync clears them
+            // by hand.
+            builder.Entity<RoomInvite>(e =>
+            {
+                e.HasOne(i => i.Room)
+                 .WithMany()
+                 .HasForeignKey(i => i.RoomId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasOne(i => i.InviterUser)
+                 .WithMany()
+                 .HasForeignKey(i => i.InviterUserId)
+                 .OnDelete(DeleteBehavior.Restrict);
+
+                e.HasOne(i => i.UsedByUser)
+                 .WithMany()
+                 .HasForeignKey(i => i.UsedByUserId)
+                 .OnDelete(DeleteBehavior.NoAction);
+
+                e.HasOne(i => i.RevokedByUser)
+                 .WithMany()
+                 .HasForeignKey(i => i.RevokedByUserId)
+                 .OnDelete(DeleteBehavior.NoAction);
+
+                // Every resolve/accept/revoke looks the invite up by its code.
+                e.HasIndex(i => i.InviteCode)
+                 .IsUnique()
+                 .HasDatabaseName("UX_RoomInvites_InviteCode");
+
+                e.HasIndex(i => i.RoomId)
+                 .HasDatabaseName("IX_RoomInvites_RoomId");
+
+                e.HasIndex(i => i.InviterUserId)
+                 .HasDatabaseName("IX_RoomInvites_InviterUserId");
+
+                e.HasIndex(i => new { i.Status, i.ExpiresAt })
+                 .HasDatabaseName("IX_RoomInvites_Status_ExpiresAt");
+
+                // Admin stats filter on the creation window.
+                e.HasIndex(i => i.CreatedAt)
+                 .HasDatabaseName("IX_RoomInvites_CreatedAt");
+
+                e.HasIndex(i => i.UsedByUserId)
+                 .HasDatabaseName("IX_RoomInvites_UsedByUserId");
             });
 
             // ============================================================
