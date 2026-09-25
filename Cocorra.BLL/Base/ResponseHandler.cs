@@ -103,6 +103,27 @@ namespace Cocorra.BLL.Base
             };
         }
 
+        public Response<T> Conflict<T>(string message = "Conflict")
+        {
+            return new Response<T>()
+            {
+                StatusCode = HttpStatusCode.Conflict,
+                Succeeded = false,
+                Message = message
+            };
+        }
+
+        public Response<T> Gone<T>(T data, string message = "Gone")
+        {
+            return new Response<T>()
+            {
+                Data = data,
+                StatusCode = HttpStatusCode.Gone,
+                Succeeded = false,
+                Message = message
+            };
+        }
+
         public PagedResponse<T> Paginated<T>(
             IEnumerable<T> data,
             int totalCount,

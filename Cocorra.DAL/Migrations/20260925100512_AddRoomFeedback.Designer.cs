@@ -4,6 +4,7 @@ using Cocorra.DAL.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Cocorra.DAL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260925100512_AddRoomFeedback")]
+    partial class AddRoomFeedback
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -765,74 +768,6 @@ namespace Cocorra.DAL.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Cocorra.DAL.Models.RoomInvite", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("InviteCode")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<Guid>("InviterUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("RevokedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("RoomId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2")
-                        .HasColumnName("UpdateAt");
-
-                    b.Property<DateTime?>("UsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("UsedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedAt")
-                        .HasDatabaseName("IX_RoomInvites_CreatedAt");
-
-                    b.HasIndex("InviteCode")
-                        .IsUnique()
-                        .HasDatabaseName("UX_RoomInvites_InviteCode");
-
-                    b.HasIndex("InviterUserId")
-                        .HasDatabaseName("IX_RoomInvites_InviterUserId");
-
-                    b.HasIndex("RevokedByUserId");
-
-                    b.HasIndex("RoomId")
-                        .HasDatabaseName("IX_RoomInvites_RoomId");
-
-                    b.HasIndex("UsedByUserId")
-                        .HasDatabaseName("IX_RoomInvites_UsedByUserId");
-
-                    b.HasIndex("Status", "ExpiresAt")
-                        .HasDatabaseName("IX_RoomInvites_Status_ExpiresAt");
-
-                    b.ToTable("RoomInvites");
-                });
-
             modelBuilder.Entity("Cocorra.DAL.Models.RoomParticipant", b =>
                 {
                     b.Property<Guid>("RoomId")
@@ -1427,39 +1362,6 @@ namespace Cocorra.DAL.Migrations
                     b.Navigation("Room");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Cocorra.DAL.Models.RoomInvite", b =>
-                {
-                    b.HasOne("Cocorra.DAL.Models.ApplicationUser", "InviterUser")
-                        .WithMany()
-                        .HasForeignKey("InviterUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Cocorra.DAL.Models.ApplicationUser", "RevokedByUser")
-                        .WithMany()
-                        .HasForeignKey("RevokedByUserId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("Cocorra.DAL.Models.Room", "Room")
-                        .WithMany()
-                        .HasForeignKey("RoomId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Cocorra.DAL.Models.ApplicationUser", "UsedByUser")
-                        .WithMany()
-                        .HasForeignKey("UsedByUserId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("InviterUser");
-
-                    b.Navigation("RevokedByUser");
-
-                    b.Navigation("Room");
-
-                    b.Navigation("UsedByUser");
                 });
 
             modelBuilder.Entity("Cocorra.DAL.Models.RoomParticipant", b =>

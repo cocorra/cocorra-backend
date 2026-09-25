@@ -176,4 +176,5 @@ void onOpenCreateRoomBottomSheet(BuildContext context) {
 - [ ] استدعاء `notification_opened` عند النقر على إشعار من مركز الإشعارات.
 - [ ] التأكد من أن الـ SignalR Hub يستدعي `MuteAudio` و `UnmuteAudio` و `RaiseHand` و `LowerHand` بشكل صحيح.
 - [ ] التأكد من أن `BaseResponse` في Dart يقبل `meta` كقيمة اختيارية (`dynamic` / `nullable`).
+- [ ] التأكد من تطبيق معرف الجهاز `X-Device-Id` وحظر الأجهزة (راجع [دليل حظر الأجهزة والمعرف](file:///e:/Cocorra/Cocorra/docs/mobile/MOBILE-DEVICE-BLOCKING-AND-ID-GUIDE.md)).
 - [ ] **لا يوجد أي عمل مطلوب بخصوص شاشات الداشبورد أو الرسوم البيانية.**
