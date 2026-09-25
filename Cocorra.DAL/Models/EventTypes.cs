@@ -125,6 +125,12 @@ namespace Cocorra.DAL.Models
         /// </summary>
         public const string ModerationActionTaken       = "moderation_action_taken";
 
+        /// <summary>
+        /// A participant rated a room session (1-5). isUpdate distinguishes a first rating
+        /// from a revised one. The comment text is never included, only hasComment.
+        /// </summary>
+        public const string RoomFeedbackSubmitted       = "room_feedback_submitted";
+
         // ── P3: failure paths and media telemetry ───────────────────────────
 
         /// <summary>

@@ -37,6 +37,7 @@ namespace Cocorra.DAL.AppMetaData
 
             public const string ResetPassword = Prefix + "/ResetPassword/{id}"; // POST
             public const string Stats = Prefix + "/Dashboard/Stats";      // GET
+            public const string Feedback = Prefix + "/Feedback";          // GET ?roomId=&rating=&pageNumber=&pageSize=
         }
         public static class RolesRouting
         {
@@ -62,6 +63,9 @@ namespace Cocorra.DAL.AppMetaData
             public const string End = Prefix + "/{roomId:guid}/End";                        // POST
             public const string Token = Prefix + "/{roomId:guid}/Token";                      // GET
             public const string AdminHistory = Prefix + "/admin/history";                    // GET
+            public const string Feedback = Prefix + "/{roomId:guid}/Feedback";              // POST
+            public const string FeedbackMe = Prefix + "/{roomId:guid}/Feedback/Me";         // GET
+            public const string FeedbackSummary = Prefix + "/{roomId:guid}/Feedback/Summary"; // GET
         }
 
         public static class ProfileRouting

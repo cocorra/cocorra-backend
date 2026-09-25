@@ -23,6 +23,7 @@ namespace Cocorra.DAL.Data
         public DbSet<SupportTicket> SupportTickets { get; set; }
         public DbSet<Report> Reports { get; set; }
         public DbSet<UserBlock> UserBlocks { get; set; }
+        public DbSet<RoomFeedback> RoomFeedbacks { get; set; }
         public DbSet<SupportChat> SupportChats { get; set; }
         public DbSet<SupportMessage> SupportMessages { get; set; }
         public DbSet<BlockedDevices> BlockedDevices { get; set; }
@@ -193,6 +194,37 @@ namespace Cocorra.DAL.Data
                 .WithMany(bd => bd.UserBlocks)
                 .HasForeignKey(ub => ub.BlockedDeviceId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // ============================================================
+            // 6b. Room Feedback
+            // ============================================================
+            // Same delete behaviour as RoomParticipant: feedback goes with its room, but a
+            // user FK that also cascaded would give SQL Server a second cascade path to the
+            // row (User → Room → Feedback and User → Feedback) and the migration would fail.
+            builder.Entity<RoomFeedback>(e =>
+            {
+                e.ToTable(t => t.HasCheckConstraint(
+                    "CK_RoomFeedbacks_Rating", "[Rating] BETWEEN 1 AND 5"));
+
+                e.HasOne(f => f.Room)
+                 .WithMany()
+                 .HasForeignKey(f => f.RoomId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasOne(f => f.User)
+                 .WithMany()
+                 .HasForeignKey(f => f.UserId)
+                 .OnDelete(DeleteBehavior.Restrict);
+
+                // One feedback per user per room; submitting again updates this row.
+                e.HasIndex(f => new { f.RoomId, f.UserId })
+                 .IsUnique()
+                 .HasDatabaseName("UX_RoomFeedbacks_RoomId_UserId");
+
+                // Admin listing is newest first.
+                e.HasIndex(f => f.CreatedAt)
+                 .HasDatabaseName("IX_RoomFeedbacks_CreatedAt");
+            });
 
             // ============================================================
             // 8. Blocked Devices

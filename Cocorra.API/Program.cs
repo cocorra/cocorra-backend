@@ -177,6 +177,8 @@ builder.Services.AddScoped<IProfileService, ProfileService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.UserRepository.IUserRepository, Cocorra.DAL.Repository.UserRepository.UserRepository>();
 builder.Services.AddScoped<ISupportRepository, SupportRepository>();
 builder.Services.AddScoped<ISupportService, SupportService>();
+builder.Services.AddScoped<Cocorra.DAL.Repository.RoomFeedbackRepository.IRoomFeedbackRepository, Cocorra.DAL.Repository.RoomFeedbackRepository.RoomFeedbackRepository>();
+builder.Services.AddScoped<Cocorra.BLL.Services.RoomFeedbackService.IRoomFeedbackService, Cocorra.BLL.Services.RoomFeedbackService.RoomFeedbackService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IOTPService, OTPService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.UserBlockRepository.IUserBlockRepository, Cocorra.DAL.Repository.UserBlockRepository.UserBlockRepository>();
