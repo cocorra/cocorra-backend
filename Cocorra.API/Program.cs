@@ -183,7 +183,7 @@ builder.Services.Configure<Cocorra.BLL.Services.RoomInviteService.InviteSettings
     builder.Configuration.GetSection(Cocorra.BLL.Services.RoomInviteService.InviteSettings.SectionName));
 builder.Services.AddScoped<Cocorra.DAL.Repository.RoomInviteRepository.IRoomInviteRepository, Cocorra.DAL.Repository.RoomInviteRepository.RoomInviteRepository>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RoomInviteService.IRoomInviteService, Cocorra.BLL.Services.RoomInviteService.RoomInviteService>();
-builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddHttpClient<IEmailService, EmailService>();
 builder.Services.AddScoped<IOTPService, OTPService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.UserBlockRepository.IUserBlockRepository, Cocorra.DAL.Repository.UserBlockRepository.UserBlockRepository>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.BlockedDevicesRepository.IBlockedDevicesRepository, Cocorra.DAL.Repository.BlockedDevicesRepository.BlockedDevicesRepository>();
