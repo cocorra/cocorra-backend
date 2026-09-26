@@ -2,6 +2,7 @@ using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -13,8 +14,10 @@ namespace Cocorra.BLL.Services.Email
     /// <para>
     /// Configuration is resolved in priority order:
     /// <list type="number">
-    ///   <item>Environment variable <c>RESEND_API_KEY</c> (preferred in production/Docker).</item>
-    ///   <item>Configuration path <c>EmailSettings:ResendApiKey</c> (appsettings / user-secrets).</item>
+    ///   <item>Configuration path <c>EmailSettings:ResendApiKey</c> (appsettings / user-secrets /
+    ///         env var <c>EmailSettings__ResendApiKey</c>).</item>
+    ///   <item>Configuration key <c>RESEND_API_KEY</c> (e.g. the <c>RESEND_API_KEY</c> environment variable,
+    ///         which ASP.NET Core already loads into <see cref="IConfiguration"/>).</item>
     /// </list>
     /// Sender address is read from <c>EmailSettings:FromEmail</c> (default: <c>noreply@cocorraapp.com</c>)
     /// and <c>EmailSettings:FromName</c> (default: <c>Cocorra</c>).
@@ -38,7 +41,7 @@ namespace Cocorra.BLL.Services.Email
         }
 
         /// <inheritdoc />
-        public async Task SendEmailAsync(string to, string subject, string htmlContent)
+        public async Task SendEmailAsync(string to, string subject, string htmlContent, CancellationToken cancellationToken = default)
         {
             var (apiKey, fromAddress) = ResolveSettings();
 
@@ -56,17 +59,19 @@ namespace Cocorra.BLL.Services.Email
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            _logger.LogInformation("Sending email via Resend to {Recipient} with subject \"{Subject}\"", to, subject);
+            // Privacy: recipients are masked in logs; the HTML body (which may contain an OTP) is never logged.
+            var maskedRecipient = MaskEmail(to);
+            _logger.LogInformation("Sending email via Resend to {Recipient} with subject \"{Subject}\"", maskedRecipient, subject);
 
-            using var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                var body = await response.Content.ReadAsStringAsync();
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
                 // Sanitise: never log the API key in error messages.
                 _logger.LogError(
                     "Resend API error {StatusCode} sending to {Recipient}: {ResponseBody}",
-                    (int)response.StatusCode, to, body);
+                    (int)response.StatusCode, maskedRecipient, body);
 
                 throw new HttpRequestException(
                     $"Resend API returned {(int)response.StatusCode} ({response.StatusCode}): {body}",
@@ -74,38 +79,39 @@ namespace Cocorra.BLL.Services.Email
                     response.StatusCode);
             }
 
-            _logger.LogInformation("Email sent successfully to {Recipient}", to);
+            _logger.LogInformation("Email sent successfully to {Recipient}", maskedRecipient);
         }
 
         /// <inheritdoc />
-        public async Task SendOtpEmailAsync(string to, string userName, string email, string otpCode, string logoUrl)
+        public async Task SendOtpEmailAsync(string to, string userName, string email, string otpCode, string logoUrl, CancellationToken cancellationToken = default)
         {
             var html = EmailTemplates.Otp(userName, email, otpCode, logoUrl);
-            await SendEmailAsync(to, "Verify Your Email", html);
+            await SendEmailAsync(to, "Verify Your Email", html, cancellationToken);
         }
 
         /// <inheritdoc />
-        public async Task SendPasswordResetEmailAsync(string to, string userName, string email, string otpCode, string logoUrl)
+        public async Task SendPasswordResetEmailAsync(string to, string userName, string email, string otpCode, string logoUrl, CancellationToken cancellationToken = default)
         {
             var html = EmailTemplates.PasswordReset(userName, email, otpCode, logoUrl);
-            await SendEmailAsync(to, "Password Reset Code", html);
+            await SendEmailAsync(to, "Password Reset Code", html, cancellationToken);
         }
 
         // ── Private helpers ──────────────────────────────────────────────────
 
         /// <summary>
         /// Resolves the API key and formatted sender address from configuration.
-        /// The <c>RESEND_API_KEY</c> environment variable takes precedence over
-        /// the <c>EmailSettings:ResendApiKey</c> config path.
+        /// <c>EmailSettings:ResendApiKey</c> takes precedence over the <c>RESEND_API_KEY</c> key.
+        /// Both are read through <see cref="IConfiguration"/> only (environment variables are already
+        /// part of it), so tests using in-memory configuration stay hermetic.
         /// </summary>
         private (string ApiKey, string FromAddress) ResolveSettings()
         {
             var emailSettings = _config.GetSection("EmailSettings");
 
-            // RESEND_API_KEY env var → EmailSettings:ResendApiKey config path.
-            var apiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
+            // EmailSettings:ResendApiKey → RESEND_API_KEY (both via IConfiguration).
+            var apiKey = emailSettings["ResendApiKey"];
             if (string.IsNullOrWhiteSpace(apiKey))
-                apiKey = emailSettings["ResendApiKey"];
+                apiKey = _config["RESEND_API_KEY"];
 
             var fromEmail = emailSettings["FromEmail"];
             var fromName = emailSettings["FromName"];
@@ -121,6 +127,21 @@ namespace Cocorra.BLL.Services.Email
                 fromName = DefaultFromName;
 
             return (apiKey, $"{fromName} <{fromEmail}>");
+        }
+
+        /// <summary>
+        /// Masks an email address for logging, e.g. <c>john@example.com</c> → <c>j***@example.com</c>.
+        /// </summary>
+        internal static string MaskEmail(string? email)
+        {
+            if (string.IsNullOrWhiteSpace(email))
+                return "***";
+
+            var at = email.IndexOf('@');
+            if (at <= 0)
+                return "***";
+
+            return $"{email[0]}***{email.Substring(at)}";
         }
     }
 }

@@ -73,6 +73,7 @@ Every configuration key the app reads:
 | `JWTSetting:securityKey` | HMAC signing key for access tokens |
 | `JWTSetting:ValidIssuer` / `ValidAudience` | Validated on every request |
 | `EmailSettings:ResendApiKey` / `FromEmail` / `FromName` | Transactional email (Resend HTTP API) |
+| `ForwardedHeaders:KnownProxies` | Optional. Reverse-proxy IPs trusted for `X-Forwarded-For` / `-Proto` (default: loopback only) |
 | `SeedAdmin:Email` / `Password` | Admin account created by `IdentitySeeder` at startup |
 | `LiveKit:ServerUrl` / `ApiKey` / `ApiSecret` | Audio room tokens |
 | `Minio:Endpoint` / `AccessKey` / `SecretKey` / `BucketName` / `PublicUrl` | Upload storage |
@@ -85,7 +86,8 @@ Every configuration key the app reads:
 > Email is sent through [Resend](https://resend.com). For local development set the key with
 > `dotnet user-secrets set "EmailSettings:ResendApiKey" "<key>" --project Cocorra.API`.
 > `FromEmail` must be an address on a domain verified in Resend. The app starts without the key,
-> but every email send fails until it is set.
+> but every email send fails until it is set. `EmailSettings:ResendApiKey` takes precedence; the
+> `RESEND_API_KEY` configuration key (e.g. environment variable) is used only as a fallback.
 
 ### 2. Create the database
 

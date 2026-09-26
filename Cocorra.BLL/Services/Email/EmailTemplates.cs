@@ -1,17 +1,35 @@
+using System.Net;
+
 namespace Cocorra.BLL.Services.Email
 {
     /// <summary>
     /// Branded HTML templates for transactional Cocorra emails.
     /// All templates use raw-string-literal interpolation (<c>$$"""</c>) so that
     /// CSS braces don't collide with C# interpolation.
+    /// Every interpolated value is HTML-encoded (user-controlled names/emails must never inject markup).
     /// </summary>
     public static class EmailTemplates
     {
         /// <summary>
+        /// Logo shown in the header of every email. Override with <c>EmailSettings:LogoUrl</c>.
+        /// </summary>
+        public const string DefaultLogoUrl = "https://admin.cocorraapp.com/cocorra-logo.jpg";
+
+        /// <summary>Returns the configured logo URL, or <see cref="DefaultLogoUrl"/> when none is set.</summary>
+        public static string ResolveLogoUrl(string? configuredUrl) =>
+            string.IsNullOrWhiteSpace(configuredUrl) ? DefaultLogoUrl : configuredUrl.Trim();
+
+        /// <summary>
         /// OTP verification template — used during registration and resend-OTP flows.
         /// </summary>
-        public static string Otp(string userName, string email, string otpCode, string logoUrl) =>
-            $$"""
+        public static string Otp(string userName, string email, string otpCode, string logoUrl)
+        {
+            userName = WebUtility.HtmlEncode(userName ?? string.Empty);
+            email = WebUtility.HtmlEncode(email ?? string.Empty);
+            otpCode = WebUtility.HtmlEncode(otpCode ?? string.Empty);
+            logoUrl = WebUtility.HtmlEncode(logoUrl ?? string.Empty);
+
+            return $$"""
             <!DOCTYPE html>
             <html lang="en">
             <head>
@@ -48,18 +66,25 @@ namespace Cocorra.BLL.Services.Email
                             your account registration.
                         </p>
                         <div class="code-box">{{otpCode}}</div>
-                        <p class="footer">This code is valid for 10 minutes.</p>
+                        <p class="footer">This code is valid for 6 minutes.</p>
                     </div>
                 </div>
             </body>
             </html>
             """;
+        }
 
         /// <summary>
         /// Password-reset template — sends a one-time code to reset the user's password.
         /// </summary>
-        public static string PasswordReset(string userName, string email, string otpCode, string logoUrl) =>
-            $$"""
+        public static string PasswordReset(string userName, string email, string otpCode, string logoUrl)
+        {
+            userName = WebUtility.HtmlEncode(userName ?? string.Empty);
+            email = WebUtility.HtmlEncode(email ?? string.Empty);
+            otpCode = WebUtility.HtmlEncode(otpCode ?? string.Empty);
+            logoUrl = WebUtility.HtmlEncode(logoUrl ?? string.Empty);
+
+            return $$"""
             <!DOCTYPE html>
             <html lang="en">
             <head>
@@ -96,11 +121,12 @@ namespace Cocorra.BLL.Services.Email
                             If you didn't request this, please ignore this email.
                         </p>
                         <div class="code-box">{{otpCode}}</div>
-                        <p class="footer">This code is valid for 10 minutes.</p>
+                        <p class="footer">This code is valid for 6 minutes.</p>
                     </div>
                 </div>
             </body>
             </html>
             """;
+        }
     }
 }

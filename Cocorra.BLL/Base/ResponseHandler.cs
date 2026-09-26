@@ -113,6 +113,16 @@ namespace Cocorra.BLL.Base
             };
         }
 
+        public Response<T> TooManyRequests<T>(string message = "Too Many Requests")
+        {
+            return new Response<T>()
+            {
+                StatusCode = HttpStatusCode.TooManyRequests, // 429
+                Succeeded = false,
+                Message = message
+            };
+        }
+
         public Response<T> Gone<T>(T data, string message = "Gone")
         {
             return new Response<T>()

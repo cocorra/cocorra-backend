@@ -8,59 +8,96 @@ using Cocorra.BLL.Base;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.OTPService
 {
     public class OTPService : ResponseHandler, IOTPService
     {
+        public const string ResendGenericMessage = "If the account exists and is not yet verified, a verification code has been sent.";
+        public const string InvalidOtpMessage = "Invalid or expired OTP code.";
+        public const string TooManyAttemptsMessage = "Too many failed attempts. Please try again later.";
+
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IEmailService _emailService;
         private readonly IConfiguration _configuration;
         private readonly IEventTracker _eventTracker;
+        private readonly IOtpAttemptLimiter _attemptLimiter;
+        private readonly ILogger<OTPService>? _logger;
 
-        public OTPService(IConfiguration configuration, UserManager<ApplicationUser> userManager, IEmailService emailService, IHttpContextAccessor httpContextAccessor, IEventTracker eventTracker)
+        public OTPService(IConfiguration configuration, UserManager<ApplicationUser> userManager, IEmailService emailService, IHttpContextAccessor httpContextAccessor, IEventTracker eventTracker, IOtpAttemptLimiter attemptLimiter, ILogger<OTPService>? logger = null)
         {
             _configuration = configuration;
             _emailService = emailService;
             _userManager = userManager;
             _eventTracker = eventTracker;
+            _attemptLimiter = attemptLimiter;
+            _logger = logger;
         }
 
         public async Task<Response<string>> ResendOtpAsync(string email)
         {
+            if (string.IsNullOrWhiteSpace(email))
+                return BadRequest<string>("Email is required.");
+
+            // SECURITY: every outcome below returns the same response so the endpoint
+            // cannot be used to discover which emails are registered or verified.
             var user = await _userManager.FindByEmailAsync(email);
-            if (user == null)
-                return BadRequest<string>("User not found");
-            if (user.EmailConfirmed) return BadRequest<string>("Email is already confirmed");
-            var otpCode = await _userManager.GenerateTwoFactorTokenAsync(
+            if (user == null || user.EmailConfirmed)
+                return Success(ResendGenericMessage);
+
+            // Anti email-bombing: at most one code per email per cooldown window.
+            // Note: requesting a new code does NOT reset the failed-attempt counter.
+            if (!_attemptLimiter.TryBeginSend(email, OtpPurposes.EmailConfirmation))
+                return Success(ResendGenericMessage);
+
+            var otpCode = await _userManager.GenerateUserTokenAsync(
                 user,
-                TokenOptions.DefaultEmailProvider
+                TokenOptions.DefaultEmailProvider,
+                OtpPurposes.EmailConfirmation
             );
-            var baseUrl = _configuration["AppSettings:BaseUrl"];
-            var fullImagePath = $"{baseUrl}/System/388f7e03b835e6ca1f7c156816047a360bf18efe.png";
-            var emailBody = GetOtpHtmlTemplate(user.FirstName, user.Email!, otpCode, fullImagePath);
-            await _emailService.SendEmailAsync(user.Email!, "Resend OTP", emailBody);
+            var fullImagePath = EmailTemplates.ResolveLogoUrl(_configuration["EmailSettings:LogoUrl"]);
 
-            return Success("OTP code resent successfully");
+            try
+            {
+                await _emailService.SendOtpEmailAsync(user.Email!, user.FirstName, user.Email!, otpCode, fullImagePath);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to send verification email for user {UserId}", user.Id);
+            }
 
+            return Success(ResendGenericMessage);
         }
 
         public async Task<Response<string>> VerifyOtpAsync(string email, string otpCode)
         {
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(otpCode))
+                return BadRequest<string>(InvalidOtpMessage);
+
+            // Reserve the attempt atomically BEFORE verifying, so concurrent bursts cannot
+            // all pass the check before any failure is recorded.
+            if (!_attemptLimiter.TryRegisterAttempt(email, OtpPurposes.EmailConfirmation))
+                return TooManyRequests<string>(TooManyAttemptsMessage);
+
             var user = await _userManager.FindByEmailAsync(email);
 
+            // Unknown user is indistinguishable from a wrong code (the attempt is already counted).
             if (user == null)
-                return BadRequest<string>("User not found");
+                return BadRequest<string>(InvalidOtpMessage);
 
-            var isValidOtp = await _userManager.VerifyTwoFactorTokenAsync(
+            var isValidOtp = await _userManager.VerifyUserTokenAsync(
                 user,
                 TokenOptions.DefaultEmailProvider,
+                OtpPurposes.EmailConfirmation,
                 otpCode
             );
 
             if (!isValidOtp)
-                return BadRequest<string>("Invalid OTP code");
+                return BadRequest<string>(InvalidOtpMessage);
+
+            _attemptLimiter.Reset(email, OtpPurposes.EmailConfirmation);
 
             user.EmailConfirmed = true;
             await _userManager.UpdateAsync(user);
@@ -69,68 +106,5 @@ namespace Cocorra.BLL.Services.OTPService
 
             return Success("Email confirmed successfully");
         }
-        private string GetOtpHtmlTemplate(string userName, string email, string otpCode, string baseUrl)
-        {
-            // استخدمنا $$""" لكي نتجاهل أقواس الـ CSS العادية { }
-            // ونستخدم المتغيرات بين قوسين مزدوجين {{ }}
-            return $$"""
-    <!DOCTYPE html>
-    <html lang="en">
-
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Email Verification</title>
-        <style>
-            body { margin: 0; padding: 0; background-color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-            .container { width: 100%; max-width: 400px; text-align: center; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); }
-            .header { background-color: #4f5b49; padding: 30px 0; }
-            .logo-container { width: 100px; height: 100px; margin: 0 auto; border: 2px solid white; border-radius: 8px; overflow: hidden; background-color: #c5d1ba; }
-            .logo-container img { width: 100%; height: 100%; object-fit: cover; }
-            .content { background-color: #a0b19d; padding: 25px 20px 40px; color: white; }
-            .greeting { margin: 0 0 15px 0; font-size: 26px; font-weight: bold; }
-            .email-box { background-color: white; color: #333; padding: 12px 20px; border-radius: 30px; display: inline-block; font-weight: bold; font-size: 18px; margin-bottom: 25px; width: 85%; box-sizing: border-box; }
-            .instruction { margin: 0 0 25px 0; font-size: 16px; line-height: 1.4; font-weight: 600; }
-            .code-box { background-color: white; color: black; font-size: 32px; font-weight: 900; letter-spacing: 8px; padding: 20px; border-radius: 15px; margin-bottom: 25px; display: inline-block; width: 85%; box-sizing: border-box; }
-            .footer { margin: 0; font-size: 14px; font-weight: bold; }
-        </style>
-    </head>
-
-    <body>
-        <div class="container">
-            <div class="header">
-                <div class="logo-container">
-                    <img src="{{baseUrl}}" alt="Cocorra">
-                </div>
-            </div>
-
-            <div class="content">
-                <h1 class="greeting">Hello {{userName}}</h1>
-
-                <div class="email-box">
-                    {{email}}
-                </div>
-
-                <p class="instruction">
-                    The current code is for<br>
-                    the verification process to complete<br>
-                    your account registration.
-                </p>
-
-                <div class="code-box">
-                    {{otpCode}}
-                </div>
-
-                <p class="footer">
-                    This code is valid for 10 minutes.
-                </p>
-            </div>
-        </div>
-    </body>
-
-    </html>
-    """;
-        }
-
     }
 }

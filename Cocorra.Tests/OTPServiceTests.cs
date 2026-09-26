@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.EventTracking;
@@ -8,6 +9,7 @@ using Cocorra.DAL.Models;
 using Cocorra.Tests.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
@@ -21,6 +23,7 @@ public class OTPServiceTests
     private readonly Mock<IConfiguration> _configMock = new();
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock = new();
     private readonly Mock<IEventTracker> _eventTrackerMock = new();
+    private readonly IOtpAttemptLimiter _attemptLimiter = new OtpAttemptLimiter(new MemoryCache(new MemoryCacheOptions()));
     private readonly OTPService _service;
 
     public OTPServiceTests()
@@ -31,26 +34,27 @@ public class OTPServiceTests
             _userManagerMock.Object,
             _emailServiceMock.Object,
             _httpContextAccessorMock.Object,
-            _eventTrackerMock.Object
+            _eventTrackerMock.Object,
+            _attemptLimiter
         );
     }
 
     [Fact]
-    public async Task ResendOtpAsync_UserNotFound_ReturnsBadRequest()
+    public async Task ResendOtpAsync_UserNotFound_ReturnsGenericSuccessWithoutSending()
     {
         var email = "unknown@cocorra.com";
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync((ApplicationUser?)null);
 
         var result = await _service.ResendOtpAsync(email);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
-        Assert.Equal("User not found", result.Message);
-        _emailServiceMock.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        Assert.True(result.Succeeded);
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(OTPService.ResendGenericMessage, result.Data);
+        _emailServiceMock.Verify(e => e.SendOtpEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task ResendOtpAsync_EmailAlreadyConfirmed_ReturnsBadRequest()
+    public async Task ResendOtpAsync_EmailAlreadyConfirmed_ReturnsGenericSuccessWithoutSending()
     {
         var email = "verified@cocorra.com";
         var user = new ApplicationUser { Email = email, EmailConfirmed = true };
@@ -58,10 +62,27 @@ public class OTPServiceTests
 
         var result = await _service.ResendOtpAsync(email);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
-        Assert.Equal("Email is already confirmed", result.Message);
-        _emailServiceMock.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        Assert.True(result.Succeeded);
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(OTPService.ResendGenericMessage, result.Data);
+        _emailServiceMock.Verify(e => e.SendOtpEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResendOtpAsync_NoLogoConfigured_UsesDefaultCocorraLogoUrl()
+    {
+        var email = "logo@cocorra.com";
+        var user = new ApplicationUser { Id = Guid.NewGuid(), FirstName = "Ali", Email = email, EmailConfirmed = false };
+        _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.GenerateUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation))
+            .ReturnsAsync("123456");
+
+        await _service.ResendOtpAsync(email);
+
+        _emailServiceMock.Verify(e => e.SendOtpEmailAsync(
+            email, "Ali", email, "123456",
+            "https://admin.cocorraapp.com/cocorra-logo.jpg",
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -76,17 +97,20 @@ public class OTPServiceTests
             EmailConfirmed = false
         };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.GenerateTwoFactorTokenAsync(user, TokenOptions.DefaultEmailProvider))
+        _userManagerMock.Setup(m => m.GenerateUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation))
             .ReturnsAsync("123456");
 
         var result = await _service.ResendOtpAsync(email);
 
         Assert.True(result.Succeeded);
-        Assert.Equal("OTP code resent successfully", result.Data);
-        _emailServiceMock.Verify(e => e.SendEmailAsync(
+        Assert.Equal(OTPService.ResendGenericMessage, result.Data);
+        _emailServiceMock.Verify(e => e.SendOtpEmailAsync(
             email,
-            "Resend OTP",
-            It.Is<string>(html => html.Contains("123456") && html.Contains("Ali"))
+            "Ali",
+            email,
+            "123456",
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()
         ), Times.Once);
     }
 
@@ -100,7 +124,7 @@ public class OTPServiceTests
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
-        Assert.Equal("User not found", result.Message);
+        Assert.Equal("Invalid or expired OTP code.", result.Message);
     }
 
     [Fact]
@@ -109,14 +133,14 @@ public class OTPServiceTests
         var email = "user@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.VerifyTwoFactorTokenAsync(user, TokenOptions.DefaultEmailProvider, "wrong"))
+        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "wrong"))
             .ReturnsAsync(false);
 
         var result = await _service.VerifyOtpAsync(email, "wrong");
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
-        Assert.Equal("Invalid OTP code", result.Message);
+        Assert.Equal("Invalid or expired OTP code.", result.Message);
         Assert.False(user.EmailConfirmed);
         _userManagerMock.Verify(m => m.UpdateAsync(user), Times.Never);
     }
@@ -128,7 +152,7 @@ public class OTPServiceTests
         var email = "user@cocorra.com";
         var user = new ApplicationUser { Id = userId, Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.VerifyTwoFactorTokenAsync(user, TokenOptions.DefaultEmailProvider, "999888"))
+        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "999888"))
             .ReturnsAsync(true);
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
 

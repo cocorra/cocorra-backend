@@ -142,27 +142,29 @@ public class EmailServiceTests
         Assert.Equal(1, handler.CallCount);
     }
 
-    // ── RESEND_API_KEY environment variable fallback ─────────────────────
+    // ── RESEND_API_KEY fallback ──────────────────────────────────────────
 
     [Fact]
     public async Task SendEmailAsync_FallsBackToResendApiKeyEnvVar()
     {
+        // The RESEND_API_KEY env var reaches the service through IConfiguration (ASP.NET Core's
+        // environment-variable provider), so the fallback is exercised via the config key.
         const string envKey = "re_env_fallback_key";
-        Environment.SetEnvironmentVariable("RESEND_API_KEY", envKey);
-        try
-        {
-            // No key in config → should pick up the env var.
-            var (service, handler) = Create(BuildConfig(apiKey: null));
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["EmailSettings:FromEmail"] = FromEmail,
+                ["RESEND_API_KEY"] = envKey
+            })
+            .Build();
 
-            await service.SendEmailAsync("user@example.com", "Test", "<p>Test</p>");
+        // No EmailSettings:ResendApiKey → should pick up RESEND_API_KEY.
+        var (service, handler) = Create(config);
 
-            Assert.Equal(1, handler.CallCount);
-            Assert.Equal(envKey, handler.Request!.Headers.Authorization!.Parameter);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("RESEND_API_KEY", null);
-        }
+        await service.SendEmailAsync("user@example.com", "Test", "<p>Test</p>");
+
+        Assert.Equal(1, handler.CallCount);
+        Assert.Equal(envKey, handler.Request!.Headers.Authorization!.Parameter);
     }
 
     // ── SendOtpEmailAsync ───────────────────────────────────────────────

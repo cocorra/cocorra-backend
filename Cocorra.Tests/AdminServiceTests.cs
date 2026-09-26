@@ -116,7 +116,8 @@ public class AdminServiceTests : IDisposable
         _emailServiceMock.Verify(e => e.SendEmailAsync(
             "user@cocorra.com",
             It.Is<string>(s => s.Contains("Verified")),
-            It.IsAny<string>()), Times.Once);
+            It.IsAny<string>(),
+            It.IsAny<System.Threading.CancellationToken>()), Times.Once);
         _pushServiceMock.Verify(p => p.SendPushNotificationAsync(
             "fcm_token_123",
             It.IsAny<string>(),

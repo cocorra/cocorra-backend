@@ -23,12 +23,15 @@ using System.Threading.Tasks;
 using System.Security.Cryptography;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.BlockedDevicesService;
+using Cocorra.BLL.Services.OTPService;
 using Microsoft.Extensions.Logging;
 
 namespace Cocorra.BLL.Services.AuthServices
 {
     public class AuthServices : ResponseHandler, IAuthServices
     {
+        public const string ForgotPasswordGenericMessage = "If your email is registered, you will receive a password reset code shortly.";
+
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly RoleManager<IdentityRole<Guid>> _roleManager;
         private readonly IConfiguration _configuration;
@@ -40,6 +43,7 @@ namespace Cocorra.BLL.Services.AuthServices
         private readonly IEventTracker _eventTracker;
         private readonly IRoomService _roomService;
         private readonly IBlockedDevicesService _blockedDevicesService;
+        private readonly IOtpAttemptLimiter _otpAttemptLimiter;
         private readonly ILogger<AuthServices>? _logger;
 
         public AuthServices(
@@ -54,6 +58,7 @@ namespace Cocorra.BLL.Services.AuthServices
             IEventTracker eventTracker,
             IRoomService roomService,
             IBlockedDevicesService blockedDevicesService,
+            IOtpAttemptLimiter otpAttemptLimiter,
             ILogger<AuthServices>? logger = null)
         {
             _blockedDevicesService = blockedDevicesService;
@@ -67,6 +72,7 @@ namespace Cocorra.BLL.Services.AuthServices
             _roomRepository = roomRepository;
             _eventTracker = eventTracker;
             _roomService = roomService;
+            _otpAttemptLimiter = otpAttemptLimiter;
             _logger = logger;
         }
 
@@ -124,14 +130,6 @@ namespace Cocorra.BLL.Services.AuthServices
                     var roleResult = await _userManager.AddToRoleAsync(user, "User");
                     if (!roleResult.Succeeded)
                         throw new Exception("Failed to assign role");
-                        var otpCode = await _userManager.GenerateTwoFactorTokenAsync(
-                            user,
-                            TokenOptions.DefaultEmailProvider
-                        );
-                    var baseUrl = _configuration["AppSettings:BaseUrl"];
-                    var fullImagePath = $"{baseUrl}/System/388f7e03b835e6ca1f7c156816047a360bf18efe.png"; 
-                    var emailBody = GetOtpHtmlTemplate(user.FirstName!, email: user.Email!, otpCode, fullImagePath);
-                    await _emailService.SendEmailAsync(user.Email!, "Registration Received", emailBody);
                     var (restrictedToken, restrictedRoles) = await GenerateJwtToken(user);
                     var restrictedRefreshToken = GenerateRefreshToken();
                     user.RefreshToken = restrictedRefreshToken;
@@ -155,6 +153,25 @@ namespace Cocorra.BLL.Services.AuthServices
 
                     await transaction.CommitAsync();
 
+                    // Send the verification email only AFTER the account is committed. A mail-provider
+                    // failure must not roll back the registration; the user can request a new code
+                    // via ResendOtp.
+                    try
+                    {
+                        var otpCode = await _userManager.GenerateUserTokenAsync(
+                            user,
+                            TokenOptions.DefaultEmailProvider,
+                            OtpPurposes.EmailConfirmation
+                        );
+                        var fullImagePath = EmailTemplates.ResolveLogoUrl(_configuration["EmailSettings:LogoUrl"]);
+                        _otpAttemptLimiter.TryBeginSend(user.Email!, OtpPurposes.EmailConfirmation);
+                        await _emailService.SendOtpEmailAsync(user.Email!, user.FirstName, user.Email!, otpCode, fullImagePath);
+                    }
+                    catch (Exception emailEx)
+                    {
+                        _logger?.LogError(emailEx, "Registration succeeded but the verification email could not be sent for user {UserId}", user.Id);
+                    }
+
                     return Created<object>(restrictedAuth, meta: new { message = "Registration successful! Check Your Email ." });
                 }
                 catch (Exception ex)
@@ -162,7 +179,8 @@ namespace Cocorra.BLL.Services.AuthServices
                     await transaction.RollbackAsync();
                     _uploadVoice.DeleteVoice(voicePathToDelete);
                     _uploadImage.DeleteImage(profilePicturePathToDelete);
-                    return BadRequest<object>($"Error: {ex.Message} -- Internal: {ex.InnerException?.Message}");
+                    _logger?.LogError(ex, "Registration failed");
+                    return BadRequest<object>("Registration failed. Please try again.");
                 }
             });
         }
@@ -278,20 +296,33 @@ namespace Cocorra.BLL.Services.AuthServices
         public async Task<Response<string>> ForgotPasswordAsync(ForgotPasswordDto dto)
         {
             var user = await _userManager.FindByEmailAsync(dto.Email!);
+            // SECURITY: every branch (unknown, cooldown, sent, send failed) returns the same
+            // message so the endpoint cannot be used to discover registered emails.
             if (user == null)
-                return Success("If your email is registered, you will receive a reset link.");
+                return Success(ForgotPasswordGenericMessage);
 
-            var otpCode = await _userManager.GenerateTwoFactorTokenAsync(
+            // Anti email-bombing: skip the send inside the cooldown window, same response.
+            // Requesting a new code does NOT reset the failed-attempt counter.
+            if (!_otpAttemptLimiter.TryBeginSend(dto.Email!, OtpPurposes.PasswordReset))
+                return Success(ForgotPasswordGenericMessage);
+
+            var otpCode = await _userManager.GenerateUserTokenAsync(
                 user,
-                TokenOptions.DefaultEmailProvider
+                TokenOptions.DefaultEmailProvider,
+                OtpPurposes.PasswordReset
             );
 
-            var baseUrl = _configuration["AppSettings:BaseUrl"];
-            var fullImagePath = $"{baseUrl}/System/388f7e03b835e6ca1f7c156816047a360bf18efe.png";
-            var emailBody = GetPasswordResetHtmlTemplate(user.FirstName!, user.Email!, otpCode, fullImagePath);
-            await _emailService.SendEmailAsync(user.Email!, "Password Reset Code", emailBody);
+            var fullImagePath = EmailTemplates.ResolveLogoUrl(_configuration["EmailSettings:LogoUrl"]);
+            try
+            {
+                await _emailService.SendPasswordResetEmailAsync(user.Email!, user.FirstName, user.Email!, otpCode, fullImagePath);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to send password reset email for user {UserId}", user.Id);
+            }
 
-            return Success("If your email is registered, you will receive a password reset code shortly.");
+            return Success(ForgotPasswordGenericMessage);
         }
 
 
@@ -353,18 +384,28 @@ namespace Cocorra.BLL.Services.AuthServices
         }
         public async Task<Response<string>> ResetPasswordAsync(ResetPasswordDto dto)
         {
-            var user = await _userManager.FindByEmailAsync(dto.Email);
-            if (user == null)
-                return BadRequest<string>("Invalid request.");
+            // Reserve the attempt atomically BEFORE verifying, so concurrent bursts cannot
+            // all pass the check before any failure is recorded.
+            if (!_otpAttemptLimiter.TryRegisterAttempt(dto.Email, OtpPurposes.PasswordReset))
+                return TooManyRequests<string>("Too many failed attempts. Please try again later.");
 
-            var isValidOtp = await _userManager.VerifyTwoFactorTokenAsync(
+            var user = await _userManager.FindByEmailAsync(dto.Email);
+
+            // Unknown user is indistinguishable from a wrong code (the attempt is already counted).
+            if (user == null)
+                return BadRequest<string>("Invalid or expired OTP code.");
+
+            var isValidOtp = await _userManager.VerifyUserTokenAsync(
                 user,
                 TokenOptions.DefaultEmailProvider,
+                OtpPurposes.PasswordReset,
                 dto.OtpCode
             );
 
             if (!isValidOtp)
                 return BadRequest<string>("Invalid or expired OTP code.");
+
+            _otpAttemptLimiter.Reset(dto.Email, OtpPurposes.PasswordReset);
 
             var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
             var result = await _userManager.ResetPasswordAsync(user, resetToken, dto.NewPassword);
@@ -377,128 +418,6 @@ namespace Cocorra.BLL.Services.AuthServices
 
             return Success("Password has been reset successfully.");
         }
-        private string GetOtpHtmlTemplate(string userName, string email, string otpCode, string baseUrl)
-        {
-            // استخدمنا $$""" لكي نتجاهل أقواس الـ CSS العادية { }
-            // ونستخدم المتغيرات بين قوسين مزدوجين {{ }}
-            return $$"""
-    <!DOCTYPE html>
-    <html lang="en">
-
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Email Verification</title>
-        <style>
-            body { margin: 0; padding: 0; background-color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-            .container { width: 100%; max-width: 400px; text-align: center; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); }
-            .header { background-color: #4f5b49; padding: 30px 0; }
-            .logo-container { width: 100px; height: 100px; margin: 0 auto; border: 2px solid white; border-radius: 8px; overflow: hidden; background-color: #c5d1ba; }
-            .logo-container img { width: 100%; height: 100%; object-fit: cover; }
-            .content { background-color: #a0b19d; padding: 25px 20px 40px; color: white; }
-            .greeting { margin: 0 0 15px 0; font-size: 26px; font-weight: bold; }
-            .email-box { background-color: white; color: #333; padding: 12px 20px; border-radius: 30px; display: inline-block; font-weight: bold; font-size: 18px; margin-bottom: 25px; width: 85%; box-sizing: border-box; }
-            .instruction { margin: 0 0 25px 0; font-size: 16px; line-height: 1.4; font-weight: 600; }
-            .code-box { background-color: white; color: black; font-size: 32px; font-weight: 900; letter-spacing: 8px; padding: 20px; border-radius: 15px; margin-bottom: 25px; display: inline-block; width: 85%; box-sizing: border-box; }
-            .footer { margin: 0; font-size: 14px; font-weight: bold; }
-        </style>
-    </head>
-
-    <body>
-        <div class="container">
-            <div class="header">
-                <div class="logo-container">
-                    <img src="{{baseUrl}}" alt="Cocorra">
-                </div>
-            </div>
-
-            <div class="content">
-                <h1 class="greeting">Hello {{userName}}</h1>
-
-                <div class="email-box">
-                    {{email}}
-                </div>
-
-                <p class="instruction">
-                    The current code is for<br>
-                    the verification process to complete<br>
-                    your account registration.
-                </p>
-
-                <div class="code-box">
-                    {{otpCode}}
-                </div>
-
-                <p class="footer">
-                    This code is valid for 10 minutes.
-                </p>
-            </div>
-        </div>
-    </body>
-
-    </html>
-    """;
-        }
-        private string GetPasswordResetHtmlTemplate(string userName, string email, string otpCode, string baseUrl)
-        {
-            return $$"""
-    <!DOCTYPE html>
-    <html lang="en">
-
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Password Reset</title>
-        <style>
-            body { margin: 0; padding: 0; background-color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-            .container { width: 100%; max-width: 400px; text-align: center; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); }
-            .header { background-color: #4f5b49; padding: 30px 0; }
-            .logo-container { width: 100px; height: 100px; margin: 0 auto; border: 2px solid white; border-radius: 8px; overflow: hidden; background-color: #c5d1ba; }
-            .logo-container img { width: 100%; height: 100%; object-fit: cover; }
-            .content { background-color: #a0b19d; padding: 25px 20px 40px; color: white; }
-            .greeting { margin: 0 0 15px 0; font-size: 26px; font-weight: bold; }
-            .email-box { background-color: white; color: #333; padding: 12px 20px; border-radius: 30px; display: inline-block; font-weight: bold; font-size: 18px; margin-bottom: 25px; width: 85%; box-sizing: border-box; }
-            .instruction { margin: 0 0 25px 0; font-size: 16px; line-height: 1.4; font-weight: 600; }
-            .code-box { background-color: white; color: black; font-size: 32px; font-weight: 900; letter-spacing: 8px; padding: 20px; border-radius: 15px; margin-bottom: 25px; display: inline-block; width: 85%; box-sizing: border-box; }
-            .footer { margin: 0; font-size: 14px; font-weight: bold; }
-        </style>
-    </head>
-
-    <body>
-        <div class="container">
-            <div class="header">
-                <div class="logo-container">
-                    <img src="{{baseUrl}}" alt="Cocorra">
-                </div>
-            </div>
-
-            <div class="content">
-                <h1 class="greeting">Hello {{userName}}</h1>
-
-                <div class="email-box">
-                    {{email}}
-                </div>
-
-                <p class="instruction">
-                    Use the code below to<br>
-                    reset your password.
-                </p>
-
-                <div class="code-box">
-                    {{otpCode}}
-                </div>
-
-                <p class="footer">
-                    This code is valid for 10 minutes.
-                </p>
-            </div>
-        </div>
-    </body>
-
-    </html>
-    """;
-        }
-
         public async Task<Response<string>> ReRecordVoiceAsync(string email, Microsoft.AspNetCore.Http.IFormFile voiceFile)
         {
             var user = await _userManager.FindByEmailAsync(email);

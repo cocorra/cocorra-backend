@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
 using Cocorra.BLL.DTOS.Auth;
 using Cocorra.BLL.Services.AuthServices;
 using Cocorra.BLL.Services.BlockedDevicesService;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.EventTracking;
+using Cocorra.BLL.Services.OTPService;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.Data;
@@ -18,6 +20,7 @@ using Cocorra.DAL.Repository.RoomRepository;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -37,6 +40,7 @@ public class AuthServicesTests : IDisposable
     private readonly Mock<IEventTracker> _eventTrackerMock = new();
     private readonly Mock<IRoomService> _roomServiceMock = new();
     private readonly Mock<IBlockedDevicesService> _blockedDevicesServiceMock = new();
+    private readonly IOtpAttemptLimiter _otpAttemptLimiter = new OtpAttemptLimiter(new MemoryCache(new MemoryCacheOptions()));
 
     public AuthServicesTests()
     {
@@ -94,7 +98,8 @@ public class AuthServicesTests : IDisposable
             _roomRepoMock.Object,
             _eventTrackerMock.Object,
             _roomServiceMock.Object,
-            _blockedDevicesServiceMock.Object
+            _blockedDevicesServiceMock.Object,
+            _otpAttemptLimiter
         );
 
         return (service, userMgr, roleMgr, db);
@@ -208,8 +213,8 @@ public class AuthServicesTests : IDisposable
         var result = await service.ForgotPasswordAsync(new ForgotPasswordDto { Email = "missing@cocorra.com" });
 
         Assert.True(result.Succeeded);
-        Assert.Contains("receive a reset link", result.Data);
-        _emailServiceMock.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        Assert.Contains("receive a password reset code shortly", result.Data);
+        _emailServiceMock.Verify(e => e.SendPasswordResetEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -227,10 +232,13 @@ public class AuthServicesTests : IDisposable
         var result = await service.ForgotPasswordAsync(new ForgotPasswordDto { Email = "reset@cocorra.com" });
 
         Assert.True(result.Succeeded);
-        _emailServiceMock.Verify(e => e.SendEmailAsync(
+        _emailServiceMock.Verify(e => e.SendPasswordResetEmailAsync(
             "reset@cocorra.com",
-            "Password Reset Code",
-            It.Is<string>(s => s.Contains("Karim"))
+            "Karim",
+            "reset@cocorra.com",
+            It.Is<string>(code => !string.IsNullOrWhiteSpace(code)),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()
         ), Times.Once);
     }
 

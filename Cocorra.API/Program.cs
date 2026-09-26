@@ -24,6 +24,7 @@ using Cocorra.DAL.Repository.RoomRepository;
 using Cocorra.DAL.Repository.SupportRepository;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -183,7 +184,7 @@ builder.Services.Configure<Cocorra.BLL.Services.RoomInviteService.InviteSettings
     builder.Configuration.GetSection(Cocorra.BLL.Services.RoomInviteService.InviteSettings.SectionName));
 builder.Services.AddScoped<Cocorra.DAL.Repository.RoomInviteRepository.IRoomInviteRepository, Cocorra.DAL.Repository.RoomInviteRepository.RoomInviteRepository>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RoomInviteService.IRoomInviteService, Cocorra.BLL.Services.RoomInviteService.RoomInviteService>();
-builder.Services.AddHttpClient<IEmailService, EmailService>();
+builder.Services.AddHttpClient<IEmailService, EmailService>(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddScoped<IOTPService, OTPService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.UserBlockRepository.IUserBlockRepository, Cocorra.DAL.Repository.UserBlockRepository.UserBlockRepository>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.BlockedDevicesRepository.IBlockedDevicesRepository, Cocorra.DAL.Repository.BlockedDevicesRepository.BlockedDevicesRepository>();
@@ -220,6 +221,8 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["Analytics:StructuredLogPat
     builder.Services.AddSingleton<ILoggerProvider, StructuredFileLoggerProvider>();
 }
 builder.Services.AddMemoryCache();
+// OTP failed-attempt + send-cooldown tracking; singleton so state is shared across requests.
+builder.Services.AddSingleton<IOtpAttemptLimiter, OtpAttemptLimiter>();
 builder.Services.AddScoped<IAnalyticsRepository, AnalyticsRepository>();
 builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 builder.Services.AddSingleton<IMetricRegistry, MetricRegistry>();
@@ -430,6 +433,39 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 Window = TimeSpan.FromMinutes(1)
             }));
+
+    // OTP send/verify endpoints (ForgotPassword, ResendOtp, ConfirmEmail, ResetPassword), on top
+    // of the global limit. Bounds email-bombing and OTP guessing from a single address.
+    options.AddPolicy("otp", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? httpContext.Request.Headers.Host.ToString(),
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 10, // max 10 OTP requests per minute per IP
+                QueueLimit = 0,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+});
+#endregion
+
+#region Forwarded Headers
+// Behind a reverse proxy, RemoteIpAddress is the proxy's address, so every client would share one
+// rate-limit partition. Only proxies listed in ForwardedHeaders:KnownProxies are trusted; when none
+// are configured the framework default (loopback only) applies. Never clear KnownProxies/KnownNetworks.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
+    var knownProxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>();
+    if (knownProxies != null)
+    {
+        foreach (var proxy in knownProxies)
+        {
+            if (!string.IsNullOrWhiteSpace(proxy) && System.Net.IPAddress.TryParse(proxy.Trim(), out var address))
+                options.KnownProxies.Add(address);
+        }
+    }
 });
 #endregion
 
@@ -453,6 +489,8 @@ using (var scope = app.Services.CreateScope())
         Console.WriteLine($"An error occurred while seeding the database: {ex.Message}");
     }
 }
+// Must run first: everything below (HTTPS redirection, rate limiting) reads the client IP/scheme.
+app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
 contentTypeProvider.Mappings[".m4a"] = "audio/mp4";

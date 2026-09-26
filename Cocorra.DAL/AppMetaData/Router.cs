@@ -14,7 +14,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string SubmitMbti = Prefix + "/SubmitMbti";
             public const string ForgotPassword = Prefix + "/ForgotPassword";
             public const string UpdateFcmToken = Prefix + "/UpdateFcmToken";
-            public const string ConfirmEmail = Prefix + "/ConfirmEmail"; // GET
+            public const string ConfirmEmail = Prefix + "/ConfirmEmail"; // POST (JSON body); GET (query string) is deprecated
             public const string ResendOtp = Prefix + "/ResendOtp"; // POST
             public const string ResetPassword = Prefix + "/ResetPassword"; // POST
             public const string ReRecordVoice = Prefix + "/ReRecordVoice"; // POST
