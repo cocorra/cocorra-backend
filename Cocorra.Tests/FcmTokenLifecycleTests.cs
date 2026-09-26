@@ -5,6 +5,7 @@ using Cocorra.BLL.Services.ChatService;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.NotificationService;
+using Cocorra.BLL.Services.OTPService;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.Data;
@@ -64,7 +65,8 @@ public class FcmTokenLifecycleTests
             new Mock<IRoomRepository>().Object,
             new Mock<IEventTracker>().Object,
             new Mock<IRoomService>().Object,
-            new Mock<IBlockedDevicesService>().Object
+            new Mock<IBlockedDevicesService>().Object,
+            new Mock<IOtpAttemptLimiter>().Object
         );
 
         // Act
@@ -105,7 +107,8 @@ public class FcmTokenLifecycleTests
             new Mock<IRoomRepository>().Object,
             new Mock<IEventTracker>().Object,
             new Mock<IRoomService>().Object,
-            new Mock<IBlockedDevicesService>().Object
+            new Mock<IBlockedDevicesService>().Object,
+            new Mock<IOtpAttemptLimiter>().Object
         );
 
         // Act

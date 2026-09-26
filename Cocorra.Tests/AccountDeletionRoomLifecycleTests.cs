@@ -2,6 +2,7 @@ using Cocorra.BLL.Services.AuthServices;
 using Cocorra.BLL.Services.BlockedDevicesService;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.EventTracking;
+using Cocorra.BLL.Services.OTPService;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.Data;
@@ -73,7 +74,8 @@ public class AccountDeletionRoomLifecycleTests : IDisposable
             new Mock<IRoomRepository>().Object,
             new Mock<IEventTracker>().Object,
             roomService.Object,
-            new Mock<IBlockedDevicesService>().Object);
+            new Mock<IBlockedDevicesService>().Object,
+            new Mock<IOtpAttemptLimiter>().Object);
 
     private async Task<Guid> SeedHostedRoomAsync(Guid hostId, RoomStatus status)
     {

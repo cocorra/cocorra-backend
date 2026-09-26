@@ -7,6 +7,7 @@ using Cocorra.DAL.DTOS.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -60,6 +61,7 @@ namespace Cocorra.API.Controllers
             return Ok(result);
         }
 
+        [EnableRateLimiting("otp")]
         [HttpPost(Router.AuthenticationRouting.ForgotPassword)]
         public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
         {
@@ -84,19 +86,41 @@ namespace Cocorra.API.Controllers
             var result = await _authServices.UpdateFcmTokenAsync(userId, token);
             return StatusCode((int)result.StatusCode, result);
         }
+        [EnableRateLimiting("otp")]
         [HttpPost(Router.AuthenticationRouting.ResendOtp)]
-        public async Task<IActionResult> ResendOtp([FromBody] string email)
+        public async Task<IActionResult> ResendOtp([FromBody] string? email)
         {
+            if (string.IsNullOrWhiteSpace(email))
+                return BadRequest("Email is required.");
+
             var result = await _otpService.ResendOtpAsync(email);
             return StatusCode((int)result.StatusCode, result);
         }
-        [HttpGet(Router.AuthenticationRouting.ConfirmEmail)]
-        public async Task<IActionResult> ConfirmEmail([FromQuery] string email, [FromQuery] string otpCode)
+
+        [EnableRateLimiting("otp")]
+        [HttpPost(Router.AuthenticationRouting.ConfirmEmail)]
+        public async Task<IActionResult> ConfirmEmail([FromBody] ConfirmEmailDto dto)
         {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var result = await _otpService.VerifyOtpAsync(dto.Email, dto.OtpCode);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        // DEPRECATED: kept for existing clients. The OTP travels in the query string (and so in
+        // proxy/server logs); new clients must use the POST overload with a JSON body.
+        [EnableRateLimiting("otp")]
+        [HttpGet(Router.AuthenticationRouting.ConfirmEmail)]
+        public async Task<IActionResult> ConfirmEmail([FromQuery] string? email, [FromQuery] string? otpCode)
+        {
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(otpCode))
+                return BadRequest("Email and OTP code are required.");
+
             var result = await _otpService.VerifyOtpAsync(email, otpCode);
             return StatusCode((int)result.StatusCode, result);
         }
 
+        [EnableRateLimiting("otp")]
         [HttpPost(Router.AuthenticationRouting.ResetPassword)]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto dto)
         {
