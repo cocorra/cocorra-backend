@@ -18,7 +18,7 @@ namespace Cocorra.Tests;
 public class EmailServiceTests
 {
     private const string ApiKey = "re_test_key";
-    private const string FromEmail = "noreply@cocorraapp.com";
+    private const string FromEmail = "support@cocorraapp.com";
 
     private static readonly ILogger<EmailService> NullLogger =
         NullLoggerFactory.Instance.CreateLogger<EmailService>();
@@ -68,7 +68,7 @@ public class EmailServiceTests
 
         using var doc = JsonDocument.Parse(handler.Body!);
         var root = doc.RootElement;
-        Assert.Equal($"Cocorra <{FromEmail}>", root.GetProperty("from").GetString());
+        Assert.Equal($"Cocorra Support <{FromEmail}>", root.GetProperty("from").GetString());
         var to = root.GetProperty("to");
         Assert.Equal(JsonValueKind.Array, to.ValueKind);
         Assert.Equal(new[] { "user@example.com" }, to.EnumerateArray().Select(e => e.GetString()).ToArray());
@@ -121,13 +121,13 @@ public class EmailServiceTests
     public async Task SendEmailAsync_MissingFromEmail_UsesDefaultAddress()
     {
         // When FromEmail is not configured, the service now falls back to
-        // noreply@cocorraapp.com instead of throwing.
+        // support@cocorraapp.com instead of throwing.
         var (service, handler) = Create(BuildConfig(fromEmail: null));
 
         await service.SendEmailAsync("user@example.com", "Hello", "<p>Hi</p>");
 
         using var doc = JsonDocument.Parse(handler.Body!);
-        Assert.Equal("Cocorra <noreply@cocorraapp.com>", doc.RootElement.GetProperty("from").GetString());
+        Assert.Equal("Cocorra Support <support@cocorraapp.com>", doc.RootElement.GetProperty("from").GetString());
     }
 
     [Fact]

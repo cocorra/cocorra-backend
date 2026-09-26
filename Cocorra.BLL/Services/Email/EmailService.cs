@@ -26,8 +26,8 @@ namespace Cocorra.BLL.Services.Email
     public class EmailService : IEmailService
     {
         private const string ResendEmailsEndpoint = "https://api.resend.com/emails";
-        private const string DefaultFromName = "Cocorra";
-        private const string DefaultFromEmail = "noreply@cocorraapp.com";
+        private const string DefaultFromName = "Cocorra Support";
+        private const string DefaultFromEmail = "support@cocorraapp.com";
 
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _config;
