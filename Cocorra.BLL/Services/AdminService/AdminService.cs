@@ -332,36 +332,44 @@ namespace Cocorra.BLL.Services.AdminService
         {
             if (string.IsNullOrEmpty(user.Email)) return;
 
+            var safeFirstName = System.Net.WebUtility.HtmlEncode(user.FirstName ?? string.Empty);
+
             switch (newStatus)
             {
                 case UserStatus.Pending:
                     await _emailService.SendEmailAsync(
                         user.Email,
-                        "Cocorra — Voice Verification Received",
-                        $"<h2>Hi {user.FirstName},</h2>" +
-                        "<p>Thank you for submitting your voice verification. Your request has been received and is currently under review by our team.</p>" +
-                        "<p>We'll notify you once a decision has been made. This usually takes 24–48 hours.</p>" +
-                        "<br><p>— The Cocorra Team</p>");
+                        "كوكورا — تم استلام العينة الصوتية للتحقق",
+                        $"<div dir=\"rtl\" style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: right; direction: rtl;\">" +
+                        $"<h2>مرحباً {safeFirstName}،</h2>" +
+                        "<p>شكراً لتقديمك عينة التحقق الصوتي. تم استلام طلبك وهو قيد المراجعة حالياً من قبل فريق العمل.</p>" +
+                        "<p>سنقوم بإشعارك فور اتخاذ القرار، وعادةً ما يستغرق ذلك من 24 إلى 48 ساعة.</p>" +
+                        "<br><p>— فريق كوكورا (The Cocorra Team)</p>" +
+                        "</div>");
                     break;
 
                 case UserStatus.Active:
                     await _emailService.SendEmailAsync(
                         user.Email,
-                        "Cocorra — Welcome! You're Verified ✅",
-                        $"<h2>Welcome, {user.FirstName}!</h2>" +
-                        "<p>Your voice verification has been approved. You now have full access to Cocorra — explore rooms, join conversations, and connect with the community.</p>" +
-                        "<p>We're excited to have you on board!</p>" +
-                        "<br><p>— The Cocorra Team</p>");
+                        "كوكورا — أهلاً بك! تم توثيق حسابك بنجاح (Verified) ✅",
+                        $"<div dir=\"rtl\" style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: right; direction: rtl;\">" +
+                        $"<h2>أهلاً بك يا {safeFirstName}!</h2>" +
+                        "<p>تمت الموافقة على عينة التحقق الصوتي الخاصة بك. أصبح بإمكانك الآن الاستفادة الكاملة من تطبيق كوكورا — استكشاف الغرف، المشاركة في المحادثات، والتواصل مع الجميع.</p>" +
+                        "<p>يسعدنا وجودك معنا في كوكورا!</p>" +
+                        "<br><p>— فريق كوكورا (The Cocorra Team)</p>" +
+                        "</div>");
                     break;
 
                 case UserStatus.ReRecord:
                     await _emailService.SendEmailAsync(
                         user.Email,
-                        "Cocorra — Action Required: New Voice Sample Needed",
-                        $"<h2>Hi {user.FirstName},</h2>" +
-                        "<p>We reviewed your voice verification but unfortunately couldn't approve it. This could be due to poor audio quality, background noise, or an incomplete recording.</p>" +
-                        "<p><strong>Please open the app and submit a new voice sample</strong> so we can complete your verification.</p>" +
-                        "<br><p>— The Cocorra Team</p>");
+                        "كوكورا — مطلوب إعادة تسجيل العينة الصوتية",
+                        $"<div dir=\"rtl\" style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: right; direction: rtl;\">" +
+                        $"<h2>مرحباً {safeFirstName}،</h2>" +
+                        "<p>قمنا بمراجعة عينة التحقق الصوتي الخاصة بك، ولكن للأسف لم نتمكن من اعتمادها. قد يرجع ذلك إلى جودة الصوت، أو وجود ضوضاء في الخلفية، أو عدم وضوح التسجيل.</p>" +
+                        "<p><strong>يرجى فتح التطبيق وإرسال عينة صوتية جديدة</strong> لنتمكن من إتمام عملية التوثيق وتفعيل حسابك.</p>" +
+                        "<br><p>— فريق كوكورا (The Cocorra Team)</p>" +
+                        "</div>");
                     break;
 
                 default:
