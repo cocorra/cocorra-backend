@@ -451,11 +451,12 @@ builder.Services.AddRateLimiter(options =>
 
 #region Forwarded Headers
 // Behind a reverse proxy, RemoteIpAddress is the proxy's address, so every client would share one
-// rate-limit partition. Only proxies listed in ForwardedHeaders:KnownProxies are trusted; when none
-// are configured the framework default (loopback only) applies. Never clear KnownProxies/KnownNetworks.
+// rate-limit partition. Only proxies listed in ForwardedHeaders:KnownProxies or KnownNetworks are trusted;
+// when none are configured the framework default (loopback only) applies. Never clear KnownProxies/KnownNetworks.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 2;
 
     var knownProxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>();
     if (knownProxies != null)
@@ -463,9 +464,34 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         foreach (var proxy in knownProxies)
         {
             if (!string.IsNullOrWhiteSpace(proxy) && System.Net.IPAddress.TryParse(proxy.Trim(), out var address))
+            {
                 options.KnownProxies.Add(address);
+                if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    options.KnownProxies.Add(address.MapToIPv6());
+                }
+            }
         }
     }
+
+    var knownNetworks = builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>();
+    if (knownNetworks != null)
+    {
+        foreach (var network in knownNetworks)
+        {
+            if (!string.IsNullOrWhiteSpace(network) && System.Net.IPNetwork.TryParse(network.Trim(), out var ipNetwork))
+            {
+                options.KnownIPNetworks.Add(ipNetwork);
+                if (ipNetwork.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    // Dual-stack sockets represent IPv4 addresses as ::ffff:a.b.c.d (/96 prefix + IPv4 prefix)
+                    options.KnownIPNetworks.Add(new System.Net.IPNetwork(ipNetwork.BaseAddress.MapToIPv6(), ipNetwork.PrefixLength + 96));
+                }
+            }
+        }
+    }
+
+    Console.WriteLine($"[ForwardedHeaders] Loaded {options.KnownProxies.Count} known proxies and {options.KnownIPNetworks.Count} known networks.");
 });
 #endregion
 

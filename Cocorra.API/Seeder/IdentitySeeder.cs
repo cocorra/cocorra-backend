@@ -49,6 +49,19 @@ namespace Cocorra.API.Seeder
                     await userManager.UpdateAsync(user);
                 }
 
+                // If admin password in configuration changed (e.g. rotated in production environment),
+                // rotate the admin user's password and invalidate existing security tokens.
+                if (!string.IsNullOrWhiteSpace(adminPassword) && !await userManager.CheckPasswordAsync(user, adminPassword))
+                {
+                    var resetToken = await userManager.GeneratePasswordResetTokenAsync(user);
+                    var resetResult = await userManager.ResetPasswordAsync(user, resetToken, adminPassword);
+                    if (resetResult.Succeeded)
+                    {
+                        await userManager.UpdateSecurityStampAsync(user);
+                        Console.WriteLine($"[IdentitySeeder] Successfully rotated password for admin user '{adminEmail}'.");
+                    }
+                }
+
                 // Ensure existing seeder account has roles just in case
                 if (!await userManager.IsInRoleAsync(user, "Admin"))
                     await userManager.AddToRoleAsync(user, "Admin");

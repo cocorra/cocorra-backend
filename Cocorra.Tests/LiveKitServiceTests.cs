@@ -9,8 +9,8 @@ public class LiveKitServiceTests
     private readonly LiveKitSettings _settings = new()
     {
         ServerUrl = "wss://test.livekit.dev",
-        ApiKey = "APIbnoqt7M8yCA4",
-        ApiSecret = "4vQLn7Z9GienF7cPZ54SOcA4fYyec5fTSAevDQh2DU5G"
+        ApiKey = "test_mock_api_key_12345",
+        ApiSecret = "test_mock_api_secret_must_be_at_least_32_bytes_long!"
     };
 
     private ILiveKitService CreateService()
