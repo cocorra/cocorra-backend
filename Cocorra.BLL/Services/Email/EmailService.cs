@@ -26,8 +26,8 @@ namespace Cocorra.BLL.Services.Email
     public class EmailService : IEmailService
     {
         private const string ResendEmailsEndpoint = "https://api.resend.com/emails";
-        private const string DefaultFromName = "Cocorra";
-        private const string DefaultFromEmail = "noreply@cocorraapp.com";
+        private const string DefaultFromName = "كوكورا | Cocorra";
+        private const string DefaultFromEmail = "support@cocorraapp.com";
 
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _config;
@@ -86,14 +86,14 @@ namespace Cocorra.BLL.Services.Email
         public async Task SendOtpEmailAsync(string to, string userName, string email, string otpCode, string logoUrl, CancellationToken cancellationToken = default)
         {
             var html = EmailTemplates.Otp(userName, email, otpCode, logoUrl);
-            await SendEmailAsync(to, "Verify Your Email", html, cancellationToken);
+            await SendEmailAsync(to, "كوكورا — كود تأكيد البريد الإلكتروني", html, cancellationToken);
         }
 
         /// <inheritdoc />
         public async Task SendPasswordResetEmailAsync(string to, string userName, string email, string otpCode, string logoUrl, CancellationToken cancellationToken = default)
         {
             var html = EmailTemplates.PasswordReset(userName, email, otpCode, logoUrl);
-            await SendEmailAsync(to, "Password Reset Code", html, cancellationToken);
+            await SendEmailAsync(to, "كوكورا — كود إعادة تعيين كلمة المرور", html, cancellationToken);
         }
 
         // ── Private helpers ──────────────────────────────────────────────────

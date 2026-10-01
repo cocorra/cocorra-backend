@@ -6,7 +6,9 @@ services:
     container_name: cocorra-api
     restart: unless-stopped
     ports:
-      - "5000:8080"
+      - "127.0.0.1:5000:8080"
+    networks:
+      - cocorra-network
     # Secrets come from a .env file next to this file, which docker-compose reads
     # automatically. .env is gitignored; copy .env.example and fill it in.
     env_file:
@@ -57,3 +59,7 @@ services:
 volumes:
   cocorra-uploads:
     driver: local
+
+networks:
+  cocorra-network:
+    external: true
