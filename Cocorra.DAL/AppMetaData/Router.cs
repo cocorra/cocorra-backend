@@ -50,6 +50,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string Delete = Prefix + "/Delete/{id}";          // DELETE
             public const string ManageUserRoles = Prefix + "/ManageUser";  // POST
             public const string GetUsersInRole = Prefix + "/Users/{roleName}"; // GET
+            public const string CreateUser = Prefix + "/CreateUser";       // POST
         }
         public static class RoomRouting
         {

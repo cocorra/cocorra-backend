@@ -102,4 +102,52 @@ public class RolesControllerTests
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(serviceResponse, ok.Value);
     }
+
+    [Fact]
+    public async Task CreateUser_Success_ReturnsOk()
+    {
+        var dto = new CreateUserDto
+        {
+            FirstName = "New",
+            LastName = "Coach",
+            Email = "coach@example.com",
+            Password = "Password123!",
+            Age = 30,
+            Role = "Coach"
+        };
+        var serviceResponse = new Response<UserDto>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = new UserDto { Id = Guid.NewGuid().ToString(), Email = "coach@example.com", FullName = "New Coach", Roles = new List<string> { "Coach" } }
+        };
+
+        _rolesServiceMock.Setup(s => s.CreateUserWithRoleAsync(dto)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController();
+        var result = await controller.CreateUser(dto);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(serviceResponse, ok.Value);
+    }
+
+    [Fact]
+    public async Task CreateUser_Failure_ReturnsBadRequest()
+    {
+        var dto = new CreateUserDto { Email = "fail@example.com" };
+        var serviceResponse = new Response<UserDto>
+        {
+            Succeeded = false,
+            StatusCode = System.Net.HttpStatusCode.BadRequest,
+            Message = "Email already registered"
+        };
+
+        _rolesServiceMock.Setup(s => s.CreateUserWithRoleAsync(dto)).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController();
+        var result = await controller.CreateUser(dto);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(serviceResponse, badRequest.Value);
+    }
 }

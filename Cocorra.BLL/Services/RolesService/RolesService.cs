@@ -2,6 +2,7 @@ using Cocorra.DAL.DTOS;
 using Cocorra.DAL.DTOS.AdminDto;
 using Cocorra.DAL.DTOS.Role;
 using Cocorra.DAL.Models;
+using Cocorra.DAL.Enums;
 using Cocorra.BLL.Base;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -97,6 +98,81 @@ namespace Cocorra.BLL.Services.RolesService
             }).ToList();
 
             return Success(usersDto);
+        }
+
+        public async Task<Response<UserDto>> CreateUserWithRoleAsync(CreateUserDto model)
+        {
+            if (string.IsNullOrWhiteSpace(model.Email))
+                return BadRequest<UserDto>("Email is required.");
+
+            var normalizedEmail = model.Email.Trim();
+            var existingUser = await _userManager.FindByEmailAsync(normalizedEmail);
+            if (existingUser != null)
+                return BadRequest<UserDto>("A user with this email already exists.");
+
+            var rolesToAssign = new List<string>();
+            if (model.Roles != null && model.Roles.Any())
+            {
+                rolesToAssign.AddRange(model.Roles.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()));
+            }
+            else if (!string.IsNullOrWhiteSpace(model.Role))
+            {
+                rolesToAssign.Add(model.Role.Trim());
+            }
+
+            if (!rolesToAssign.Any())
+            {
+                rolesToAssign.Add("User");
+            }
+
+            foreach (var role in rolesToAssign)
+            {
+                if (!await _roleManager.RoleExistsAsync(role))
+                {
+                    return BadRequest<UserDto>($"Role '{role}' does not exist in the system.");
+                }
+            }
+
+            var user = new ApplicationUser
+            {
+                UserName = normalizedEmail,
+                Email = normalizedEmail,
+                FirstName = model.FirstName?.Trim() ?? string.Empty,
+                LastName = model.LastName?.Trim() ?? string.Empty,
+                Age = model.Age > 0 ? model.Age : 25,
+                EmailConfirmed = true,
+                Status = UserStatus.Active,
+                SecurityStamp = Guid.NewGuid().ToString(),
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var createResult = await _userManager.CreateAsync(user, model.Password);
+            if (!createResult.Succeeded)
+            {
+                var errors = string.Join("; ", createResult.Errors.Select(e => e.Description));
+                return BadRequest<UserDto>($"Failed to create user: {errors}");
+            }
+
+            var roleResult = await _userManager.AddToRolesAsync(user, rolesToAssign);
+            if (!roleResult.Succeeded)
+            {
+                var errors = string.Join("; ", roleResult.Errors.Select(e => e.Description));
+                return BadRequest<UserDto>($"User created, but role assignment failed: {errors}");
+            }
+
+            var userDto = new UserDto
+            {
+                Id = user.Id.ToString(),
+                FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                Email = user.Email,
+                Age = user.Age,
+                MBTI = user.MBTI ?? "N/A",
+                Status = user.Status.ToString(),
+                CreatedAt = user.CreatedAt,
+                Roles = rolesToAssign
+            };
+
+            return Success(userDto);
         }
     }
 }

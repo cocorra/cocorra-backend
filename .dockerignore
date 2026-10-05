@@ -4,7 +4,6 @@
 **/bin
 **/obj
 **/publish
-**/.gitignore
 **/*.user
 **/*.suo
 **/Thumbs.db
@@ -13,7 +12,6 @@
 
 # Docker files themselves
 **/Dockerfile
-**/docker-compose.yml
 **/.dockerignore
 
 # Documentation and non-essential files
