@@ -371,4 +371,60 @@ public class AuthServicesTests : IDisposable
         Assert.Null(updated!.RefreshToken);
         Assert.Null(updated.FcmToken);
     }
+
+    [Fact]
+    public async Task DeleteAccountWithCredentialsAsync_UnknownEmail_ReturnsGenericError()
+    {
+        var (service, _, _, _) = CreateService();
+
+        var result = await service.DeleteAccountWithCredentialsAsync("missing@cocorra.com", "Password123");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Equal(AuthServices.DeleteAccountInvalidCredentialsMessage, result.Message);
+    }
+
+    [Fact]
+    public async Task DeleteAccountWithCredentialsAsync_WrongPassword_ReturnsGenericErrorAndKeepsUser()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var user = new ApplicationUser { UserName = "keep@cocorra.com", Email = "keep@cocorra.com", EmailConfirmed = true, Status = UserStatus.Active };
+        await userMgr.CreateAsync(user, "Password123");
+
+        var result = await service.DeleteAccountWithCredentialsAsync("keep@cocorra.com", "WrongPassword");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Equal(AuthServices.DeleteAccountInvalidCredentialsMessage, result.Message);
+        Assert.NotNull(await userMgr.FindByEmailAsync("keep@cocorra.com"));
+    }
+
+    [Fact]
+    public async Task DeleteAccountWithCredentialsAsync_LockedOutUser_ReturnsForbiddenAndKeepsUser()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var user = new ApplicationUser { UserName = "banned@cocorra.com", Email = "banned@cocorra.com", EmailConfirmed = true, Status = UserStatus.Banned };
+        await userMgr.CreateAsync(user, "Password123");
+        await userMgr.SetLockoutEnabledAsync(user, true);
+        await userMgr.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
+
+        var result = await service.DeleteAccountWithCredentialsAsync("banned@cocorra.com", "Password123");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.Forbidden, result.StatusCode);
+        Assert.NotNull(await userMgr.FindByEmailAsync("banned@cocorra.com"));
+    }
+
+    [Fact]
+    public async Task DeleteAccountWithCredentialsAsync_ValidCredentials_DeletesUser()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var user = new ApplicationUser { UserName = "gone@cocorra.com", Email = "gone@cocorra.com", EmailConfirmed = true, Status = UserStatus.Active };
+        await userMgr.CreateAsync(user, "Password123");
+
+        var result = await service.DeleteAccountWithCredentialsAsync("gone@cocorra.com", "Password123");
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Null(await userMgr.FindByEmailAsync("gone@cocorra.com"));
+    }
 }

@@ -44,6 +44,7 @@ using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.Analytics;
 using Amazon.S3;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -114,9 +115,12 @@ builder.Services.AddSwaggerGen(options =>
 // reflecting every Origin while allowing credentials would let any site call the
 // API with the caller's credentials — so the origins are named here instead.
 // SignalR's JS client sends credentials on /hubs negotiate, hence AllowCredentials.
-var allowedOrigins = builder.Configuration
+var allowedOrigins = (builder.Configuration
     .GetSection("Cors:AllowedOrigins")
-    .Get<string[]>() ?? Array.Empty<string>();
+    .Get<string[]>() ?? Array.Empty<string>())
+    .Select(o => o.Trim().TrimEnd('/'))
+    .Where(o => !string.IsNullOrEmpty(o))
+    .ToArray();
 
 builder.Services.AddCors(options =>
 {
@@ -133,8 +137,11 @@ builder.Services.AddCors(options =>
             // Configured origins, plus any localhost port so a dev server on
             // 4201/4300 works without a config edit. Remote origins stay pinned.
             policy.SetIsOriginAllowed(origin =>
-                allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)
-                || IsLocalhost(origin));
+            {
+                var trimmedOrigin = origin.TrimEnd('/');
+                return allowedOrigins.Contains(trimmedOrigin, StringComparer.OrdinalIgnoreCase)
+                    || IsLocalhost(trimmedOrigin);
+            });
         }
         else
         {
@@ -278,18 +285,55 @@ builder.Services.AddHostedService<AnalyticsAggregationService>();
 #endregion
 
 #region Add Minio
-builder.Services.Configure<MinioSettings>(builder.Configuration.GetSection("Minio"));
+builder.Services.Configure<MinioSettings>(options =>
+{
+    builder.Configuration.GetSection("Minio").Bind(options);
+
+    // Standalone environment variables (standard Docker/MinIO naming)
+    // take precedence over appsettings placeholders.
+    var envEndpoint = builder.Configuration["MINIO_ENDPOINT"];
+    if (!string.IsNullOrWhiteSpace(envEndpoint))
+        options.Endpoint = envEndpoint;
+
+    var envAccessKey = builder.Configuration["MINIO_ACCESS_KEY"] 
+        ?? builder.Configuration["MINIO_ROOT_USER"];
+    if (!string.IsNullOrWhiteSpace(envAccessKey))
+        options.AccessKey = envAccessKey;
+
+    var envSecretKey = builder.Configuration["MINIO_SECRET_KEY"] 
+        ?? builder.Configuration["MINIO_ROOT_PASSWORD"];
+    if (!string.IsNullOrWhiteSpace(envSecretKey))
+        options.SecretKey = envSecretKey;
+
+    var envBucket = builder.Configuration["MINIO_BUCKET_NAME"];
+    if (!string.IsNullOrWhiteSpace(envBucket))
+        options.BucketName = envBucket;
+
+    var envPublicUrl = builder.Configuration["MINIO_PUBLIC_URL"];
+    if (!string.IsNullOrWhiteSpace(envPublicUrl))
+        options.PublicUrl = envPublicUrl;
+});
+
 builder.Services.AddSingleton<IAmazonS3>(sp =>
 {
-    var minioSettings = builder.Configuration.GetSection("Minio").Get<MinioSettings>();
+    var minioSettings = sp.GetRequiredService<IOptions<MinioSettings>>().Value;
+
+    var endpoint = (minioSettings.Endpoint ?? string.Empty).Trim().TrimEnd('/');
+    var isHttps = endpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
     var credentials = new Amazon.Runtime.BasicAWSCredentials(minioSettings.AccessKey, minioSettings.SecretKey);
     
     var config = new Amazon.S3.AmazonS3Config
     {
-        ServiceURL = minioSettings.Endpoint,
-        ForcePathStyle = true, // مهم جداً لـ MinIO ليعمل بشكل صحيح كبديل لـ AWS
-        UseHttp = true // استخدم https إذا كنت قد أعددت SSL لـ MinIO
+        ServiceURL = endpoint,
+        ForcePathStyle = true, // Required for MinIO S3 compatibility
+        UseHttp = !isHttps
     };
+
+    var accessKeyMasked = string.IsNullOrEmpty(minioSettings.AccessKey) 
+        ? "EMPTY" 
+        : (minioSettings.AccessKey.Length > 4 ? minioSettings.AccessKey[..4] + "***" : "***");
+    Console.WriteLine($"[MinIO] Initialized: Endpoint='{endpoint}', Bucket='{minioSettings.BucketName}', AccessKey='{accessKeyMasked}', ForcePathStyle=true, UseHttp={!isHttps}");
 
     return new Amazon.S3.AmazonS3Client(credentials, config);
 });
@@ -581,6 +625,14 @@ app.MapHub<RoomHub>("/hubs/rooms");
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<Cocorra.API.Hubs.SupportHub>("/hubs/support");
 app.MapControllers();
+// Public account-deletion page required by Google Play (reachable without the app).
+// Served from a clean URL with no-cache so policy-text changes are picked up immediately,
+// unlike wwwroot static files which are cached for a week.
+app.MapGet("/delete-account", (IWebHostEnvironment env, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-cache";
+    return Results.File(Path.Combine(env.WebRootPath, "Html", "deleteAccount.html"), "text/html; charset=utf-8");
+});
 app.MapGet("/", context =>
 {
     context.Response.ContentType = "text/html";

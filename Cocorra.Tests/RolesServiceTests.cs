@@ -215,4 +215,82 @@ public class RolesServiceTests : IDisposable
         Assert.Single(result.Data);
         Assert.Equal("Agent Smith", result.Data[0].FullName);
     }
+
+    [Fact]
+    public async Task CreateUserWithRoleAsync_ValidInput_CreatesUserAndAssignsRole()
+    {
+        var (service, roleMgr, _) = CreateService();
+        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
+
+        var dto = new CreateUserDto
+        {
+            FirstName = "Sarah",
+            LastName = "Connor",
+            Email = "sarah@example.com",
+            Password = "Password123!",
+            Age = 28,
+            Role = "Coach"
+        };
+
+        var result = await service.CreateUserWithRoleAsync(dto);
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+        Assert.Equal("Sarah Connor", result.Data.FullName);
+        Assert.Equal("sarah@example.com", result.Data.Email);
+        Assert.Contains("Coach", result.Data.Roles);
+    }
+
+    [Fact]
+    public async Task CreateUserWithRoleAsync_DuplicateEmail_ReturnsBadRequest()
+    {
+        var (service, roleMgr, userMgr) = CreateService();
+        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
+
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "dup@example.com",
+            Email = "dup@example.com",
+            FirstName = "Existing",
+            LastName = "User"
+        };
+        await userMgr.CreateAsync(existingUser, "Password123!");
+
+        var dto = new CreateUserDto
+        {
+            FirstName = "New",
+            LastName = "User",
+            Email = "dup@example.com",
+            Password = "Password123!",
+            Role = "Coach"
+        };
+
+        var result = await service.CreateUserWithRoleAsync(dto);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Contains("already exists", result.Message);
+    }
+
+    [Fact]
+    public async Task CreateUserWithRoleAsync_InvalidRole_ReturnsBadRequest()
+    {
+        var (service, _, _) = CreateService();
+
+        var dto = new CreateUserDto
+        {
+            FirstName = "Test",
+            LastName = "User",
+            Email = "nonexistent_role@example.com",
+            Password = "Password123!",
+            Role = "NonExistentRole"
+        };
+
+        var result = await service.CreateUserWithRoleAsync(dto);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Contains("does not exist", result.Message);
+    }
 }

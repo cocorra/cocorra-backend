@@ -69,7 +69,13 @@ namespace Cocorra.BLL.Services.Upload
             }
             catch (Exception ex)
             {
-                System.IO.File.WriteAllText("minio-error.txt", ex.ToString());
+                try
+                {
+                    System.IO.File.WriteAllText("minio-error.txt", ex.ToString());
+                }
+                catch { }
+
+                Console.Error.WriteLine($"[MinIO Image Upload Error] Failed uploading to Endpoint: '{_settings?.Endpoint}', Bucket: '{_settings?.BucketName}'. Exception: {ex.Message}");
                 Console.WriteLine($"MinIO Upload Error: {ex}");
                 return "Error:ServerException";
             }

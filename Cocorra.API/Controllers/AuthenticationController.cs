@@ -171,6 +171,18 @@ namespace Cocorra.API.Controllers
             var result = await _authServices.DeleteAccountAsync(userId);
             return StatusCode((int)result.StatusCode, result);
         }
+
+        // Anonymous, so it is rate limited like the OTP endpoints to bound password guessing.
+        [EnableRateLimiting("otp")]
+        [HttpPost(Router.AuthenticationRouting.DeleteAccountWithCredentials)]
+        public async Task<IActionResult> DeleteAccountWithCredentials([FromBody] LoginDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var result = await _authServices.DeleteAccountWithCredentialsAsync(dto.Email!, dto.Password!);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         [HttpPost(Router.AuthenticationRouting.RefreshToken)]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenDto dto)
         {
