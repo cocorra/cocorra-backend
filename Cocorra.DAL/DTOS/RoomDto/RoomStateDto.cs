@@ -10,6 +10,8 @@ public class RoomStateDto
     public Guid RoomId { get; set; }
     public string RoomTitle { get; set; } = string.Empty;
     public Guid HostId { get; set; }
+    public string HostName { get; set; } = string.Empty;
+    public string? HostProfilePicture { get; set; }
     public int TotalCapacity { get; set; }
     public int StageCapacity { get; set; }
     public RoomCategory Category { get; set; }

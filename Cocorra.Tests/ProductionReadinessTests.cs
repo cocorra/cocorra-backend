@@ -247,6 +247,74 @@ public class ProductionReadinessTests
         Assert.Equal("true", config["Analytics:EnableNewEventEmission"]);
     }
 
+    [Fact]
+    public void MinioSettings_BindsFromDoubleUnderscoreEnvironmentVariables()
+    {
+        const string endpointKey = "Minio__Endpoint";
+        const string accessKey = "Minio__AccessKey";
+        const string secretKey = "Minio__SecretKey";
+
+        var prevEndpoint = Environment.GetEnvironmentVariable(endpointKey);
+        var prevAccess = Environment.GetEnvironmentVariable(accessKey);
+        var prevSecret = Environment.GetEnvironmentVariable(secretKey);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(endpointKey, "http://152.239.115.176:9000");
+            Environment.SetEnvironmentVariable(accessKey, "env_minio_user");
+            Environment.SetEnvironmentVariable(secretKey, "env_minio_secret");
+
+            var config = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+            var settings = config.GetSection("Minio").Get<Cocorra.BLL.Services.UploadService.MinioSettings>();
+
+            Assert.NotNull(settings);
+            Assert.Equal("http://152.239.115.176:9000", settings.Endpoint);
+            Assert.Equal("env_minio_user", settings.AccessKey);
+            Assert.Equal("env_minio_secret", settings.SecretKey);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(endpointKey, prevEndpoint);
+            Environment.SetEnvironmentVariable(accessKey, prevAccess);
+            Environment.SetEnvironmentVariable(secretKey, prevSecret);
+        }
+    }
+
+    [Fact]
+    public void MinioSettings_FallbackResolution_HonorsStandardUppercaseEnvironmentVariables()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Minio:Endpoint"] = "http://localhost:9000",
+                ["Minio:AccessKey"] = "dev_minio_access_key_placeholder",
+                ["Minio:SecretKey"] = "dev_minio_secret_key_placeholder",
+                ["MINIO_ENDPOINT"] = "http://152.239.115.176:9000",
+                ["MINIO_ACCESS_KEY"] = "real_admin",
+                ["MINIO_SECRET_KEY"] = "real_secret"
+            })
+            .Build();
+
+        var options = new Cocorra.BLL.Services.UploadService.MinioSettings();
+        config.GetSection("Minio").Bind(options);
+
+        var envEndpoint = config["MINIO_ENDPOINT"];
+        if (!string.IsNullOrWhiteSpace(envEndpoint))
+            options.Endpoint = envEndpoint;
+
+        var envAccessKey = config["MINIO_ACCESS_KEY"] ?? config["MINIO_ROOT_USER"];
+        if (!string.IsNullOrWhiteSpace(envAccessKey))
+            options.AccessKey = envAccessKey;
+
+        var envSecretKey = config["MINIO_SECRET_KEY"] ?? config["MINIO_ROOT_PASSWORD"];
+        if (!string.IsNullOrWhiteSpace(envSecretKey))
+            options.SecretKey = envSecretKey;
+
+        Assert.Equal("http://152.239.115.176:9000", options.Endpoint);
+        Assert.Equal("real_admin", options.AccessKey);
+        Assert.Equal("real_secret", options.SecretKey);
+    }
+
     // ── Design-time tooling must not need the salt ──────────────────────────
 
     [Fact]

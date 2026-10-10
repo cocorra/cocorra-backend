@@ -44,6 +44,7 @@ using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.Analytics;
 using Amazon.S3;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -114,9 +115,12 @@ builder.Services.AddSwaggerGen(options =>
 // reflecting every Origin while allowing credentials would let any site call the
 // API with the caller's credentials — so the origins are named here instead.
 // SignalR's JS client sends credentials on /hubs negotiate, hence AllowCredentials.
-var allowedOrigins = builder.Configuration
+var allowedOrigins = (builder.Configuration
     .GetSection("Cors:AllowedOrigins")
-    .Get<string[]>() ?? Array.Empty<string>();
+    .Get<string[]>() ?? Array.Empty<string>())
+    .Select(o => o.Trim().TrimEnd('/'))
+    .Where(o => !string.IsNullOrEmpty(o))
+    .ToArray();
 
 builder.Services.AddCors(options =>
 {
@@ -133,8 +137,11 @@ builder.Services.AddCors(options =>
             // Configured origins, plus any localhost port so a dev server on
             // 4201/4300 works without a config edit. Remote origins stay pinned.
             policy.SetIsOriginAllowed(origin =>
-                allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)
-                || IsLocalhost(origin));
+            {
+                var trimmedOrigin = origin.TrimEnd('/');
+                return allowedOrigins.Contains(trimmedOrigin, StringComparer.OrdinalIgnoreCase)
+                    || IsLocalhost(trimmedOrigin);
+            });
         }
         else
         {
@@ -278,18 +285,55 @@ builder.Services.AddHostedService<AnalyticsAggregationService>();
 #endregion
 
 #region Add Minio
-builder.Services.Configure<MinioSettings>(builder.Configuration.GetSection("Minio"));
+builder.Services.Configure<MinioSettings>(options =>
+{
+    builder.Configuration.GetSection("Minio").Bind(options);
+
+    // Standalone environment variables (standard Docker/MinIO naming)
+    // take precedence over appsettings placeholders.
+    var envEndpoint = builder.Configuration["MINIO_ENDPOINT"];
+    if (!string.IsNullOrWhiteSpace(envEndpoint))
+        options.Endpoint = envEndpoint;
+
+    var envAccessKey = builder.Configuration["MINIO_ACCESS_KEY"] 
+        ?? builder.Configuration["MINIO_ROOT_USER"];
+    if (!string.IsNullOrWhiteSpace(envAccessKey))
+        options.AccessKey = envAccessKey;
+
+    var envSecretKey = builder.Configuration["MINIO_SECRET_KEY"] 
+        ?? builder.Configuration["MINIO_ROOT_PASSWORD"];
+    if (!string.IsNullOrWhiteSpace(envSecretKey))
+        options.SecretKey = envSecretKey;
+
+    var envBucket = builder.Configuration["MINIO_BUCKET_NAME"];
+    if (!string.IsNullOrWhiteSpace(envBucket))
+        options.BucketName = envBucket;
+
+    var envPublicUrl = builder.Configuration["MINIO_PUBLIC_URL"];
+    if (!string.IsNullOrWhiteSpace(envPublicUrl))
+        options.PublicUrl = envPublicUrl;
+});
+
 builder.Services.AddSingleton<IAmazonS3>(sp =>
 {
-    var minioSettings = builder.Configuration.GetSection("Minio").Get<MinioSettings>();
+    var minioSettings = sp.GetRequiredService<IOptions<MinioSettings>>().Value;
+
+    var endpoint = (minioSettings.Endpoint ?? string.Empty).Trim().TrimEnd('/');
+    var isHttps = endpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
     var credentials = new Amazon.Runtime.BasicAWSCredentials(minioSettings.AccessKey, minioSettings.SecretKey);
     
     var config = new Amazon.S3.AmazonS3Config
     {
-        ServiceURL = minioSettings.Endpoint,
-        ForcePathStyle = true, // مهم جداً لـ MinIO ليعمل بشكل صحيح كبديل لـ AWS
-        UseHttp = true // استخدم https إذا كنت قد أعددت SSL لـ MinIO
+        ServiceURL = endpoint,
+        ForcePathStyle = true, // Required for MinIO S3 compatibility
+        UseHttp = !isHttps
     };
+
+    var accessKeyMasked = string.IsNullOrEmpty(minioSettings.AccessKey) 
+        ? "EMPTY" 
+        : (minioSettings.AccessKey.Length > 4 ? minioSettings.AccessKey[..4] + "***" : "***");
+    Console.WriteLine($"[MinIO] Initialized: Endpoint='{endpoint}', Bucket='{minioSettings.BucketName}', AccessKey='{accessKeyMasked}', ForcePathStyle=true, UseHttp={!isHttps}");
 
     return new Amazon.S3.AmazonS3Client(credentials, config);
 });
@@ -451,11 +495,12 @@ builder.Services.AddRateLimiter(options =>
 
 #region Forwarded Headers
 // Behind a reverse proxy, RemoteIpAddress is the proxy's address, so every client would share one
-// rate-limit partition. Only proxies listed in ForwardedHeaders:KnownProxies are trusted; when none
-// are configured the framework default (loopback only) applies. Never clear KnownProxies/KnownNetworks.
+// rate-limit partition. Only proxies listed in ForwardedHeaders:KnownProxies or KnownNetworks are trusted;
+// when none are configured the framework default (loopback only) applies. Never clear KnownProxies/KnownNetworks.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 2;
 
     var knownProxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>();
     if (knownProxies != null)
@@ -463,9 +508,34 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         foreach (var proxy in knownProxies)
         {
             if (!string.IsNullOrWhiteSpace(proxy) && System.Net.IPAddress.TryParse(proxy.Trim(), out var address))
+            {
                 options.KnownProxies.Add(address);
+                if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    options.KnownProxies.Add(address.MapToIPv6());
+                }
+            }
         }
     }
+
+    var knownNetworks = builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>();
+    if (knownNetworks != null)
+    {
+        foreach (var network in knownNetworks)
+        {
+            if (!string.IsNullOrWhiteSpace(network) && System.Net.IPNetwork.TryParse(network.Trim(), out var ipNetwork))
+            {
+                options.KnownIPNetworks.Add(ipNetwork);
+                if (ipNetwork.BaseAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    // Dual-stack sockets represent IPv4 addresses as ::ffff:a.b.c.d (/96 prefix + IPv4 prefix)
+                    options.KnownIPNetworks.Add(new System.Net.IPNetwork(ipNetwork.BaseAddress.MapToIPv6(), ipNetwork.PrefixLength + 96));
+                }
+            }
+        }
+    }
+
+    Console.WriteLine($"[ForwardedHeaders] Loaded {options.KnownProxies.Count} known proxies and {options.KnownIPNetworks.Count} known networks.");
 });
 #endregion
 

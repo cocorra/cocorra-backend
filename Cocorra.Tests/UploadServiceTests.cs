@@ -227,4 +227,34 @@ public class UploadServiceTests
             r.BucketName == "cocorra-bucket" &&
             r.Key == "Uploads/Voices/sample.mp3"), default), Times.Once);
     }
+
+    [Fact]
+    public async Task UploadImage_S3ThrowsException_ReturnsErrorServerException()
+    {
+        var service = CreateImageService();
+        var jpegBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46 };
+        var file = CreateMockFormFile("avatar.jpg", "image/jpeg", jpegBytes);
+
+        _s3Mock.Setup(s => s.PutObjectAsync(It.IsAny<PutObjectRequest>(), default))
+            .ThrowsAsync(new AmazonS3Exception("Connection refused / MinIO unreachable"));
+
+        var result = await service.SaveImageAsync(file);
+
+        Assert.Equal("Error:ServerException", result);
+    }
+
+    [Fact]
+    public async Task UploadVoice_S3ThrowsException_ReturnsErrorServerException()
+    {
+        var service = CreateVoiceService();
+        var mp3Bytes = new byte[] { 0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        var file = CreateMockFormFile("voice.mp3", "audio/mpeg", mp3Bytes);
+
+        _s3Mock.Setup(s => s.PutObjectAsync(It.IsAny<PutObjectRequest>(), default))
+            .ThrowsAsync(new AmazonS3Exception("Invalid credentials / MinIO rejected"));
+
+        var result = await service.SaveVoice(file);
+
+        Assert.Equal("Error:ServerException", result);
+    }
 }

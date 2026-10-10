@@ -71,6 +71,15 @@ public class RoomService : ResponseHandler, IRoomService
         return $"{_baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
     }
 
+    private static string ResolveFullName(ApplicationUser? user)
+    {
+        if (user == null) return "Unknown";
+        var fullName = $"{user.FirstName} {user.LastName}".Trim();
+        if (!string.IsNullOrWhiteSpace(fullName)) return fullName;
+        if (!string.IsNullOrWhiteSpace(user.UserName)) return user.UserName;
+        return "Unknown";
+    }
+
     public async Task<Response<Guid>> CreateRoomAsync(CreateRoomDto dto, Guid hostId, IFormFile? roomImage = null)
     {
         try
@@ -188,7 +197,7 @@ public class RoomService : ResponseHandler, IRoomService
 
         // Helper to resolve display name for token generation
         string ResolveName(RoomParticipant p) =>
-            ((p.User?.FirstName ?? "") + " " + (p.User?.LastName ?? "")).Trim();
+            ResolveFullName(p.User);
 
         // Only the host and people on stage can use their microphone
         bool ResolveCanPublish(RoomParticipant p) =>
@@ -213,15 +222,16 @@ public class RoomService : ResponseHandler, IRoomService
 
             if (activeCount >= room.TotalCapacity) return BadRequest<JoinRoomResultDto>("Room is full.");
 
-            existingParticipant.Status = room.IsPrivate ? ParticipantStatus.PendingApproval : ParticipantStatus.Active;
+            var isHost = room.HostId == userId;
+            existingParticipant.Status = (room.IsPrivate && !isHost) ? ParticipantStatus.PendingApproval : ParticipantStatus.Active;
             existingParticipant.JoinedAt = DateTime.UtcNow;
-            existingParticipant.IsOnStage = false;
-            existingParticipant.IsMuted = true;
+            existingParticipant.IsOnStage = isHost;
+            existingParticipant.IsMuted = !isHost;
 
             await _roomRepo.UpdateParticipantAsync(existingParticipant);
             await _roomRepo.SaveChangesAsync();
 
-            if (room.IsPrivate)
+            if (room.IsPrivate && !isHost)
             {
                 _eventTracker.Track(EventTypes.RoomJoinRequested, userId, new { roomId });
                 return Success(new JoinRoomResultDto(), message: "Request sent.");
@@ -246,16 +256,17 @@ public class RoomService : ResponseHandler, IRoomService
             return BadRequest<JoinRoomResultDto>("Room is full.");
         }
 
+        var newIsHost = room.HostId == userId;
         var newParticipant = new RoomParticipant
         {
             RoomId = roomId,
             UserId = userId,
             JoinedAt = DateTime.UtcNow,
-            IsOnStage = false,
-            IsMuted = true,
-            Status = room.IsPrivate ? ParticipantStatus.PendingApproval : ParticipantStatus.Active
+            IsOnStage = newIsHost,
+            IsMuted = !newIsHost,
+            Status = (room.IsPrivate && !newIsHost) ? ParticipantStatus.PendingApproval : ParticipantStatus.Active
         };
-        if (room.IsPrivate)
+        if (room.IsPrivate && !newIsHost)
         {
             var notification = new Notification
             {
@@ -281,7 +292,7 @@ public class RoomService : ResponseHandler, IRoomService
         await _roomRepo.AddParticipantAsync(newParticipant);
         await _roomRepo.SaveChangesAsync();
 
-        if (room.IsPrivate)
+        if (room.IsPrivate && !newIsHost)
         {
             _eventTracker.Track(EventTypes.RoomJoinRequested, userId, new { roomId });
             return Success(new JoinRoomResultDto(), message: "Request sent, waiting for approval.");
@@ -290,7 +301,7 @@ public class RoomService : ResponseHandler, IRoomService
         {
             // Fetch the user info for the display name
             var user = await _userManager.FindByIdAsync(userId.ToString());
-            var displayName = ((user?.FirstName ?? "") + " " + (user?.LastName ?? "")).Trim();
+            var displayName = ResolveFullName(user);
             var canPublish = ResolveCanPublish(newParticipant);
             var token = _liveKitService.GenerateToken(roomId, userId, displayName, canPublish);
             return Success(new JoinRoomResultDto
@@ -368,8 +379,14 @@ public class RoomService : ResponseHandler, IRoomService
         var participants = await _roomRepo.GetRoomParticipantsAsync(roomId);
         var activeParticipants = participants.Where(p => p.Status == ParticipantStatus.Active).ToList();
 
+        // Host participant resolution
+        var hostParticipant = activeParticipants.FirstOrDefault(p => p.UserId == room.HostId);
+        var hostUser = hostParticipant?.User ?? room.Host;
+        var hostName = ResolveFullName(hostUser);
+        var hostProfilePicture = BuildFullUrl(hostUser?.ProfilePicturePath);
+
         // Generate a fresh LiveKit token for the requesting user
-        var currentName = ((currentParticipant.User?.FirstName ?? "") + " " + (currentParticipant.User?.LastName ?? "")).Trim();
+        var currentName = ResolveFullName(currentParticipant.User);
         var currentCanPublish = room.HostId == currentUserId || currentParticipant.IsOnStage;
         var liveKitToken = _liveKitService.GenerateToken(roomId, currentUserId, currentName, currentCanPublish);
 
@@ -378,6 +395,8 @@ public class RoomService : ResponseHandler, IRoomService
             RoomId = room.Id,
             RoomTitle = room.RoomTitle,
             HostId = room.HostId,
+            HostName = hostName,
+            HostProfilePicture = hostProfilePicture,
             TotalCapacity = room.TotalCapacity,
             StageCapacity = room.StageCapacity,
             Category = room.Category,
@@ -385,10 +404,10 @@ public class RoomService : ResponseHandler, IRoomService
             Participants = activeParticipants.Select(p => new ParticipantStateDto
             {
                 UserId = p.UserId,
-                Name = p.User?.FirstName + " " + p.User?.LastName,
+                Name = ResolveFullName(p.User),
                 ProfilePicture = BuildFullUrl(p.User?.ProfilePicturePath),
-                IsOnStage = p.IsOnStage,
-                IsMuted = p.IsMuted,
+                IsOnStage = p.UserId == room.HostId || p.IsOnStage,
+                IsMuted = p.UserId == room.HostId ? p.IsMuted : p.IsMuted,
                 IsHandRaised = p.IsHandRaised,
                 JoinedAt = p.JoinedAt
             }).ToList(),
@@ -448,7 +467,7 @@ public class RoomService : ResponseHandler, IRoomService
             Category = room.Category,
             CategoryName = room.Category.ToString(),
             HostId = room.HostId,
-            HostName = room.Host != null ? $"{room.Host.FirstName} {room.Host.LastName}" : "Unknown",
+            HostName = ResolveFullName(room.Host),
             HostProfilePicture = room.Host != null ? BuildFullUrl(room.Host.ProfilePicturePath) : null,
             RoomImage = BuildFullUrl(room.ImagePath),
             ListenersCount = room.Status == RoomStatus.Live
@@ -882,7 +901,7 @@ public class RoomService : ResponseHandler, IRoomService
             Category = room.Category,
             CategoryName = room.Category.ToString(),
             HostId = room.HostId,
-            HostName = room.Host != null ? $"{room.Host.FirstName} {room.Host.LastName}" : "Unknown",
+            HostName = ResolveFullName(room.Host),
             HostProfilePicture = room.Host != null ? BuildFullUrl(room.Host.ProfilePicturePath) : null,
             RoomImage = BuildFullUrl(room.ImagePath),
             ListenersCount = room.Participants.Count,

@@ -158,6 +158,15 @@ namespace Cocorra.API.Hubs
             return result;
         }
 
+        private static string ResolveDisplayName(ApplicationUser? user)
+        {
+            if (user == null) return "User";
+            var fullName = $"{user.FirstName} {user.LastName}".Trim();
+            if (!string.IsNullOrWhiteSpace(fullName)) return fullName;
+            if (!string.IsNullOrWhiteSpace(user.UserName)) return user.UserName;
+            return "User";
+        }
+
         /// <summary>
         /// AN-041 — records that a core-loop operation did not complete.
         ///
@@ -324,14 +333,15 @@ namespace Cocorra.API.Hubs
             // Re-activate users who had previously left (e.g., disconnect/reconnect)
             if (participant.Status == ParticipantStatus.Left)
             {
+                var isHostRejoin = room.HostId == userId;
                 participant.Status = ParticipantStatus.Active;
                 // AN-031: JoinedAt is NOT overwritten here any more. It is the first entry, and
                 // overwriting it destroyed the only record of when this person actually arrived.
                 participant.LastJoinedAt = DateTime.UtcNow;
                 participant.RejoinCount++;
                 participant.LeftAt = null;
-                participant.IsOnStage = false;
-                participant.IsMuted = true;
+                participant.IsOnStage = isHostRejoin;
+                participant.IsMuted = !isHostRejoin;
                 participant.IsHandRaised = false;
                 await _roomRepo.UpdateParticipantAsync(participant);
                 await _roomRepo.SaveChangesAsync();
@@ -387,16 +397,20 @@ namespace Cocorra.API.Hubs
                 },
                 schemaVersion: 2);
 
+            var isHost = room.HostId == userId;
+            var isOnStage = isHost || participant.IsOnStage;
+            var displayName = ResolveDisplayName(participant.User);
+
             await Clients.Group(roomId).SendAsync("UserJoined", new
             {
                 UserId = userId,
-                Name = participant.User?.FirstName + " " + participant.User?.LastName,
-                IsOnStage = participant.IsOnStage
+                Name = displayName,
+                IsOnStage = isOnStage,
+                IsHost = isHost
             });
 
             // Send LiveKit token to the joining user so they can connect to the media server
-            var displayName = ((participant.User?.FirstName ?? "") + " " + (participant.User?.LastName ?? "")).Trim();
-            var canPublish = room.HostId == userId || participant.IsOnStage;
+            var canPublish = isHost || participant.IsOnStage;
 
             // [JOINROOM-TRACE] #3 — before generating the LiveKit token
             _logger.LogInformation(
@@ -527,7 +541,7 @@ namespace Cocorra.API.Hubs
             await Clients.Group(roomId).SendAsync("HandRaised", new
             {
                 UserId = userId,
-                Name = participant.User?.FirstName + " " + participant.User?.LastName
+                Name = ResolveDisplayName(participant.User)
             });
         }
 
@@ -562,7 +576,7 @@ namespace Cocorra.API.Hubs
             await Clients.Group(roomId).SendAsync("HandLowered", new
             {
                 UserId = userId,
-                Name = participant.User?.FirstName + " " + participant.User?.LastName
+                Name = ResolveDisplayName(participant.User)
             });
         }
 
@@ -639,7 +653,7 @@ namespace Cocorra.API.Hubs
             {
                 UserId = targetGuid,
                 IsOnStage = true,
-                Name = participant.User?.FirstName + " " + participant.User?.LastName
+                Name = ResolveDisplayName(participant.User)
             });
         }
 
@@ -701,14 +715,14 @@ namespace Cocorra.API.Hubs
             {
                 UserId = targetGuid,
                 IsOnStage = false,
-                Name = participant.User?.FirstName + " " + participant.User?.LastName
+                Name = ResolveDisplayName(participant.User)
             });
 
             await Clients.Group(roomId).SendAsync("MicStatusChanged", new
             {
                 UserId = targetGuid,
                 IsMuted = true,
-                Name = participant.User?.FirstName
+                Name = ResolveDisplayName(participant.User)
             });
         }
 
@@ -787,7 +801,7 @@ namespace Cocorra.API.Hubs
             {
                 UserId = userId,
                 IsMuted = muteStatus,
-                Name = participant.User?.FirstName,
+                Name = ResolveDisplayName(participant.User),
                 RemainingSeconds = Math.Max(0, Math.Round(remainingSeconds))
             });
         }
@@ -830,7 +844,7 @@ namespace Cocorra.API.Hubs
             {
                 UserId = targetGuid,
                 AddedMinutes = minutes,
-                Name = participant.User?.FirstName
+                Name = ResolveDisplayName(participant.User)
             });
         }
 
@@ -921,7 +935,7 @@ namespace Cocorra.API.Hubs
             await Clients.Group(roomId).SendAsync("UserKicked", new
             {
                 UserId = targetGuid,
-                Name = participant.User?.FirstName + " " + participant.User?.LastName
+                Name = ResolveDisplayName(participant.User)
             });
         }
 

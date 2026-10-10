@@ -1,4 +1,4 @@
-﻿using Cocorra.BLL.Services.RolesService;
+using Cocorra.BLL.Services.RolesService;
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS;
 using Cocorra.DAL.DTOS.Role;
@@ -53,6 +53,18 @@ namespace Cocorra.API.Controllers
         public async Task<IActionResult> GetUsersInRole([FromRoute] string roleName)
         {
             var result = await _rolesService.GetUsersInRoleAsync(roleName);
+
+            if (!result.Succeeded) return BadRequest(result);
+
+            return Ok(result);
+        }
+
+        [HttpPost(Router.RolesRouting.CreateUser)]
+        public async Task<IActionResult> CreateUser([FromBody] CreateUserDto model)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var result = await _rolesService.CreateUserWithRoleAsync(model);
 
             if (!result.Succeeded) return BadRequest(result);
 
