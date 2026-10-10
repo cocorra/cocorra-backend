@@ -2,6 +2,7 @@ using Cocorra.BLL.DTOS.Auth;
 using Cocorra.BLL.Services.Auth;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.Upload;
+using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.Auth;
 using Cocorra.DAL.Enums;
@@ -78,6 +79,11 @@ namespace Cocorra.BLL.Services.AuthServices
 
         public async Task<Response<object>> RegisterAsync(RegisterDto dto)
         {
+            // Model validation already enforces this on the HTTP path; checked again here so no
+            // caller can create an under-18 account, and before any voice/photo upload happens.
+            if (dto.Age < AgePolicy.MinimumAge || dto.Age > AgePolicy.MaximumAge)
+                return BadRequest<object>(AgePolicy.RangeErrorMessage);
+
             var strategy = _context.Database.CreateExecutionStrategy();
             return await strategy.ExecuteAsync(async () =>
             {

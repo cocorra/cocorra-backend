@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using Cocorra.DAL.AppMetaData;
 
 namespace Cocorra.DAL.DTOS.Role
 {
@@ -18,7 +19,7 @@ namespace Cocorra.DAL.DTOS.Role
         [Required(ErrorMessage = "Password is required"), MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
         public string Password { get; set; } = string.Empty;
 
-        [Range(10, 120, ErrorMessage = "Age must be between 10 and 120")]
+        [Range(AgePolicy.MinimumAge, AgePolicy.MaximumAge, ErrorMessage = AgePolicy.RangeErrorMessage)]
         public int Age { get; set; } = 25;
 
         public string? Role { get; set; }

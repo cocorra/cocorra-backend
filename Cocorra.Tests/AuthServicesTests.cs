@@ -427,4 +427,28 @@ public class AuthServicesTests : IDisposable
         Assert.True(result.Succeeded, result.Message);
         Assert.Null(await userMgr.FindByEmailAsync("gone@cocorra.com"));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(17)]
+    public async Task RegisterAsync_UnderAge_ReturnsBadRequestWithoutUploadingOrCreatingUser(int age)
+    {
+        var (service, userMgr, _, _) = CreateService();
+
+        var result = await service.RegisterAsync(new RegisterDto
+        {
+            FirstName = "Young",
+            LastName = "User",
+            Age = age,
+            Email = "minor@cocorra.com",
+            Password = "Password123",
+            ConfirmPassword = "Password123"
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Equal(Cocorra.DAL.AppMetaData.AgePolicy.RangeErrorMessage, result.Message);
+        _uploadVoiceMock.Verify(u => u.SaveVoice(It.IsAny<Microsoft.AspNetCore.Http.IFormFile>()), Times.Never);
+        Assert.Null(await userMgr.FindByEmailAsync("minor@cocorra.com"));
+    }
 }
