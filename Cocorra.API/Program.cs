@@ -555,6 +555,14 @@ app.MapHub<RoomHub>("/hubs/rooms");
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<Cocorra.API.Hubs.SupportHub>("/hubs/support");
 app.MapControllers();
+// Public account-deletion page required by Google Play (reachable without the app).
+// Served from a clean URL with no-cache so policy-text changes are picked up immediately,
+// unlike wwwroot static files which are cached for a week.
+app.MapGet("/delete-account", (IWebHostEnvironment env, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-cache";
+    return Results.File(Path.Combine(env.WebRootPath, "Html", "deleteAccount.html"), "text/html; charset=utf-8");
+});
 app.MapGet("/", context =>
 {
     context.Response.ContentType = "text/html";

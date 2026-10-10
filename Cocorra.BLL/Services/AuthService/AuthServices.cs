@@ -689,6 +689,26 @@ namespace Cocorra.BLL.Services.AuthServices
             return response;
         }
 
+        public const string DeleteAccountInvalidCredentialsMessage = "Invalid Email or Password";
+
+        public async Task<Response<string>> DeleteAccountWithCredentialsAsync(string email, string password)
+        {
+            var user = await _userManager.FindByEmailAsync(email);
+            if (user == null)
+                return BadRequest<string>(DeleteAccountInvalidCredentialsMessage);
+
+            // Same order as LoginAsync: a locked-out account never reaches the password check.
+            // Banned accounts stay locked out here too — deleting them would cascade away their
+            // BlockedDevices rows and let the user re-register on the same device.
+            if (await _userManager.IsLockedOutAsync(user))
+                return Forbidden<string>("This account is locked. Please contact support to request deletion.");
+
+            if (!await _userManager.CheckPasswordAsync(user, password))
+                return BadRequest<string>(DeleteAccountInvalidCredentialsMessage);
+
+            return await DeleteAccountAsync(user.Id);
+        }
+
         private string GenerateRefreshToken()
         {
             var randomNumber = new byte[32];

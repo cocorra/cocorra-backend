@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Delete Your Cocorrá Account</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 24px 16px;
+            background-color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #2f362b;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .header {
+            background-color: #4f5b49;
+            padding: 28px 20px;
+            text-align: center;
+            color: white;
+        }
+
+        .logo-container {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 14px;
+            border: 2px solid white;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #c5d1ba;
+        }
+
+        .logo-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 600;
+        }
+
+        .content {
+            background-color: #ffffff;
+            padding: 24px 22px 30px;
+            line-height: 1.55;
+            font-size: 15px;
+        }
+
+        .content h2 {
+            font-size: 16px;
+            margin: 20px 0 8px;
+            color: #4f5b49;
+        }
+
+        .content ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .content li {
+            margin-bottom: 4px;
+        }
+
+        .warning {
+            background-color: #fdf1ef;
+            border-left: 4px solid #b5473a;
+            padding: 10px 14px;
+            margin: 18px 0;
+            font-size: 14px;
+            color: #7a2c23;
+        }
+
+        form {
+            margin-top: 22px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 11px 12px;
+            font-size: 15px;
+            border: 1px solid #b9c4b2;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-family: inherit;
+        }
+
+        input[type="email"]:focus,
+        input[type="password"]:focus {
+            outline: 2px solid #a0b19d;
+            border-color: #4f5b49;
+        }
+
+        .confirm {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            font-weight: normal;
+            margin-bottom: 18px;
+        }
+
+        .confirm input {
+            margin-top: 4px;
+            flex-shrink: 0;
+        }
+
+        button {
+            width: 100%;
+            padding: 13px;
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            background-color: #b5473a;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .message {
+            display: none;
+            margin-top: 16px;
+            padding: 12px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .message.error {
+            display: block;
+            background-color: #fdf1ef;
+            color: #7a2c23;
+        }
+
+        .message.success {
+            display: block;
+            background-color: #eef3eb;
+            color: #2f4a27;
+        }
+
+        .footer {
+            margin-top: 24px;
+            font-size: 13px;
+            color: #5d6658;
+        }
+
+        a {
+            color: #4f5b49;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-container">
+                <img src="/System/388f7e03b835e6ca1f7c156816047a360bf18efe.png" alt="Cocorrá">
+            </div>
+            <h1>Delete Your Cocorrá Account</h1>
+        </div>
+
+        <div class="content">
+            <p>Use this page to permanently delete your Cocorrá account and its data without opening the app.
+                Sign in with the email and password you use in the app to confirm it's you.</p>
+
+            <h2>What gets deleted</h2>
+            <ul>
+                <li>Your account and profile (name, email, age, profile picture)</li>
+                <li>Your voice verification recording</li>
+                <li>Your messages, friends, friend requests and blocks</li>
+                <li>Rooms you host, room participation, invites, topic requests and votes</li>
+                <li>Your notifications and reports you've filed</li>
+            </ul>
+
+            <h2>What is kept</h2>
+            <ul>
+                <li>Reports other users filed about you are kept for safety and moderation, with your identity
+                    removed.</li>
+                <li>Anonymous usage statistics that can't be linked back to you.</li>
+            </ul>
+
+            <div class="warning">
+                Deletion happens immediately and <strong>cannot be undone</strong>. You'll need to register again
+                to use Cocorrá.
+            </div>
+
+            <form id="deleteForm" novalidate>
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" autocomplete="email" required maxlength="100">
+
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" required
+                    maxlength="100">
+
+                <label class="confirm">
+                    <input type="checkbox" id="confirm" required>
+                    <span>I understand my account and data will be permanently deleted.</span>
+                </label>
+
+                <button type="submit" id="submitBtn">Delete my account</button>
+            </form>
+
+            <div id="message" class="message" role="status" aria-live="polite"></div>
+
+            <p class="footer">
+                Forgot your password? Reset it from the login screen in the app, then come back here.
+                If you can't sign in, email
+                <a href="mailto:support@cocorraapp.com?subject=Account%20Deletion%20Request">support@cocorraapp.com</a>
+                from your registered address with the subject "Account Deletion Request" and we'll delete your
+                account for you.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var form = document.getElementById('deleteForm');
+            var btn = document.getElementById('submitBtn');
+            var msg = document.getElementById('message');
+
+            function show(text, kind) {
+                msg.textContent = text;
+                msg.className = 'message ' + kind;
+            }
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+
+                var email = document.getElementById('email').value.trim();
+                var password = document.getElementById('password').value;
+
+                if (!email || !password) {
+                    show('Please enter your email and password.', 'error');
+                    return;
+                }
+                if (password.length < 6) {
+                    show('Invalid email or password.', 'error');
+                    return;
+                }
+                if (!document.getElementById('confirm').checked) {
+                    show('Please tick the box to confirm you want to delete your account.', 'error');
+                    return;
+                }
+
+                btn.disabled = true;
+                btn.textContent = 'Deleting…';
+                msg.className = 'message';
+
+                fetch('/Api/V1/Authentication/DeleteAccountWithCredentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email, password: password })
+                })
+                    .then(function (res) {
+                        return res.json().catch(function () { return {}; }).then(function (body) {
+                            return { status: res.status, body: body };
+                        });
+                    })
+                    .then(function (r) {
+                        if (r.status >= 200 && r.status < 300 && r.body.succeeded !== false) {
+                            form.style.display = 'none';
+                            show('Your account and data have been permanently deleted. You can now uninstall the app.', 'success');
+                            return;
+                        }
+                        if (r.status === 429) {
+                            show('Too many attempts. Please wait a minute and try again.', 'error');
+                        } else if (r.status === 400 && r.body.errors && !r.body.message) {
+                            show('Invalid email or password.', 'error');
+                        } else {
+                            show(r.body.message || 'Something went wrong. Please try again.', 'error');
+                        }
+                        btn.disabled = false;
+                        btn.textContent = 'Delete my account';
+                    })
+                    .catch(function () {
+                        show('Network error. Please check your connection and try again.', 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Delete my account';
+                    });
+            });
+        })();
+    </script>
+</body>
+
+</html>

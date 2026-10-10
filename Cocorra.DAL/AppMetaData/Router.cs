@@ -20,6 +20,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string ReRecordVoice = Prefix + "/ReRecordVoice"; // POST
             public const string UpdatePassword = Prefix + "/UpdatePassword"; // PUT
             public const string DeleteAccount = Prefix + "/DeleteAccount"; // DELETE
+            public const string DeleteAccountWithCredentials = Prefix + "/DeleteAccountWithCredentials"; // POST (anonymous; backs the public /delete-account page)
             public const string RefreshToken = Prefix + "/RefreshToken"; // POST
             public const string RevokeToken = Prefix + "/RevokeToken"; // POST
         }

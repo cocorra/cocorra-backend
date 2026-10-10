@@ -24,6 +24,11 @@ namespace Cocorra.BLL.Services.Auth
         Task<Response<string>> ReRecordVoiceAsync(string email, Microsoft.AspNetCore.Http.IFormFile voiceFile);
         Task<Response<string>> UpdatePasswordAsync(Guid userId, string currentPassword, string newPassword);
         Task<Response<string>> DeleteAccountAsync(Guid userId);
+        /// <summary>
+        /// Deletes an account from outside the app (the public /delete-account web page that
+        /// Google Play requires), authenticating with email and password instead of a JWT.
+        /// </summary>
+        Task<Response<string>> DeleteAccountWithCredentialsAsync(string email, string password);
         Task<Response<AuthModel>> RefreshTokenAsync(RefreshTokenDto dto, DeviceInfoDto? device = null);
         Task<Response<string>> RevokeTokenAsync(Guid userId);
     }
