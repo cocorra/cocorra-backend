@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Cocorra.DAL.AppMetaData;
 
 namespace Cocorra.DAL.DTOS.ProfileDto
 {
@@ -13,7 +14,7 @@ namespace Cocorra.DAL.DTOS.ProfileDto
         [MaxLength(500)]
         public string? Bio { get; set; }
 
-        [Range(18, 120)]
+        [Range(AgePolicy.MinimumAge, AgePolicy.MaximumAge, ErrorMessage = AgePolicy.RangeErrorMessage)]
         public int Age { get; set; }
     }
 }

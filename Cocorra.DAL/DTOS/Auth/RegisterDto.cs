@@ -4,6 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Cocorra.DAL.AppMetaData;
 
 namespace Cocorra.BLL.DTOS.Auth
 {
@@ -15,7 +16,7 @@ namespace Cocorra.BLL.DTOS.Auth
         [Required, MaxLength(100)]
         public string? LastName { get; set; }
 
-        [Required]
+        [Required, Range(AgePolicy.MinimumAge, AgePolicy.MaximumAge, ErrorMessage = AgePolicy.RangeErrorMessage)]
         public int Age { get; set; }
 
         [Required, EmailAddress, MaxLength(100), MinLength(5)]
