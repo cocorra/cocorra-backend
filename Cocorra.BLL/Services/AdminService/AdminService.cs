@@ -25,6 +25,7 @@ namespace Cocorra.BLL.Services.AdminService
         private readonly IUploadVoice _uploadVoice;
         private readonly IEmailService _emailService;
         private readonly string _baseUrl;
+        private readonly string _emailLogoUrl;
         private readonly IUserRepository _userRepository;
         private readonly IPushNotificationService _pushService;
         private readonly IBlockedDevicesRepository _blockedDevicesRepository;
@@ -48,6 +49,7 @@ namespace Cocorra.BLL.Services.AdminService
             _userManager = userManager;
             _uploadVoice = uploadVoice;
             _baseUrl = configuration["AppSettings:BaseUrl"]?.TrimEnd('/') ?? "";
+            _emailLogoUrl = EmailTemplates.ResolveLogoUrl(configuration["EmailSettings:LogoUrl"]);
             _emailService = emailService;
             _userRepository = userRepository;
             _pushService = pushService;
@@ -332,7 +334,8 @@ namespace Cocorra.BLL.Services.AdminService
         {
             if (string.IsNullOrEmpty(user.Email)) return;
 
-            var safeFirstName = System.Net.WebUtility.HtmlEncode(user.FirstName ?? string.Empty);
+            // Templates HTML-encode the name themselves.
+            var firstName = user.FirstName ?? string.Empty;
 
             switch (newStatus)
             {
@@ -340,36 +343,21 @@ namespace Cocorra.BLL.Services.AdminService
                     await _emailService.SendEmailAsync(
                         user.Email,
                         "كوكورا — تم استلام العينة الصوتية للتحقق",
-                        $"<div dir=\"rtl\" style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: right; direction: rtl;\">" +
-                        $"<h2>مرحباً {safeFirstName}،</h2>" +
-                        "<p>شكراً لتقديمك عينة التحقق الصوتي. تم استلام طلبك وهو قيد المراجعة حالياً من قبل فريق العمل.</p>" +
-                        "<p>سنقوم بإشعارك فور اتخاذ القرار، وعادةً ما يستغرق ذلك من 24 إلى 48 ساعة.</p>" +
-                        "<br><p>— فريق كوكورا (The Cocorra Team)</p>" +
-                        "</div>");
+                        EmailTemplates.VerificationPending(firstName, _emailLogoUrl));
                     break;
 
                 case UserStatus.Active:
                     await _emailService.SendEmailAsync(
                         user.Email,
                         "كوكورا — أهلاً بك! تم توثيق حسابك بنجاح (Verified) ✅",
-                        $"<div dir=\"rtl\" style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: right; direction: rtl;\">" +
-                        $"<h2>أهلاً بك يا {safeFirstName}!</h2>" +
-                        "<p>تمت الموافقة على عينة التحقق الصوتي الخاصة بك. أصبح بإمكانك الآن الاستفادة الكاملة من تطبيق كوكورا — استكشاف الغرف، المشاركة في المحادثات، والتواصل مع الجميع.</p>" +
-                        "<p>يسعدنا وجودك معنا في كوكورا!</p>" +
-                        "<br><p>— فريق كوكورا (The Cocorra Team)</p>" +
-                        "</div>");
+                        EmailTemplates.AccountVerified(firstName, _emailLogoUrl));
                     break;
 
                 case UserStatus.ReRecord:
                     await _emailService.SendEmailAsync(
                         user.Email,
                         "كوكورا — مطلوب إعادة تسجيل العينة الصوتية",
-                        $"<div dir=\"rtl\" style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: right; direction: rtl;\">" +
-                        $"<h2>مرحباً {safeFirstName}،</h2>" +
-                        "<p>قمنا بمراجعة عينة التحقق الصوتي الخاصة بك، ولكن للأسف لم نتمكن من اعتمادها. قد يرجع ذلك إلى جودة الصوت، أو وجود ضوضاء في الخلفية، أو عدم وضوح التسجيل.</p>" +
-                        "<p><strong>يرجى فتح التطبيق وإرسال عينة صوتية جديدة</strong> لنتمكن من إتمام عملية التوثيق وتفعيل حسابك.</p>" +
-                        "<br><p>— فريق كوكورا (The Cocorra Team)</p>" +
-                        "</div>");
+                        EmailTemplates.ReRecordRequired(firstName, _emailLogoUrl));
                     break;
 
                 default:

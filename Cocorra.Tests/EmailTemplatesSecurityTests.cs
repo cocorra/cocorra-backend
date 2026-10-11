@@ -29,12 +29,51 @@ public class EmailTemplatesSecurityTests
         Assert.Equal("https://cdn.example.com/logo.png", EmailTemplates.ResolveLogoUrl(" https://cdn.example.com/logo.png "));
     }
 
-    [Fact]
-    public void Templates_RenderLogoUrlInImgSrc()
+    public static IEnumerable<object[]> AllTemplates()
+    {
+        yield return new object[] { "Otp", (Func<string, string, string>)((name, logo) => EmailTemplates.Otp(name, "a@b.com", "123456", logo)) };
+        yield return new object[] { "PasswordReset", (Func<string, string, string>)((name, logo) => EmailTemplates.PasswordReset(name, "a@b.com", "123456", logo)) };
+        yield return new object[] { "VerificationPending", (Func<string, string, string>)EmailTemplates.VerificationPending };
+        yield return new object[] { "AccountVerified", (Func<string, string, string>)EmailTemplates.AccountVerified };
+        yield return new object[] { "ReRecordRequired", (Func<string, string, string>)EmailTemplates.ReRecordRequired };
+    }
+
+    [Theory]
+    [MemberData(nameof(AllTemplates))]
+    public void Templates_RenderLogoUrlInImgSrc(string _, Func<string, string, string> render)
     {
         var logo = EmailTemplates.DefaultLogoUrl;
-        Assert.Contains($"<img src=\"{logo}\"", EmailTemplates.Otp("Ali", "a@b.com", "123456", logo));
-        Assert.Contains($"<img src=\"{logo}\"", EmailTemplates.PasswordReset("Ali", "a@b.com", "123456", logo));
+        Assert.Contains($"<img src=\"{logo}\"", render("Ali", logo));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllTemplates))]
+    public void Templates_ShareTheBrandedEmailSafeLayout(string _, Func<string, string, string> render)
+    {
+        var html = render("Ali", EmailTemplates.DefaultLogoUrl);
+
+        Assert.Contains("<html lang=\"ar\" dir=\"rtl\">", html);
+        Assert.Contains("role=\"presentation\"", html);
+        Assert.Contains("#4f5b49", html); // olive header
+        Assert.Contains("#a0b19d", html); // sage content
+        // Constructs Outlook / Gmail ignore or strip.
+        Assert.DoesNotContain("display: flex", html);
+        Assert.DoesNotContain("display:flex", html);
+        Assert.DoesNotContain("100vh", html);
+        Assert.DoesNotContain("<style", html);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllTemplates))]
+    public void Templates_HtmlEncode_UserName(string _, Func<string, string, string> render)
+    {
+        const string maliciousInput = "<a href=\"https://evil\">x</a>";
+        const string expectedEncoded = "&lt;a href=&quot;https://evil&quot;&gt;x&lt;/a&gt;";
+
+        var html = render(maliciousInput, "https://logo.png");
+
+        Assert.DoesNotContain(maliciousInput, html);
+        Assert.Contains(expectedEncoded, html);
     }
 
     [Theory]
