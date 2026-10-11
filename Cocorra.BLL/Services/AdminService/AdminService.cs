@@ -15,6 +15,7 @@ using Cocorra.DAL.Repository.UserRepository;
 using Cocorra.DAL.Repository.BlockedDevicesRepository;
 using Cocorra.DAL.Repository.NotificationRepository;
 using Cocorra.BLL.Services.EventTracking;
+using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.DAL.Data;
 
 namespace Cocorra.BLL.Services.AdminService
@@ -32,6 +33,7 @@ namespace Cocorra.BLL.Services.AdminService
         private readonly IEventTracker _eventTracker;
         private readonly AppDbContext _context;
         private readonly INotificationRepository _notificationRepo;
+        private readonly IAuditLogService? _auditLog;
 
         public AdminService(
             UserManager<ApplicationUser> userManager,
@@ -43,7 +45,9 @@ namespace Cocorra.BLL.Services.AdminService
             IBlockedDevicesRepository blockedDevicesRepository,
             IEventTracker eventTracker,
             AppDbContext context,
-            INotificationRepository notificationRepo)
+            INotificationRepository notificationRepo,
+            // Optional so existing callers that construct AdminService directly keep compiling.
+            IAuditLogService? auditLog = null)
         {
             _blockedDevicesRepository = blockedDevicesRepository;
             _userManager = userManager;
@@ -56,7 +60,11 @@ namespace Cocorra.BLL.Services.AdminService
             _eventTracker = eventTracker;
             _context = context;
             _notificationRepo = notificationRepo;
+            _auditLog = auditLog;
         }
+
+        private Task RecordAuditAsync(AuditEntry entry) =>
+            _auditLog is null ? Task.CompletedTask : _auditLog.RecordAsync(entry);
 
         private string? BuildFullUrl(string? relativePath)
         {
@@ -153,6 +161,13 @@ namespace Cocorra.BLL.Services.AdminService
                         changedByAdminId = adminId,
                         isBulkOperation = isBulk
                     });
+
+                await RecordAuditAsync(new AuditEntry(
+                    AuditActions.UserStatusChanged,
+                    adminId,
+                    user.Id,
+                    user.Email,
+                    new { fromStatus = oldStatus.ToString(), toStatus = newStatus.ToString(), isBulk }));
 
                 if (newStatus == UserStatus.Active)
                 {
@@ -463,6 +478,13 @@ namespace Cocorra.BLL.Services.AdminService
                     isBulkOperation = false,
                     devicesBlocked
                 });
+
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.UserDeviceAndEmailBlocked,
+                adminId,
+                user.Id,
+                user.Email,
+                new { fromStatus = oldStatus.ToString(), toStatus = UserStatus.Banned.ToString(), devicesBlocked }));
 
             var result = new BlockDeviceAndEmailResultDto
             {

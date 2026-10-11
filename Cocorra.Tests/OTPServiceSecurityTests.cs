@@ -21,6 +21,7 @@ public class OTPServiceSecurityTests
 {
     private readonly Mock<UserManager<ApplicationUser>> _userManagerMock = TestIdentityHelper.CreateMockUserManager();
     private readonly Mock<IEmailService> _emailServiceMock = new();
+    private readonly Mock<IOtpCodeService> _otpCodesMock = new();
     private readonly Mock<IConfiguration> _configMock = new();
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock = new();
     private readonly Mock<IEventTracker> _eventTrackerMock = new();
@@ -33,7 +34,8 @@ public class OTPServiceSecurityTests
         _service = new OTPService(
             _configMock.Object,
             _userManagerMock.Object,
-            _emailServiceMock.Object,
+            new InlineEmailQueue(_emailServiceMock.Object, _otpCodesMock.Object),
+            _otpCodesMock.Object,
             _httpContextAccessorMock.Object,
             _eventTrackerMock.Object,
             _attemptLimiter
@@ -49,7 +51,7 @@ public class OTPServiceSecurityTests
         var knownEmail = "known@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), Email = knownEmail, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(knownEmail)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "wrong-code"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "wrong-code", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         var unknownResult = await _service.VerifyOtpAsync(unknownEmail, "123456");
@@ -65,14 +67,14 @@ public class OTPServiceSecurityTests
     }
 
     [Fact]
-    public async Task VerifyOtpAsync_AfterMaxFailedAttempts_NextCallReturns429AndDoesNotCallVerifyUserTokenAsync()
+    public async Task VerifyOtpAsync_AfterMaxFailedAttempts_NextCallReturns429AndDoesNotCheckTheCode()
     {
         var email = "user@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "wrong"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "wrong", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "correct"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "correct", It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Exhaust MaxFailedAttempts (5)
@@ -82,7 +84,7 @@ public class OTPServiceSecurityTests
             Assert.Equal(HttpStatusCode.BadRequest, failResult.StatusCode);
         }
 
-        _userManagerMock.Verify(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "wrong"),
+        _otpCodesMock.Verify(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "wrong", It.IsAny<CancellationToken>()),
             Times.Exactly(OtpAttemptLimiter.MaxFailedAttempts));
 
         // The (MaxFailedAttempts + 1)th call with correct code must be rejected with 429
@@ -92,11 +94,11 @@ public class OTPServiceSecurityTests
         Assert.Equal(HttpStatusCode.TooManyRequests, lockedResult.StatusCode);
         Assert.Equal(OTPService.TooManyAttemptsMessage, lockedResult.Message);
 
-        // VerifyUserTokenAsync was NOT called for the locked call
-        _userManagerMock.Verify(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "correct"),
+        // The code was NOT checked for the locked call
+        _otpCodesMock.Verify(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "correct", It.IsAny<CancellationToken>()),
             Times.Never);
         // Total verify calls remains exactly MaxFailedAttempts
-        _userManagerMock.Verify(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, It.IsAny<string>()),
+        _otpCodesMock.Verify(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Exactly(OtpAttemptLimiter.MaxFailedAttempts));
     }
 
@@ -106,9 +108,9 @@ public class OTPServiceSecurityTests
         var email = "reset-test@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "wrong"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "wrong", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "correct"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "correct", It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
 
@@ -145,9 +147,9 @@ public class OTPServiceSecurityTests
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
 
         // Token configured to be valid for PasswordReset but invalid for EmailConfirmation
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.PasswordReset, "reset-only-code"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.PasswordReset, "reset-only-code", It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "reset-only-code"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "reset-only-code", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         var result = await _service.VerifyOtpAsync(email, "reset-only-code");
@@ -157,10 +159,10 @@ public class OTPServiceSecurityTests
         Assert.Equal(OTPService.InvalidOtpMessage, result.Message);
 
         // Verify it was checked specifically with OtpPurposes.EmailConfirmation
-        _userManagerMock.Verify(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "reset-only-code"),
+        _otpCodesMock.Verify(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "reset-only-code", It.IsAny<CancellationToken>()),
             Times.Once);
         // And never checked with OtpPurposes.PasswordReset
-        _userManagerMock.Verify(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.PasswordReset, It.IsAny<string>()),
+        _otpCodesMock.Verify(m => m.TryConsumeAsync(user.Id, OtpPurposes.PasswordReset, It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -177,7 +179,7 @@ public class OTPServiceSecurityTests
         var validEmail = "valid@cocorra.com";
         var validUser = new ApplicationUser { Id = Guid.NewGuid(), FirstName = "Valid", Email = validEmail, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(validEmail)).ReturnsAsync(validUser);
-        _userManagerMock.Setup(m => m.GenerateUserTokenAsync(validUser, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation))
+        _otpCodesMock.Setup(m => m.IssueAsync(validUser.Id, OtpPurposes.EmailConfirmation, It.IsAny<CancellationToken>()))
             .ReturnsAsync("123456");
 
         var unknownRes = await _service.ResendOtpAsync(unknownEmail);
@@ -206,7 +208,7 @@ public class OTPServiceSecurityTests
         var email = "cooldown@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), FirstName = "Bob", Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.GenerateUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation))
+        _otpCodesMock.Setup(m => m.IssueAsync(user.Id, OtpPurposes.EmailConfirmation, It.IsAny<CancellationToken>()))
             .ReturnsAsync("112233");
 
         var firstResult = await _service.ResendOtpAsync(email);
@@ -236,7 +238,7 @@ public class OTPServiceSecurityTests
         var email = "network-error@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), FirstName = "Charlie", Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.GenerateUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation))
+        _otpCodesMock.Setup(m => m.IssueAsync(user.Id, OtpPurposes.EmailConfirmation, It.IsAny<CancellationToken>()))
             .ReturnsAsync("445566");
         _emailServiceMock.Setup(e => e.SendOtpEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()

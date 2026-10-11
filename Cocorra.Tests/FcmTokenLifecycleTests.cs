@@ -59,14 +59,15 @@ public class FcmTokenLifecycleTests
             null!,
             new Mock<IConfiguration>().Object,
             new Mock<IUploadVoice>().Object,
-            new Mock<IEmailService>().Object,
+            new Mock<IEmailQueue>().Object,
             new Mock<IUploadImage>().Object,
             null!,
             new Mock<IRoomRepository>().Object,
             new Mock<IEventTracker>().Object,
             new Mock<IRoomService>().Object,
             new Mock<IBlockedDevicesService>().Object,
-            new Mock<IOtpAttemptLimiter>().Object
+            new Mock<IOtpAttemptLimiter>().Object,
+            new Mock<IOtpCodeService>().Object
         );
 
         // Act
@@ -101,14 +102,15 @@ public class FcmTokenLifecycleTests
             null!,
             new Mock<IConfiguration>().Object,
             new Mock<IUploadVoice>().Object,
-            new Mock<IEmailService>().Object,
+            new Mock<IEmailQueue>().Object,
             new Mock<IUploadImage>().Object,
             null!,
             new Mock<IRoomRepository>().Object,
             new Mock<IEventTracker>().Object,
             new Mock<IRoomService>().Object,
             new Mock<IBlockedDevicesService>().Object,
-            new Mock<IOtpAttemptLimiter>().Object
+            new Mock<IOtpAttemptLimiter>().Object,
+            new Mock<IOtpCodeService>().Object
         );
 
         // Act

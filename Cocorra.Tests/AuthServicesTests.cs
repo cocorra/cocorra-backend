@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using Cocorra.Tests.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -41,6 +43,8 @@ public class AuthServicesTests : IDisposable
     private readonly Mock<IRoomService> _roomServiceMock = new();
     private readonly Mock<IBlockedDevicesService> _blockedDevicesServiceMock = new();
     private readonly IOtpAttemptLimiter _otpAttemptLimiter = new OtpAttemptLimiter(new MemoryCache(new MemoryCacheOptions()));
+    private const string TestOtpHmacKey = "test-only-otp-hmac-key-at-least-32-chars";
+    private OtpCodeService _otpCodes = null!;
 
     public AuthServicesTests()
     {
@@ -86,20 +90,22 @@ public class AuthServicesTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+        _otpCodes = new OtpCodeService(db, Options.Create(new OtpOptions { HmacKey = TestOtpHmacKey }));
 
         var service = new AuthServices(
             userMgr,
             roleMgr,
             _configMock.Object,
             _uploadVoiceMock.Object,
-            _emailServiceMock.Object,
+            new InlineEmailQueue(_emailServiceMock.Object, _otpCodes),
             _uploadImageMock.Object,
             db,
             _roomRepoMock.Object,
             _eventTrackerMock.Object,
             _roomServiceMock.Object,
             _blockedDevicesServiceMock.Object,
-            _otpAttemptLimiter
+            _otpAttemptLimiter,
+            _otpCodes
         );
 
         return (service, userMgr, roleMgr, db);
@@ -311,6 +317,91 @@ public class AuthServicesTests : IDisposable
         Assert.Equal("Password updated successfully.", result.Data);
     }
 
+    // ── Session revocation after password reset / change ─────────────────────
+
+    private async Task<(ApplicationUser user, AuthModel auth)> CreateLoggedInUserAsync(
+        AuthServices service, UserManager<ApplicationUser> userMgr, RoleManager<IdentityRole<Guid>> roleMgr, string email)
+    {
+        if (!await roleMgr.RoleExistsAsync("User"))
+            await roleMgr.CreateAsync(new IdentityRole<Guid>("User"));
+        var user = new ApplicationUser
+        {
+            UserName = email, Email = email, EmailConfirmed = true, Status = UserStatus.Active,
+            FirstName = "Session", LastName = "User"
+        };
+        await userMgr.CreateAsync(user, "Password123");
+        await userMgr.AddToRoleAsync(user, "User");
+        var login = await service.LoginAsync(new LoginDto { Email = email, Password = "Password123" });
+        var auth = Assert.IsType<AuthModel>(login.Data);
+        var stored = (await userMgr.FindByEmailAsync(email))!;
+        stored.FcmToken = "device_fcm_token";
+        await userMgr.UpdateAsync(stored);
+        return (stored, auth);
+    }
+
+    private static string StampClaimOf(AuthModel auth) =>
+        new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(auth.Token)
+            .Claims.Single(c => c.Type == SecurityStampClaim.Type).Value;
+
+    [Fact]
+    public async Task LoginAsync_TokenCarriesTheCurrentSecurityStamp()
+    {
+        var (service, userMgr, roleMgr, _) = CreateService();
+        var (user, auth) = await CreateLoggedInUserAsync(service, userMgr, roleMgr, "stamp@cocorra.com");
+
+        Assert.True(SecurityStampClaim.Matches(user.SecurityStamp, StampClaimOf(auth)));
+        Assert.DoesNotContain(user.SecurityStamp!, auth.Token);
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_RevokesExistingSessions()
+    {
+        var (service, userMgr, roleMgr, _) = CreateService();
+        var (user, auth) = await CreateLoggedInUserAsync(service, userMgr, roleMgr, "reset-sessions@cocorra.com");
+        var code = await _otpCodes.IssueAsync(user.Id, OtpPurposes.PasswordReset);
+
+        var result = await service.ResetPasswordAsync(new ResetPasswordDto { Email = user.Email!, OtpCode = code, NewPassword = "NewPassword123" });
+
+        Assert.True(result.Succeeded, result.Message);
+        var fresh = (await userMgr.FindByEmailAsync(user.Email!))!;
+        Assert.Null(fresh.RefreshToken);
+        Assert.Null(fresh.FcmToken);
+        Assert.False(SecurityStampClaim.Matches(fresh.SecurityStamp, StampClaimOf(auth)));
+        var refresh = await service.RefreshTokenAsync(new RefreshTokenDto { RefreshToken = auth.RefreshToken! });
+        Assert.False(refresh.Succeeded);
+    }
+
+    [Fact]
+    public async Task UpdatePasswordAsync_RevokesExistingSessions()
+    {
+        var (service, userMgr, roleMgr, _) = CreateService();
+        var (user, auth) = await CreateLoggedInUserAsync(service, userMgr, roleMgr, "change-sessions@cocorra.com");
+
+        var result = await service.UpdatePasswordAsync(user.Id, "Password123", "NewPassword123");
+
+        Assert.True(result.Succeeded, result.Message);
+        var fresh = (await userMgr.FindByEmailAsync(user.Email!))!;
+        Assert.Null(fresh.RefreshToken);
+        Assert.Null(fresh.FcmToken);
+        Assert.False(SecurityStampClaim.Matches(fresh.SecurityStamp, StampClaimOf(auth)));
+        var refresh = await service.RefreshTokenAsync(new RefreshTokenDto { RefreshToken = auth.RefreshToken! });
+        Assert.False(refresh.Succeeded);
+    }
+
+    [Fact]
+    public async Task UpdatePasswordAsync_WrongCurrentPassword_KeepsSessions()
+    {
+        var (service, userMgr, roleMgr, _) = CreateService();
+        var (user, auth) = await CreateLoggedInUserAsync(service, userMgr, roleMgr, "keep-sessions@cocorra.com");
+
+        var result = await service.UpdatePasswordAsync(user.Id, "WrongPassword", "NewPassword123");
+
+        Assert.False(result.Succeeded);
+        var fresh = (await userMgr.FindByEmailAsync(user.Email!))!;
+        Assert.Equal(auth.RefreshToken, fresh.RefreshToken);
+        Assert.True(SecurityStampClaim.Matches(fresh.SecurityStamp, StampClaimOf(auth)));
+    }
+
     [Fact]
     public async Task DeleteAccountAsync_UserNotFound_ReturnsBadRequest()
     {
@@ -413,6 +504,56 @@ public class AuthServicesTests : IDisposable
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.Forbidden, result.StatusCode);
         Assert.NotNull(await userMgr.FindByEmailAsync("banned@cocorra.com"));
+    }
+
+    [Fact]
+    public async Task DeleteAccountWithCredentialsAsync_LockedOutUserWrongPassword_ReturnsGenericErrorNotForbidden()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var user = new ApplicationUser { UserName = "banned2@cocorra.com", Email = "banned2@cocorra.com", EmailConfirmed = true, Status = UserStatus.Banned };
+        await userMgr.CreateAsync(user, "Password123");
+        await userMgr.SetLockoutEnabledAsync(user, true);
+        await userMgr.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
+
+        var result = await service.DeleteAccountWithCredentialsAsync("banned2@cocorra.com", "WrongPassword");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Equal(AuthServices.DeleteAccountInvalidCredentialsMessage, result.Message);
+        Assert.NotNull(await userMgr.FindByEmailAsync("banned2@cocorra.com"));
+    }
+
+    [Fact]
+    public async Task LoginAsync_LockedOutUserWrongPassword_ReturnsSameErrorAsUnknownEmail()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var user = new ApplicationUser { UserName = "locked@cocorra.com", Email = "locked@cocorra.com", EmailConfirmed = true, Status = UserStatus.Banned };
+        await userMgr.CreateAsync(user, "Password123");
+        await userMgr.SetLockoutEnabledAsync(user, true);
+        await userMgr.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
+
+        var lockedResult = await service.LoginAsync(new LoginDto { Email = "locked@cocorra.com", Password = "WrongPassword" });
+        var unknownResult = await service.LoginAsync(new LoginDto { Email = "nobody@cocorra.com", Password = "WrongPassword" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, lockedResult.StatusCode);
+        Assert.Equal(unknownResult.StatusCode, lockedResult.StatusCode);
+        Assert.Equal(unknownResult.Message, lockedResult.Message);
+        Assert.Null(lockedResult.Data);
+    }
+
+    [Fact]
+    public async Task LoginAsync_LockedOutUserCorrectPassword_ReturnsForbidden()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var user = new ApplicationUser { UserName = "locked2@cocorra.com", Email = "locked2@cocorra.com", EmailConfirmed = true, Status = UserStatus.Banned };
+        await userMgr.CreateAsync(user, "Password123");
+        await userMgr.SetLockoutEnabledAsync(user, true);
+        await userMgr.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
+
+        var result = await service.LoginAsync(new LoginDto { Email = "locked2@cocorra.com", Password = "Password123" });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.Forbidden, result.StatusCode);
     }
 
     [Fact]

@@ -26,6 +26,9 @@ namespace Cocorra.API.Controllers
             _authServices = authServices;
         }
 
+        // Rate limited like the OTP endpoints: the duplicate-email reply reveals which emails are
+        // registered, so this bounds how fast one address can probe for accounts.
+        [EnableRateLimiting("otp")]
         [HttpPost(Router.AuthenticationRouting.Register)]
         public async Task<IActionResult> Register([FromForm] RegisterDto dto)
         {

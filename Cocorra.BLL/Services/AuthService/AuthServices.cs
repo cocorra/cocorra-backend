@@ -38,13 +38,14 @@ namespace Cocorra.BLL.Services.AuthServices
         private readonly IConfiguration _configuration;
         private readonly IUploadVoice _uploadVoice;
         private readonly AppDbContext _context;
-        private readonly IEmailService _emailService;
+        private readonly IEmailQueue _emailQueue;
         private readonly IUploadImage _uploadImage;
         private readonly IRoomRepository _roomRepository;
         private readonly IEventTracker _eventTracker;
         private readonly IRoomService _roomService;
         private readonly IBlockedDevicesService _blockedDevicesService;
         private readonly IOtpAttemptLimiter _otpAttemptLimiter;
+        private readonly IOtpCodeService _otpCodes;
         private readonly ILogger<AuthServices>? _logger;
 
         public AuthServices(
@@ -52,7 +53,7 @@ namespace Cocorra.BLL.Services.AuthServices
             RoleManager<IdentityRole<Guid>> roleManager,
             IConfiguration configuration,
             IUploadVoice uploadVoice,
-            IEmailService emailService,
+            IEmailQueue emailQueue,
             IUploadImage uploadImage,
             AppDbContext context,
             IRoomRepository roomRepository,
@@ -60,6 +61,7 @@ namespace Cocorra.BLL.Services.AuthServices
             IRoomService roomService,
             IBlockedDevicesService blockedDevicesService,
             IOtpAttemptLimiter otpAttemptLimiter,
+            IOtpCodeService otpCodes,
             ILogger<AuthServices>? logger = null)
         {
             _blockedDevicesService = blockedDevicesService;
@@ -68,12 +70,13 @@ namespace Cocorra.BLL.Services.AuthServices
             _uploadVoice = uploadVoice;
             _userManager = userManager;
             _roleManager = roleManager;
-            _emailService = emailService;
+            _emailQueue = emailQueue;
             _configuration = configuration;
             _roomRepository = roomRepository;
             _eventTracker = eventTracker;
             _roomService = roomService;
             _otpAttemptLimiter = otpAttemptLimiter;
+            _otpCodes = otpCodes;
             _logger = logger;
         }
 
@@ -162,20 +165,11 @@ namespace Cocorra.BLL.Services.AuthServices
                     // Send the verification email only AFTER the account is committed. A mail-provider
                     // failure must not roll back the registration; the user can request a new code
                     // via ResendOtp.
-                    try
+                    var fullImagePath = EmailTemplates.ResolveLogoUrl(_configuration["EmailSettings:LogoUrl"]);
+                    _otpAttemptLimiter.TryBeginSend(user.Email!, OtpPurposes.EmailConfirmation);
+                    if (!_emailQueue.TryEnqueueOtpEmail(user.Id, OtpPurposes.EmailConfirmation, user.Email!, user.FirstName, fullImagePath))
                     {
-                        var otpCode = await _userManager.GenerateUserTokenAsync(
-                            user,
-                            TokenOptions.DefaultEmailProvider,
-                            OtpPurposes.EmailConfirmation
-                        );
-                        var fullImagePath = EmailTemplates.ResolveLogoUrl(_configuration["EmailSettings:LogoUrl"]);
-                        _otpAttemptLimiter.TryBeginSend(user.Email!, OtpPurposes.EmailConfirmation);
-                        await _emailService.SendOtpEmailAsync(user.Email!, user.FirstName, user.Email!, otpCode, fullImagePath);
-                    }
-                    catch (Exception emailEx)
-                    {
-                        _logger?.LogError(emailEx, "Registration succeeded but the verification email could not be sent for user {UserId}", user.Id);
+                        _logger?.LogError("Email queue full; verification email for user {UserId} was not sent", user.Id);
                     }
 
                     return Created<object>(restrictedAuth, meta: new { message = "Registration successful! Check Your Email ." });
@@ -196,20 +190,20 @@ namespace Cocorra.BLL.Services.AuthServices
             var user = await _userManager.FindByEmailAsync(dto.Email!);
             if (user == null)
             {
+                VerifyAgainstDummyHash(dto.Password!);
                 return BadRequest<object>("Invalid Email or Password");
-            }
-
-            // SECURITY: Check lockout BEFORE password verification.
-            // Prevents locked-out users from exercising the password hash path,
-            // and stops AccessFailedCount from incrementing during an active lockout.
-            if (await _userManager.IsLockedOutAsync(user))
-            {
-                return Forbidden<object>("Account is locked or banned.", new { lockoutEnd = user.LockoutEnd });
             }
 
             if (!await _userManager.CheckPasswordAsync(user, dto.Password!))
             {
                 return BadRequest<object>("Invalid Email or Password");
+            }
+
+            // SECURITY: Check lockout only AFTER the password is verified. Checking it first
+            // would tell anyone who knows just the email that the account exists and is banned.
+            if (await _userManager.IsLockedOutAsync(user))
+            {
+                return Forbidden<object>("Account is locked or banned.", new { lockoutEnd = user.LockoutEnd });
             }
 
             // Clear any accumulated failed access attempts on successful login.
@@ -312,20 +306,13 @@ namespace Cocorra.BLL.Services.AuthServices
             if (!_otpAttemptLimiter.TryBeginSend(dto.Email!, OtpPurposes.PasswordReset))
                 return Success(ForgotPasswordGenericMessage);
 
-            var otpCode = await _userManager.GenerateUserTokenAsync(
-                user,
-                TokenOptions.DefaultEmailProvider,
-                OtpPurposes.PasswordReset
-            );
-
             var fullImagePath = EmailTemplates.ResolveLogoUrl(_configuration["EmailSettings:LogoUrl"]);
-            try
+
+            // Issued and sent in the background, not awaited: doing that work only for real
+            // accounts would let the response time reveal which emails are registered.
+            if (!_emailQueue.TryEnqueueOtpEmail(user.Id, OtpPurposes.PasswordReset, user.Email!, user.FirstName, fullImagePath))
             {
-                await _emailService.SendPasswordResetEmailAsync(user.Email!, user.FirstName, user.Email!, otpCode, fullImagePath);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to send password reset email for user {UserId}", user.Id);
+                _logger?.LogError("Email queue full; password reset email for user {UserId} was not sent", user.Id);
             }
 
             return Success(ForgotPasswordGenericMessage);
@@ -347,7 +334,9 @@ namespace Cocorra.BLL.Services.AuthServices
                 // SECURITY: Embed verification status for policy-based authorization.
                 // This claim determines whether the user can access full app features (Active)
                 // or only verification endpoints (Pending/ReRecord).
-                new Claim("VerificationStatus", user.Status.ToString())
+                new Claim("VerificationStatus", user.Status.ToString()),
+                // SECURITY: lets OnTokenValidated reject this token once the password changes.
+                new Claim(SecurityStampClaim.Type, SecurityStampClaim.Compute(user.SecurityStamp))
             };
 
             foreach (var role in userRoles) claims.Add(new Claim(ClaimTypes.Role, role));
@@ -388,8 +377,28 @@ namespace Cocorra.BLL.Services.AuthServices
 
             return Success("FCM Token updated successfully.");
         }
+        /// <summary>Runs Identity's password validators; returns the joined errors, or null if valid.</summary>
+        private async Task<string?> ValidateNewPasswordAsync(string password)
+        {
+            var errors = new List<string>();
+            foreach (var validator in _userManager.PasswordValidators)
+            {
+                var result = await validator.ValidateAsync(_userManager, new ApplicationUser(), password);
+                if (!result.Succeeded)
+                    errors.AddRange(result.Errors.Select(e => e.Description));
+            }
+            return errors.Count == 0 ? null : string.Join(", ", errors);
+        }
+
         public async Task<Response<string>> ResetPasswordAsync(ResetPasswordDto dto)
         {
+            // Check the new password BEFORE the code: a valid code is used up when checked, so a
+            // rejected password afterwards would force the user to request another one. The
+            // password rules do not depend on the account, so this reveals nothing about it.
+            var passwordErrors = await ValidateNewPasswordAsync(dto.NewPassword);
+            if (passwordErrors != null)
+                return BadRequest<string>($"Password reset failed: {passwordErrors}");
+
             // Reserve the attempt atomically BEFORE verifying, so concurrent bursts cannot
             // all pass the check before any failure is recorded.
             if (!_otpAttemptLimiter.TryRegisterAttempt(dto.Email, OtpPurposes.PasswordReset))
@@ -398,17 +407,10 @@ namespace Cocorra.BLL.Services.AuthServices
             var user = await _userManager.FindByEmailAsync(dto.Email);
 
             // Unknown user is indistinguishable from a wrong code (the attempt is already counted).
-            if (user == null)
-                return BadRequest<string>("Invalid or expired OTP code.");
-
-            var isValidOtp = await _userManager.VerifyUserTokenAsync(
-                user,
-                TokenOptions.DefaultEmailProvider,
-                OtpPurposes.PasswordReset,
-                dto.OtpCode
-            );
-
-            if (!isValidOtp)
+            // The lookup still runs for an unknown user (with an id no code can match) so both
+            // cases cost the same database round trip.
+            var isValidOtp = await _otpCodes.TryConsumeAsync(user?.Id ?? Guid.Empty, OtpPurposes.PasswordReset, dto.OtpCode);
+            if (user == null || !isValidOtp)
                 return BadRequest<string>("Invalid or expired OTP code.");
 
             _otpAttemptLimiter.Reset(dto.Email, OtpPurposes.PasswordReset);
@@ -421,6 +423,8 @@ namespace Cocorra.BLL.Services.AuthServices
                 var errors = string.Join(", ", result.Errors.Select(e => e.Description));
                 return BadRequest<string>($"Password reset failed: {errors}");
             }
+
+            await RevokeSessionsAsync(user);
 
             return Success("Password has been reset successfully.");
         }
@@ -462,7 +466,23 @@ namespace Cocorra.BLL.Services.AuthServices
                 return BadRequest<string>($"Password update failed: {errors}");
             }
 
+            await RevokeSessionsAsync(user);
+
             return Success("Password updated successfully.");
+        }
+
+        /// <summary>
+        /// Ends every existing session after a password reset or change, so whoever had the old
+        /// password loses access. Access tokens are already dead: the password change rotated the
+        /// security stamp, which OnTokenValidated checks. This kills the refresh token, and clears
+        /// the push token so notifications stop going to the old device.
+        /// </summary>
+        private async Task RevokeSessionsAsync(ApplicationUser user)
+        {
+            user.RefreshToken = null;
+            user.RefreshTokenExpiryTime = DateTime.UtcNow;
+            user.FcmToken = null;
+            await _userManager.UpdateAsync(user);
         }
 
         public async Task<Response<string>> DeleteAccountAsync(Guid userId)
@@ -697,20 +717,37 @@ namespace Cocorra.BLL.Services.AuthServices
 
         public const string DeleteAccountInvalidCredentialsMessage = "Invalid Email or Password";
 
+        private static string? _dummyPasswordHash;
+
+        /// <summary>
+        /// Runs a password hash check for an email that has no account, so "unknown email"
+        /// takes as long as "wrong password" and response times don't reveal which emails exist.
+        /// </summary>
+        private void VerifyAgainstDummyHash(string password)
+        {
+            var hasher = _userManager.PasswordHasher;
+            var dummyUser = new ApplicationUser();
+            _dummyPasswordHash ??= hasher.HashPassword(dummyUser, Guid.NewGuid().ToString());
+            hasher.VerifyHashedPassword(dummyUser, _dummyPasswordHash, password ?? string.Empty);
+        }
+
         public async Task<Response<string>> DeleteAccountWithCredentialsAsync(string email, string password)
         {
             var user = await _userManager.FindByEmailAsync(email);
             if (user == null)
+            {
+                VerifyAgainstDummyHash(password);
+                return BadRequest<string>(DeleteAccountInvalidCredentialsMessage);
+            }
+
+            if (!await _userManager.CheckPasswordAsync(user, password))
                 return BadRequest<string>(DeleteAccountInvalidCredentialsMessage);
 
-            // Same order as LoginAsync: a locked-out account never reaches the password check.
+            // Same order as LoginAsync: lockout is only revealed once the password is verified.
             // Banned accounts stay locked out here too — deleting them would cascade away their
             // BlockedDevices rows and let the user re-register on the same device.
             if (await _userManager.IsLockedOutAsync(user))
                 return Forbidden<string>("This account is locked. Please contact support to request deletion.");
-
-            if (!await _userManager.CheckPasswordAsync(user, password))
-                return BadRequest<string>(DeleteAccountInvalidCredentialsMessage);
 
             return await DeleteAccountAsync(user.Id);
         }

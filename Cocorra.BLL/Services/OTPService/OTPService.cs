@@ -20,16 +20,18 @@ namespace Cocorra.BLL.Services.OTPService
         public const string TooManyAttemptsMessage = "Too many failed attempts. Please try again later.";
 
         private readonly UserManager<ApplicationUser> _userManager;
-        private readonly IEmailService _emailService;
+        private readonly IEmailQueue _emailQueue;
+        private readonly IOtpCodeService _otpCodes;
         private readonly IConfiguration _configuration;
         private readonly IEventTracker _eventTracker;
         private readonly IOtpAttemptLimiter _attemptLimiter;
         private readonly ILogger<OTPService>? _logger;
 
-        public OTPService(IConfiguration configuration, UserManager<ApplicationUser> userManager, IEmailService emailService, IHttpContextAccessor httpContextAccessor, IEventTracker eventTracker, IOtpAttemptLimiter attemptLimiter, ILogger<OTPService>? logger = null)
+        public OTPService(IConfiguration configuration, UserManager<ApplicationUser> userManager, IEmailQueue emailQueue, IOtpCodeService otpCodes, IHttpContextAccessor httpContextAccessor, IEventTracker eventTracker, IOtpAttemptLimiter attemptLimiter, ILogger<OTPService>? logger = null)
         {
             _configuration = configuration;
-            _emailService = emailService;
+            _emailQueue = emailQueue;
+            _otpCodes = otpCodes;
             _userManager = userManager;
             _eventTracker = eventTracker;
             _attemptLimiter = attemptLimiter;
@@ -52,20 +54,13 @@ namespace Cocorra.BLL.Services.OTPService
             if (!_attemptLimiter.TryBeginSend(email, OtpPurposes.EmailConfirmation))
                 return Success(ResendGenericMessage);
 
-            var otpCode = await _userManager.GenerateUserTokenAsync(
-                user,
-                TokenOptions.DefaultEmailProvider,
-                OtpPurposes.EmailConfirmation
-            );
             var fullImagePath = EmailTemplates.ResolveLogoUrl(_configuration["EmailSettings:LogoUrl"]);
 
-            try
+            // Issued and sent in the background, not awaited: doing that work only for real
+            // accounts would let the response time reveal which emails are registered.
+            if (!_emailQueue.TryEnqueueOtpEmail(user.Id, OtpPurposes.EmailConfirmation, user.Email!, user.FirstName, fullImagePath))
             {
-                await _emailService.SendOtpEmailAsync(user.Email!, user.FirstName, user.Email!, otpCode, fullImagePath);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to send verification email for user {UserId}", user.Id);
+                _logger?.LogError("Email queue full; verification email for user {UserId} was not sent", user.Id);
             }
 
             return Success(ResendGenericMessage);
@@ -84,17 +79,10 @@ namespace Cocorra.BLL.Services.OTPService
             var user = await _userManager.FindByEmailAsync(email);
 
             // Unknown user is indistinguishable from a wrong code (the attempt is already counted).
-            if (user == null)
-                return BadRequest<string>(InvalidOtpMessage);
-
-            var isValidOtp = await _userManager.VerifyUserTokenAsync(
-                user,
-                TokenOptions.DefaultEmailProvider,
-                OtpPurposes.EmailConfirmation,
-                otpCode
-            );
-
-            if (!isValidOtp)
+            // The lookup still runs for an unknown user (with an id no code can match) so both
+            // cases cost the same database round trip.
+            var isValidOtp = await _otpCodes.TryConsumeAsync(user?.Id ?? Guid.Empty, OtpPurposes.EmailConfirmation, otpCode);
+            if (user == null || !isValidOtp)
                 return BadRequest<string>(InvalidOtpMessage);
 
             _attemptLimiter.Reset(email, OtpPurposes.EmailConfirmation);

@@ -20,6 +20,7 @@ public class OTPServiceTests
 {
     private readonly Mock<UserManager<ApplicationUser>> _userManagerMock = TestIdentityHelper.CreateMockUserManager();
     private readonly Mock<IEmailService> _emailServiceMock = new();
+    private readonly Mock<IOtpCodeService> _otpCodesMock = new();
     private readonly Mock<IConfiguration> _configMock = new();
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock = new();
     private readonly Mock<IEventTracker> _eventTrackerMock = new();
@@ -32,7 +33,8 @@ public class OTPServiceTests
         _service = new OTPService(
             _configMock.Object,
             _userManagerMock.Object,
-            _emailServiceMock.Object,
+            new InlineEmailQueue(_emailServiceMock.Object, _otpCodesMock.Object),
+            _otpCodesMock.Object,
             _httpContextAccessorMock.Object,
             _eventTrackerMock.Object,
             _attemptLimiter
@@ -74,7 +76,7 @@ public class OTPServiceTests
         var email = "logo@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), FirstName = "Ali", Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.GenerateUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation))
+        _otpCodesMock.Setup(m => m.IssueAsync(user.Id, OtpPurposes.EmailConfirmation, It.IsAny<CancellationToken>()))
             .ReturnsAsync("123456");
 
         await _service.ResendOtpAsync(email);
@@ -97,7 +99,7 @@ public class OTPServiceTests
             EmailConfirmed = false
         };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.GenerateUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation))
+        _otpCodesMock.Setup(m => m.IssueAsync(user.Id, OtpPurposes.EmailConfirmation, It.IsAny<CancellationToken>()))
             .ReturnsAsync("123456");
 
         var result = await _service.ResendOtpAsync(email);
@@ -133,7 +135,7 @@ public class OTPServiceTests
         var email = "user@cocorra.com";
         var user = new ApplicationUser { Id = Guid.NewGuid(), Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "wrong"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "wrong", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         var result = await _service.VerifyOtpAsync(email, "wrong");
@@ -152,7 +154,7 @@ public class OTPServiceTests
         var email = "user@cocorra.com";
         var user = new ApplicationUser { Id = userId, Email = email, EmailConfirmed = false };
         _userManagerMock.Setup(m => m.FindByEmailAsync(email)).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, "999888"))
+        _otpCodesMock.Setup(m => m.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, "999888", It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
 

@@ -3,8 +3,10 @@ using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.RolesService;
 using Cocorra.DAL.DTOS.AdminDto;
 using Cocorra.DAL.DTOS.Role;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
+using System.Security.Claims;
 using Xunit;
 
 namespace Cocorra.Tests;
@@ -15,7 +17,13 @@ public class RolesControllerTests
 
     private RolesController CreateController()
     {
-        return new RolesController(_rolesServiceMock.Object);
+        var admin = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()) }, "Test"));
+
+        return new RolesController(_rolesServiceMock.Object)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = admin } }
+        };
     }
 
     [Fact]
@@ -71,7 +79,7 @@ public class RolesControllerTests
             Data = "Roles updated"
         };
 
-        _rolesServiceMock.Setup(s => s.ManageUserRolesAsync(dto)).ReturnsAsync(serviceResponse);
+        _rolesServiceMock.Setup(s => s.ManageUserRolesAsync(dto, It.IsAny<Guid>())).ReturnsAsync(serviceResponse);
 
         var controller = CreateController();
         var result = await controller.ManageUserRoles(dto);
@@ -122,7 +130,7 @@ public class RolesControllerTests
             Data = new UserDto { Id = Guid.NewGuid().ToString(), Email = "coach@example.com", FullName = "New Coach", Roles = new List<string> { "Coach" } }
         };
 
-        _rolesServiceMock.Setup(s => s.CreateUserWithRoleAsync(dto)).ReturnsAsync(serviceResponse);
+        _rolesServiceMock.Setup(s => s.CreateUserWithRoleAsync(dto, It.IsAny<Guid>())).ReturnsAsync(serviceResponse);
 
         var controller = CreateController();
         var result = await controller.CreateUser(dto);
@@ -142,7 +150,7 @@ public class RolesControllerTests
             Message = "Email already registered"
         };
 
-        _rolesServiceMock.Setup(s => s.CreateUserWithRoleAsync(dto)).ReturnsAsync(serviceResponse);
+        _rolesServiceMock.Setup(s => s.CreateUserWithRoleAsync(dto, It.IsAny<Guid>())).ReturnsAsync(serviceResponse);
 
         var controller = CreateController();
         var result = await controller.CreateUser(dto);

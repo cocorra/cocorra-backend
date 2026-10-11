@@ -5,6 +5,8 @@ using Cocorra.DAL.DTOS.Role;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace Cocorra.API.Controllers
@@ -13,6 +15,8 @@ namespace Cocorra.API.Controllers
     [Authorize(Roles = "Admin")] 
     public class RolesController : ControllerBase
     {
+        private const string UnresolvedAdminMessage = "Could not resolve the acting admin identity.";
+
         private readonly IRolesService _rolesService;
 
         public RolesController(IRolesService rolesService)
@@ -42,7 +46,12 @@ namespace Cocorra.API.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var result = await _rolesService.ManageUserRolesAsync(model);
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var adminGuid))
+            {
+                return BadRequest(new { succeeded = false, message = UnresolvedAdminMessage });
+            }
+
+            var result = await _rolesService.ManageUserRolesAsync(model, adminGuid);
 
             if (!result.Succeeded) return BadRequest(result);
 
@@ -64,7 +73,12 @@ namespace Cocorra.API.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var result = await _rolesService.CreateUserWithRoleAsync(model);
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var adminGuid))
+            {
+                return BadRequest(new { succeeded = false, message = UnresolvedAdminMessage });
+            }
+
+            var result = await _rolesService.CreateUserWithRoleAsync(model, adminGuid);
 
             if (!result.Succeeded) return BadRequest(result);
 

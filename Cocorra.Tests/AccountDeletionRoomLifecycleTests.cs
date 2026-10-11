@@ -68,14 +68,15 @@ public class AccountDeletionRoomLifecycleTests : IDisposable
             null!,
             new Mock<IConfiguration>().Object,
             new Mock<IUploadVoice>().Object,
-            new Mock<IEmailService>().Object,
+            new Mock<IEmailQueue>().Object,
             new Mock<IUploadImage>().Object,
             _context,
             new Mock<IRoomRepository>().Object,
             new Mock<IEventTracker>().Object,
             roomService.Object,
             new Mock<IBlockedDevicesService>().Object,
-            new Mock<IOtpAttemptLimiter>().Object);
+            new Mock<IOtpAttemptLimiter>().Object,
+            new Mock<IOtpCodeService>().Object);
 
     private async Task<Guid> SeedHostedRoomAsync(Guid hostId, RoomStatus status)
     {

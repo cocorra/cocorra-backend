@@ -29,6 +29,10 @@ services:
       # colon-space sequence, which YAML cannot hold in a plain scalar.
       - "Analytics__IpHashSalt=${ANALYTICS_IP_HASH_SALT:?set ANALYTICS_IP_HASH_SALT in .env — copy .env.example and generate a value with openssl rand -base64 32}"
 
+      # REQUIRED. Keys the hashes of stored email OTP codes. Rotating it invalidates
+      # only the codes currently outstanding (users request a new one).
+      - "Otp__HmacKey=${OTP_HMAC_KEY:?set OTP_HMAC_KEY in .env — generate a value with openssl rand -base64 32}"
+
       # Analytics event-emission flags. Both default to false in appsettings.json.
       # Uncomment ONLY when the corresponding stage gate in
       # docs/dashboard-discovery/30-production-deployment-checklist.md has passed.
