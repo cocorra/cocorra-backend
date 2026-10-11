@@ -4,6 +4,7 @@ using Cocorra.DAL.DTOS.Role;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Enums;
 using Cocorra.BLL.Base;
+using Cocorra.BLL.Services.AuditLogs;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -17,11 +18,16 @@ namespace Cocorra.BLL.Services.RolesService
     {
         private readonly RoleManager<IdentityRole<Guid>> _roleManager;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IAuditLogService _auditLog;
 
-        public RolesService(RoleManager<IdentityRole<Guid>> roleManager, UserManager<ApplicationUser> userManager)
+        public RolesService(
+            RoleManager<IdentityRole<Guid>> roleManager,
+            UserManager<ApplicationUser> userManager,
+            IAuditLogService auditLog)
         {
             _roleManager = roleManager;
             _userManager = userManager;
+            _auditLog = auditLog;
         }
 
         public async Task<Response<List<RoleDto>>> GetRolesAsync()
@@ -39,7 +45,7 @@ namespace Cocorra.BLL.Services.RolesService
             return Success(new RoleDto { Id = role.Id.ToString(), Name = role.Name! });
         }
 
-        public async Task<Response<string>> ManageUserRolesAsync(ManageUserRolesDto model)
+        public async Task<Response<string>> ManageUserRolesAsync(ManageUserRolesDto model, Guid actorUserId)
         {
             var user = await _userManager.FindByIdAsync(model.UserId.ToString());
             if (user == null) return BadRequest<string>("User not found");
@@ -76,6 +82,13 @@ namespace Cocorra.BLL.Services.RolesService
                 if (!removeResult.Succeeded) return BadRequest<string>("Failed to remove roles: " + string.Join(", ", removeResult.Errors.Select(e => e.Description)));
             }
 
+            await _auditLog.RecordAsync(new AuditEntry(
+                AuditActions.UserRolesChanged,
+                actorUserId,
+                user.Id,
+                user.Email,
+                new { added = rolesToAdd, removed = rolesToRemove }));
+
             return Success("User roles updated successfully");
         }
 
@@ -100,7 +113,7 @@ namespace Cocorra.BLL.Services.RolesService
             return Success(usersDto);
         }
 
-        public async Task<Response<UserDto>> CreateUserWithRoleAsync(CreateUserDto model)
+        public async Task<Response<UserDto>> CreateUserWithRoleAsync(CreateUserDto model, Guid actorUserId)
         {
             if (string.IsNullOrWhiteSpace(model.Email))
                 return BadRequest<UserDto>("Email is required.");
@@ -159,6 +172,13 @@ namespace Cocorra.BLL.Services.RolesService
                 var errors = string.Join("; ", roleResult.Errors.Select(e => e.Description));
                 return BadRequest<UserDto>($"User created, but role assignment failed: {errors}");
             }
+
+            await _auditLog.RecordAsync(new AuditEntry(
+                AuditActions.UserCreatedWithRole,
+                actorUserId,
+                user.Id,
+                user.Email,
+                new { roles = rolesToAssign }));
 
             var userDto = new UserDto
             {

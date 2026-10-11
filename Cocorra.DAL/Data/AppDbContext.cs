@@ -25,6 +25,7 @@ namespace Cocorra.DAL.Data
         public DbSet<UserBlock> UserBlocks { get; set; }
         public DbSet<RoomFeedback> RoomFeedbacks { get; set; }
         public DbSet<RoomInvite> RoomInvites { get; set; }
+        public DbSet<OtpCode> OtpCodes { get; set; }
         public DbSet<SupportChat> SupportChats { get; set; }
         public DbSet<SupportMessage> SupportMessages { get; set; }
         public DbSet<BlockedDevices> BlockedDevices { get; set; }
@@ -36,6 +37,8 @@ namespace Cocorra.DAL.Data
         public DbSet<DailyHostMetrics> DailyHostMetrics { get; set; }
         public DbSet<DailyFunnelMetrics> DailyFunnelMetrics { get; set; }
         public DbSet<AggregationCheckpoint> AggregationCheckpoints { get; set; }
+        public DbSet<SystemLog> SystemLogs { get; set; }
+        public DbSet<AuditLog> AuditLogs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -277,6 +280,23 @@ namespace Cocorra.DAL.Data
                  .HasDatabaseName("IX_RoomInvites_UsedByUserId");
             });
 
+            // Email OTP codes: one live code per user and purpose, removed with the user.
+            builder.Entity<OtpCode>(e =>
+            {
+                e.HasOne(o => o.User)
+                 .WithMany()
+                 .HasForeignKey(o => o.UserId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasIndex(o => new { o.UserId, o.Purpose })
+                 .IsUnique()
+                 .HasDatabaseName("UX_OtpCodes_UserId_Purpose");
+
+                // The cleanup job deletes by expiry.
+                e.HasIndex(o => o.ExpiresAt)
+                 .HasDatabaseName("IX_OtpCodes_ExpiresAt");
+            });
+
             // ============================================================
             // 8. Blocked Devices
             // ============================================================
@@ -428,6 +448,23 @@ namespace Cocorra.DAL.Data
                 e.HasIndex(x => x.PipelineName)
                  .IsUnique()
                  .HasDatabaseName("UX_AggregationCheckpoints_PipelineName");
+            });
+
+            // ============================================================
+            // 11. System & Audit Logs (no FK to users: rows must outlive the user)
+            // ============================================================
+            builder.Entity<SystemLog>(e =>
+            {
+                e.HasIndex(x => x.TimestampUtc);
+                e.HasIndex(x => new { x.Level, x.TimestampUtc });
+            });
+
+            builder.Entity<AuditLog>(e =>
+            {
+                e.HasIndex(x => x.OccurredAtUtc);
+                e.HasIndex(x => new { x.Action, x.OccurredAtUtc });
+                e.HasIndex(x => new { x.ActorUserId, x.OccurredAtUtc });
+                e.HasIndex(x => new { x.TargetUserId, x.OccurredAtUtc });
             });
         }
 

@@ -1,4 +1,7 @@
+using System.Threading.Channels;
 using System.Threading.RateLimiting;
+using Cocorra.BLL.Services.AuditLogs;
+using Cocorra.BLL.Services.SystemLogs;
 using Cocorra.API.Hubs;
 using Cocorra.API.Seeder;
 using Cocorra.BLL.Services.AdminService;
@@ -187,12 +190,38 @@ builder.Services.AddScoped<ISupportRepository, SupportRepository>();
 builder.Services.AddScoped<ISupportService, SupportService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.RoomFeedbackRepository.IRoomFeedbackRepository, Cocorra.DAL.Repository.RoomFeedbackRepository.RoomFeedbackRepository>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RoomFeedbackService.IRoomFeedbackService, Cocorra.BLL.Services.RoomFeedbackService.RoomFeedbackService>();
+builder.Services.AddScoped<Cocorra.DAL.Repository.SystemLogRepository.ISystemLogRepository, Cocorra.DAL.Repository.SystemLogRepository.SystemLogRepository>();
+builder.Services.AddScoped<ISystemLogService, SystemLogService>();
+builder.Services.AddScoped<Cocorra.DAL.Repository.AuditLogRepository.IAuditLogRepository, Cocorra.DAL.Repository.AuditLogRepository.AuditLogRepository>();
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.Configure<Cocorra.BLL.Services.RoomInviteService.InviteSettings>(
     builder.Configuration.GetSection(Cocorra.BLL.Services.RoomInviteService.InviteSettings.SectionName));
 builder.Services.AddScoped<Cocorra.DAL.Repository.RoomInviteRepository.IRoomInviteRepository, Cocorra.DAL.Repository.RoomInviteRepository.RoomInviteRepository>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RoomInviteService.IRoomInviteService, Cocorra.BLL.Services.RoomInviteService.RoomInviteService>();
 builder.Services.AddHttpClient<IEmailService, EmailService>(c => c.Timeout = TimeSpan.FromSeconds(15));
+// OTP emails are sent in the background so response times don't reveal which emails are registered.
+builder.Services.AddSingleton<EmailQueue>();
+builder.Services.AddSingleton<IEmailQueue>(sp => sp.GetRequiredService<EmailQueue>());
+builder.Services.AddHostedService<BackgroundEmailSender>();
 builder.Services.AddScoped<IOTPService, OTPService>();
+// Fail fast if the OTP HMAC key is missing: it is what keeps stored codes unrecoverable from a
+// database leak, so there is deliberately no default.
+var otpHmacKey = builder.Configuration[$"{OtpOptions.SectionName}:{nameof(OtpOptions.HmacKey)}"];
+if (string.IsNullOrWhiteSpace(otpHmacKey)
+    || otpHmacKey.Length < OtpOptions.MinimumHmacKeyLength
+    || otpHmacKey.StartsWith("CHANGE_ME", StringComparison.Ordinal)) // the .env.example placeholder
+    throw new InvalidOperationException(
+        $"Otp:HmacKey is not configured or shorter than {OtpOptions.MinimumHmacKeyLength} characters. "
+        + "It keys the hashes of stored OTP codes and must stay out of the database and out of git.\n"
+        + "\n"
+        + "LOCAL DEVELOPMENT:\n"
+        + "    dotnet user-secrets set \"Otp:HmacKey\" \"$(openssl rand -base64 32)\" --project Cocorra.API\n"
+        + "\n"
+        + "PRODUCTION — set OTP_HMAC_KEY in the .env file next to docker-compose.yml.\n"
+        + "  Generate a value with: openssl rand -base64 32");
+builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection(OtpOptions.SectionName));
+builder.Services.AddScoped<IOtpCodeService, OtpCodeService>();
+builder.Services.AddHostedService<OtpCodeCleanupService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.UserBlockRepository.IUserBlockRepository, Cocorra.DAL.Repository.UserBlockRepository.UserBlockRepository>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.BlockedDevicesRepository.IBlockedDevicesRepository, Cocorra.DAL.Repository.BlockedDevicesRepository.BlockedDevicesRepository>();
 builder.Services.AddScoped<Cocorra.BLL.Services.BlockService.IBlockService, Cocorra.BLL.Services.BlockService.BlockService>();
@@ -226,6 +255,26 @@ builder.Services.Configure<EventTrackingOptions>(builder.Configuration.GetSectio
 if (!string.IsNullOrWhiteSpace(builder.Configuration["Analytics:StructuredLogPath"]))
 {
     builder.Services.AddSingleton<ILoggerProvider, StructuredFileLoggerProvider>();
+}
+
+// Persisted system logs (Admin > System Logs). Retention runs even when capture is disabled so
+// rows written before it was switched off still age out.
+builder.Services.Configure<SystemLogOptions>(builder.Configuration.GetSection(SystemLogOptions.SectionName));
+builder.Services.AddHostedService<SystemLogCleanupService>();
+var systemLogOptions = builder.Configuration.GetSection(SystemLogOptions.SectionName).Get<SystemLogOptions>()
+    ?? new SystemLogOptions();
+if (systemLogOptions.Enabled)
+{
+    // DropOldest: under a log storm the newest entries are the ones worth keeping, and the
+    // logger must never block or fail the request that is logging.
+    builder.Services.AddSingleton(Channel.CreateBounded<SystemLog>(
+        new BoundedChannelOptions(Math.Max(1, systemLogOptions.QueueCapacity))
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true
+        }));
+    builder.Services.AddSingleton<ILoggerProvider, DatabaseLoggerProvider>();
+    builder.Services.AddHostedService<SystemLogFlushService>();
 }
 builder.Services.AddMemoryCache();
 // OTP failed-attempt + send-cooldown tracking; singleton so state is shared across requests.
@@ -421,6 +470,16 @@ builder.Services.AddAuthentication(options =>
                 if (user != null && await userManager.IsLockedOutAsync(user))
                 {
                     context.Fail("User is locked out.");
+                    return;
+                }
+
+                // Reject tokens issued before the last password reset/change (the security stamp
+                // rotates on both). Tokens without the claim predate it and are still accepted;
+                // they expire within a day of this check shipping.
+                var stampClaim = context.Principal?.FindFirst(SecurityStampClaim.Type)?.Value;
+                if (user != null && stampClaim != null && !SecurityStampClaim.Matches(user.SecurityStamp, stampClaim))
+                {
+                    context.Fail("Token was issued before the last password change.");
                 }
             }
         }
@@ -480,6 +539,8 @@ builder.Services.AddRateLimiter(options =>
 
     // OTP send/verify endpoints (ForgotPassword, ResendOtp, ConfirmEmail, ResetPassword), on top
     // of the global limit. Bounds email-bombing and OTP guessing from a single address.
+    // Register also uses it: its "Email is already registered" reply reveals which emails exist,
+    // so this caps how fast one address can probe.
     options.AddPolicy("otp", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? httpContext.Request.Headers.Host.ToString(),

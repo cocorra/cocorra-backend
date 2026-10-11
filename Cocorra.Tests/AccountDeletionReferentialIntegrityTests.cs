@@ -118,14 +118,15 @@ public class AccountDeletionReferentialIntegrityTests : IDisposable
             null!,
             new Mock<IConfiguration>().Object,
             uploadVoice ?? new Mock<IUploadVoice>().Object,
-            new Mock<IEmailService>().Object,
+            new Mock<IEmailQueue>().Object,
             uploadImage ?? new Mock<IUploadImage>().Object,
             _context,
             new Mock<IRoomRepository>().Object,
             new Mock<IEventTracker>().Object,
             new Mock<IRoomService>().Object,
             new Mock<IBlockedDevicesService>().Object,
-            new Mock<IOtpAttemptLimiter>().Object);
+            new Mock<IOtpAttemptLimiter>().Object,
+            new Mock<IOtpCodeService>().Object);
 
     /// <summary>
     /// Guards the guard: if SQLite were not enforcing foreign keys, every test below would pass

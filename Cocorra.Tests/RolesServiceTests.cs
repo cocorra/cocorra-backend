@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.RolesService;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.Role;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace Cocorra.Tests;
@@ -53,7 +55,7 @@ public class RolesServiceTests : IDisposable
         var scope = _services.CreateScope();
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var service = new RolesService(roleMgr, userMgr);
+        var service = new RolesService(roleMgr, userMgr, new Mock<IAuditLogService>().Object);
         return (service, roleMgr, userMgr);
     }
 
@@ -108,7 +110,7 @@ public class RolesServiceTests : IDisposable
             Roles = new List<string> { "Member" }
         };
 
-        var result = await service.ManageUserRolesAsync(dto);
+        var result = await service.ManageUserRolesAsync(dto, Guid.NewGuid());
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -128,7 +130,7 @@ public class RolesServiceTests : IDisposable
             Roles = new List<string> { "Admin" }
         };
 
-        var result = await service.ManageUserRolesAsync(dto);
+        var result = await service.ManageUserRolesAsync(dto, Guid.NewGuid());
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -148,7 +150,7 @@ public class RolesServiceTests : IDisposable
             Roles = new List<string> { "GhostRole" }
         };
 
-        var result = await service.ManageUserRolesAsync(dto);
+        var result = await service.ManageUserRolesAsync(dto, Guid.NewGuid());
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -172,7 +174,7 @@ public class RolesServiceTests : IDisposable
             Roles = new List<string> { "NewRole" }
         };
 
-        var result = await service.ManageUserRolesAsync(dto);
+        var result = await service.ManageUserRolesAsync(dto, Guid.NewGuid());
 
         Assert.True(result.Succeeded);
         var currentRoles = await userMgr.GetRolesAsync(user);
@@ -232,7 +234,7 @@ public class RolesServiceTests : IDisposable
             Role = "Coach"
         };
 
-        var result = await service.CreateUserWithRoleAsync(dto);
+        var result = await service.CreateUserWithRoleAsync(dto, Guid.NewGuid());
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
@@ -266,7 +268,7 @@ public class RolesServiceTests : IDisposable
             Role = "Coach"
         };
 
-        var result = await service.CreateUserWithRoleAsync(dto);
+        var result = await service.CreateUserWithRoleAsync(dto, Guid.NewGuid());
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -287,7 +289,7 @@ public class RolesServiceTests : IDisposable
             Role = "NonExistentRole"
         };
 
-        var result = await service.CreateUserWithRoleAsync(dto);
+        var result = await service.CreateUserWithRoleAsync(dto, Guid.NewGuid());
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);

@@ -30,6 +30,7 @@ public class AuthenticationControllerOtpTests
     [InlineData(nameof(AuthenticationController.ForgotPassword), typeof(HttpPostAttribute))]
     [InlineData(nameof(AuthenticationController.ResendOtp), typeof(HttpPostAttribute))]
     [InlineData(nameof(AuthenticationController.ResetPassword), typeof(HttpPostAttribute))]
+    [InlineData(nameof(AuthenticationController.Register), typeof(HttpPostAttribute))]
     public void OtpActions_HaveEnableRateLimitingOtpAttribute(string actionName, Type httpAttributeType)
     {
         var method = typeof(AuthenticationController).GetMethods()

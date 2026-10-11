@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using Cocorra.Tests.Helpers;
 using System;
 using System.Net;
 using System.Net.Http;
@@ -38,6 +40,8 @@ public class AuthServicesOtpSecurityTests : IDisposable
     private readonly Mock<IRoomService> _roomServiceMock = new();
     private readonly Mock<IBlockedDevicesService> _blockedDevicesServiceMock = new();
     private readonly IOtpAttemptLimiter _otpAttemptLimiter = new OtpAttemptLimiter(new MemoryCache(new MemoryCacheOptions()));
+    private const string TestOtpHmacKey = "test-only-otp-hmac-key-at-least-32-chars";
+    private OtpCodeService _otpCodes = null!;
 
     public AuthServicesOtpSecurityTests()
     {
@@ -83,20 +87,22 @@ public class AuthServicesOtpSecurityTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+        _otpCodes = new OtpCodeService(db, Options.Create(new OtpOptions { HmacKey = TestOtpHmacKey }));
 
         var service = new AuthServices(
             userMgr,
             roleMgr,
             _configMock.Object,
             _uploadVoiceMock.Object,
-            _emailServiceMock.Object,
+            new InlineEmailQueue(_emailServiceMock.Object, _otpCodes),
             _uploadImageMock.Object,
             db,
             _roomRepoMock.Object,
             _eventTrackerMock.Object,
             _roomServiceMock.Object,
             _blockedDevicesServiceMock.Object,
-            _otpAttemptLimiter
+            _otpAttemptLimiter,
+            _otpCodes
         );
 
         return (service, userMgr, roleMgr, db);
@@ -183,11 +189,12 @@ public class AuthServicesOtpSecurityTests : IDisposable
         Assert.True(firstResult.Succeeded);
         Assert.NotNull(capturedOtp);
 
-        // Verify token is valid specifically for PasswordReset purpose, not EmailConfirmation
-        var validForReset = await userMgr.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.PasswordReset, capturedOtp!);
-        var validForConfirm = await userMgr.VerifyUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.EmailConfirmation, capturedOtp!);
-        Assert.True(validForReset);
+        // Verify the code is valid specifically for PasswordReset purpose, not EmailConfirmation
+        // (checked first: a successful check uses the code up).
+        var validForConfirm = await _otpCodes.TryConsumeAsync(user.Id, OtpPurposes.EmailConfirmation, capturedOtp!);
+        var validForReset = await _otpCodes.TryConsumeAsync(user.Id, OtpPurposes.PasswordReset, capturedOtp!);
         Assert.False(validForConfirm);
+        Assert.True(validForReset);
 
         // Second call within cooldown window returns success without sending email
         var secondResult = await service.ForgotPasswordAsync(new ForgotPasswordDto { Email = email });
@@ -253,7 +260,7 @@ public class AuthServicesOtpSecurityTests : IDisposable
         await userMgr.CreateAsync(user, "InitialPassword123");
 
         // Real valid reset token
-        var validCode = await userMgr.GenerateUserTokenAsync(user, TokenOptions.DefaultEmailProvider, OtpPurposes.PasswordReset);
+        var validCode = await _otpCodes.IssueAsync(user.Id, OtpPurposes.PasswordReset);
 
         // Exhaust MaxFailedAttempts (5) with wrong code
         for (int i = 0; i < OtpAttemptLimiter.MaxFailedAttempts; i++)
@@ -286,6 +293,43 @@ public class AuthServicesOtpSecurityTests : IDisposable
     }
 
     [Fact]
+    public async Task ResetPasswordAsync_RejectedNewPassword_DoesNotUseUpTheCode()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var email = "weak-password@cocorra.com";
+        var user = new ApplicationUser { UserName = email, Email = email };
+        await userMgr.CreateAsync(user, "InitialPassword123");
+        var code = await _otpCodes.IssueAsync(user.Id, OtpPurposes.PasswordReset);
+
+        // Shorter than the test host's RequiredLength (6).
+        var weak = await service.ResetPasswordAsync(new ResetPasswordDto { Email = email, OtpCode = code, NewPassword = "abc" });
+        var retry = await service.ResetPasswordAsync(new ResetPasswordDto { Email = email, OtpCode = code, NewPassword = "NewPassword123" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, weak.StatusCode);
+        Assert.StartsWith("Password reset failed:", weak.Message);
+        Assert.True(retry.Succeeded, retry.Message);
+        Assert.True(await userMgr.CheckPasswordAsync((await userMgr.FindByEmailAsync(email))!, "NewPassword123"));
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_SameCodeTwice_SecondUseIsRejected()
+    {
+        var (service, userMgr, _, _) = CreateService();
+        var email = "single-use@cocorra.com";
+        var user = new ApplicationUser { UserName = email, Email = email };
+        await userMgr.CreateAsync(user, "InitialPassword123");
+        var code = await _otpCodes.IssueAsync(user.Id, OtpPurposes.PasswordReset);
+
+        var first = await service.ResetPasswordAsync(new ResetPasswordDto { Email = email, OtpCode = code, NewPassword = "NewPassword123" });
+        var second = await service.ResetPasswordAsync(new ResetPasswordDto { Email = email, OtpCode = code, NewPassword = "AnotherPassword123" });
+
+        Assert.True(first.Succeeded, first.Message);
+        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+        Assert.Equal("Invalid or expired OTP code.", second.Message);
+        Assert.True(await userMgr.CheckPasswordAsync((await userMgr.FindByEmailAsync(email))!, "NewPassword123"));
+    }
+
+    [Fact]
     public async Task ResetPasswordAsync_VerifiesWithPasswordResetPurpose_EmailConfirmationCodeIsRejected()
     {
         var (service, userMgr, _, _) = CreateService();
@@ -298,11 +342,7 @@ public class AuthServicesOtpSecurityTests : IDisposable
         await userMgr.CreateAsync(user, "InitialPassword123");
 
         // Code generated for EmailConfirmation purpose, NOT PasswordReset
-        var emailConfirmationCode = await userMgr.GenerateUserTokenAsync(
-            user,
-            TokenOptions.DefaultEmailProvider,
-            OtpPurposes.EmailConfirmation
-        );
+        var emailConfirmationCode = await _otpCodes.IssueAsync(user.Id, OtpPurposes.EmailConfirmation);
 
         var result = await service.ResetPasswordAsync(new ResetPasswordDto
         {
@@ -320,11 +360,7 @@ public class AuthServicesOtpSecurityTests : IDisposable
         Assert.True(await userMgr.CheckPasswordAsync(freshUser!, "InitialPassword123"));
 
         // Now test that a code generated for PasswordReset succeeds
-        var passwordResetCode = await userMgr.GenerateUserTokenAsync(
-            user,
-            TokenOptions.DefaultEmailProvider,
-            OtpPurposes.PasswordReset
-        );
+        var passwordResetCode = await _otpCodes.IssueAsync(user.Id, OtpPurposes.PasswordReset);
 
         var successResult = await service.ResetPasswordAsync(new ResetPasswordDto
         {
