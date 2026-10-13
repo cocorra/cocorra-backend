@@ -19,6 +19,11 @@ public class RoomStateDto
     public List<ParticipantStateDto> Participants { get; set; } = new List<ParticipantStateDto>();
 
     /// <summary>
+    /// Indicates whether the requesting user is currently on stage (always true for the host).
+    /// </summary>
+    public bool IsOnStage { get; set; } = false;
+
+    /// <summary>
     /// LiveKit JWT token for the requesting user to connect to the media server.
     /// </summary>
     public string? LiveKitToken { get; set; }

@@ -71,13 +71,14 @@ public class RoomService : ResponseHandler, IRoomService
         return $"{_baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
     }
 
-    private static string ResolveFullName(ApplicationUser? user)
+    private static string ResolveFullName(ApplicationUser? user, string fallback = "Unknown")
     {
-        if (user == null) return "Unknown";
+        if (user == null) return fallback;
         var fullName = $"{user.FirstName} {user.LastName}".Trim();
         if (!string.IsNullOrWhiteSpace(fullName)) return fullName;
-        if (!string.IsNullOrWhiteSpace(user.UserName)) return user.UserName;
-        return "Unknown";
+        if (!string.IsNullOrWhiteSpace(user.UserName)) return user.UserName.Trim();
+        if (!string.IsNullOrWhiteSpace(user.Email)) return user.Email.Trim();
+        return fallback;
     }
 
     public async Task<Response<Guid>> CreateRoomAsync(CreateRoomDto dto, Guid hostId, IFormFile? roomImage = null)
@@ -132,6 +133,7 @@ public class RoomService : ResponseHandler, IRoomService
             {
                 var hostParticipant = new RoomParticipant
                 {
+                    RoomId = room.Id,
                     UserId = hostId,
                     Status = ParticipantStatus.Active,
                     IsOnStage = true,
@@ -382,13 +384,50 @@ public class RoomService : ResponseHandler, IRoomService
         // Host participant resolution
         var hostParticipant = activeParticipants.FirstOrDefault(p => p.UserId == room.HostId);
         var hostUser = hostParticipant?.User ?? room.Host;
-        var hostName = ResolveFullName(hostUser);
+        if (hostUser == null)
+        {
+            try
+            {
+                hostUser = await _userManager.FindByIdAsync(room.HostId.ToString());
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+        var hostName = ResolveFullName(hostUser, fallback: "Host");
         var hostProfilePicture = BuildFullUrl(hostUser?.ProfilePicturePath);
 
+        // Ensure host is recognized as an active participant on stage
+        if (hostParticipant == null)
+        {
+            hostParticipant = new RoomParticipant
+            {
+                RoomId = room.Id,
+                UserId = room.HostId,
+                Status = ParticipantStatus.Active,
+                IsOnStage = true,
+                IsMuted = false,
+                JoinedAt = room.WentLiveAt ?? DateTime.UtcNow,
+                User = hostUser
+            };
+            activeParticipants.Insert(0, hostParticipant);
+        }
+        else
+        {
+            hostParticipant.IsOnStage = true;
+            if (hostParticipant.User == null && hostUser != null)
+            {
+                hostParticipant.User = hostUser;
+            }
+        }
+
         // Generate a fresh LiveKit token for the requesting user
-        var currentName = ResolveFullName(currentParticipant.User);
+        var currentName = ResolveFullName(currentParticipant.User, fallback: "User");
         var currentCanPublish = room.HostId == currentUserId || currentParticipant.IsOnStage;
         var liveKitToken = _liveKitService.GenerateToken(roomId, currentUserId, currentName, currentCanPublish);
+
+        var isCallerOnStage = room.HostId == currentUserId || currentParticipant.IsOnStage;
 
         var roomState = new RoomStateDto
         {
@@ -401,14 +440,15 @@ public class RoomService : ResponseHandler, IRoomService
             StageCapacity = room.StageCapacity,
             Category = room.Category,
             CategoryName = room.Category.ToString(),
+            IsOnStage = isCallerOnStage,
             Participants = activeParticipants.Select(p => new ParticipantStateDto
             {
                 UserId = p.UserId,
-                Name = ResolveFullName(p.User),
-                ProfilePicture = BuildFullUrl(p.User?.ProfilePicturePath),
+                Name = ResolveFullName(p.UserId == room.HostId ? (p.User ?? hostUser) : p.User, fallback: p.UserId == room.HostId ? "Host" : "User"),
+                ProfilePicture = BuildFullUrl((p.UserId == room.HostId ? (p.User ?? hostUser) : p.User)?.ProfilePicturePath),
                 IsOnStage = p.UserId == room.HostId || p.IsOnStage,
-                IsMuted = p.UserId == room.HostId ? p.IsMuted : p.IsMuted,
-                IsHandRaised = p.IsHandRaised,
+                IsMuted = p.UserId == room.HostId ? false : p.IsMuted,
+                IsHandRaised = p.UserId == room.HostId ? false : p.IsHandRaised,
                 JoinedAt = p.JoinedAt
             }).ToList(),
             LiveKitToken = liveKitToken,

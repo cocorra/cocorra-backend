@@ -9,7 +9,7 @@ bind_addresses:
 
 # API Keys matching Cocorra.API appsettings.json
 keys:
-  dev_livekit_api_key_placeholder: dev_livekit_api_secret_placeholder_must_be_32_bytes_long!
+  APIbnoqt7M8yCA4: yGI8cGT4Mlo0H1-vrDPH4huPimLBzmNIYl600kuFpu31Rjty
 
 logging:
   json: false
@@ -28,7 +28,7 @@ logging:
 # matching secret and the backend verifies it via the SDK's WebhookReceiver.
 # ==============================================================================
 webhook:
-  api_key: dev_livekit_api_key_placeholder
+  api_key: APIbnoqt7M8yCA4
   urls:
     - https://api.cocorraapp.com/Api/V1/Webhooks/LiveKit
 
@@ -76,7 +76,7 @@ rtc:
   use_external_ip: true
   
   # If behind 1:1 NAT, specify the public IP directly:
-  # node_ip: "152.239.115.176"
+  node_ip: "152.239.115.176"
 
   # ICE Lite (server-driven peer connections)
   ice_lite: true
@@ -97,5 +97,5 @@ turn:
 
   # Static credentials (synced with Cocorra.API appsettings.json -> LiveKit:IceServers)
   users:
-    - username: dev_turn_user
-      password: dev_turn_secret_placeholder
+    - username: APIbnoqt7M8yCA4
+      password: yGI8cGT4Mlo0H1-vrDPH4huPimLBzmNIYl600kuFpu31Rjty
