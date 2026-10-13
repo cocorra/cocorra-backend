@@ -1,308 +1,318 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cocorra API Tester - Auth</title>
-    <style>
-      body {
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        background-color: #1e1e2f;
-        color: #fff;
-        margin: 0;
-        padding: 20px;
-        display: flex;
-        gap: 20px;
-      }
-      .panel {
-        background: #2a2a40;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-      }
-      .controls {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 15px;
-        overflow-y: auto;
-        max-height: 90vh;
-      }
-      .console-panel {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-      }
-      .card {
-        background: #35354e;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 4px solid #4caf50;
-      }
-      .card h3 {
-        margin-top: 0;
-        border-bottom: 1px solid #555;
-        padding-bottom: 5px;
-      }
-      input,
-      select,
-      button {
-        width: 100%;
-        padding: 10px;
-        margin-top: 8px;
-        border-radius: 5px;
-        border: 1px solid #555;
-        background: #222;
-        color: #fff;
-        box-sizing: border-box;
-      }
-      button {
-        background: #4caf50;
-        color: white;
-        border: none;
-        cursor: pointer;
-        font-weight: bold;
-        margin-top: 15px;
-      }
-      button:hover {
-        background: #45a049;
-      }
-      .token-box {
-        word-break: break-all;
-        background: #111;
-        padding: 10px;
-        border-radius: 5px;
-        font-family: monospace;
-        color: #00ffcc;
-        font-size: 12px;
-      }
-      pre {
-        background: #111;
-        padding: 15px;
-        border-radius: 5px;
-        overflow-x: auto;
-        flex: 1;
-        color: #00ff00;
-        font-family: Consolas, monospace;
-        margin: 0;
-      }
-      .private-badge {
-        background: #ff4757;
-        color: white;
-        font-size: 10px;
-        padding: 3px 6px;
-        border-radius: 10px;
-        vertical-align: middle;
-        margin-left: 10px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="panel controls">
-      <h2>🔐 Auth Controller</h2>
 
-      <div class="card">
-        <h3>Current Token</h3>
-        <div id="currentToken" class="token-box">
-          No token yet. Please login.
-        </div>
-        <button onclick="clearToken()" style="background: #ff4757">
-          Clear Token
-        </button>
-      </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cocorra API Tester - Auth</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #1e1e2f;
+      color: #fff;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      gap: 20px;
+    }
 
-      <div class="card">
-        <h3>Login</h3>
-        <input type="email" id="loginEmail" placeholder="Email" />
-        <input type="password" id="loginPassword" placeholder="Password" />
-        <button onclick="login()">Login</button>
-      </div>
+    .panel {
+      background: #2a2a40;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
 
-      <div class="card">
-        <h3>Register [FromForm]</h3>
-        <input type="email" id="regEmail" placeholder="Email" />
-        <input type="password" id="regPassword" placeholder="Password" />
-        <input type="text" id="regFirstName" placeholder="First Name" />
-        <input type="text" id="regLastName" placeholder="Last Name" />
-        <button onclick="register()">Register</button>
-      </div>
+    .controls {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      overflow-y: auto;
+      max-height: 90vh;
+    }
 
-      <div class="card">
-        <h3>Submit MBTI <span class="private-badge">Requires Token</span></h3>
-        <input type="text" id="mbtiValue" placeholder="e.g., INTJ" />
-        <button onclick="submitMbti()">Submit MBTI</button>
-      </div>
+    .console-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
 
-      <div class="card">
-        <h3>Forgot Password</h3>
-        <input type="email" id="forgotEmail" placeholder="Email" />
-        <button onclick="forgotPassword()">Request Reset</button>
-      </div>
+    .card {
+      background: #35354e;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid #4caf50;
+    }
 
-      <div class="card">
-        <h3>
-          Update FCM Token <span class="private-badge">Requires Token</span>
-        </h3>
-        <input
-          type="text"
-          id="fcmTokenInput"
-          placeholder="Firebase Token String"
-        />
-        <button onclick="updateFcmToken()">Update FCM</button>
+    .card h3 {
+      margin-top: 0;
+      border-bottom: 1px solid #555;
+      padding-bottom: 5px;
+    }
+
+    input,
+    select,
+    button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      border-radius: 5px;
+      border: 1px solid #555;
+      background: #222;
+      color: #fff;
+      box-sizing: border-box;
+    }
+
+    button {
+      background: #4caf50;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+      margin-top: 15px;
+    }
+
+    button:hover {
+      background: #45a049;
+    }
+
+    .token-box {
+      word-break: break-all;
+      background: #111;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      color: #00ffcc;
+      font-size: 12px;
+    }
+
+    pre {
+      background: #111;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+      flex: 1;
+      color: #00ff00;
+      font-family: Consolas, monospace;
+      margin: 0;
+    }
+
+    .private-badge {
+      background: #ff4757;
+      color: white;
+      font-size: 10px;
+      padding: 3px 6px;
+      border-radius: 10px;
+      vertical-align: middle;
+      margin-left: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="panel controls">
+    <h2>🔐 Auth Controller</h2>
+
+    <div class="card">
+      <h3>Current Token</h3>
+      <div id="currentToken" class="token-box">
+        No token yet. Please login.
       </div>
+      <button onclick="clearToken()" style="background: #ff4757">
+        Clear Token
+      </button>
     </div>
 
-    <div class="panel console-panel">
-      <h2 style="margin-top: 0">💻 Server Response</h2>
-      <pre id="apiResponse">Ready to test...</pre>
+    <div class="card">
+      <h3>Login</h3>
+      <input type="email" id="loginEmail" placeholder="Email" />
+      <input type="password" id="loginPassword" placeholder="Password" />
+      <button onclick="login()">Login</button>
     </div>
 
-    <script>
-      // 1. التعديل الأول: البورت الصح بتاعك
-      const BASE_URL = "https://localhost:7232";
+    <div class="card">
+      <h3>Register [FromForm]</h3>
+      <input type="email" id="regEmail" placeholder="Email" />
+      <input type="password" id="regPassword" placeholder="Password" />
+      <input type="text" id="regFirstName" placeholder="First Name" />
+      <input type="text" id="regLastName" placeholder="Last Name" />
+      <button onclick="register()">Register</button>
+    </div>
 
-      // 2. التعديل التاني: ضفنا /Api/V1/ لكل الراوتس
-      const ROUTES = {
-        login: "/Api/V1/Authentication/Login",
-        register: "/Api/V1/Authentication/Register",
-        submitMbti: "/Api/V1/Authentication/submit-mbti",
-        forgotPassword: "/Api/V1/Authentication/forgot-password",
-        updateFcm: "/Api/V1/Authentication/update-fcm-token",
-      };
+    <div class="card">
+      <h3>Submit MBTI <span class="private-badge">Requires Token</span></h3>
+      <input type="text" id="mbtiValue" placeholder="e.g., INTJ" />
+      <button onclick="submitMbti()">Submit MBTI</button>
+    </div>
 
-      let token = localStorage.getItem("jwt_token") || "";
+    <div class="card">
+      <h3>Forgot Password</h3>
+      <input type="email" id="forgotEmail" placeholder="Email" />
+      <button onclick="forgotPassword()">Request Reset</button>
+    </div>
+
+    <div class="card">
+      <h3>
+        Update FCM Token <span class="private-badge">Requires Token</span>
+      </h3>
+      <input type="text" id="fcmTokenInput" placeholder="Firebase Token String" />
+      <button onclick="updateFcmToken()">Update FCM</button>
+    </div>
+  </div>
+
+  <div class="panel console-panel">
+    <h2 style="margin-top: 0">💻 Server Response</h2>
+    <pre id="apiResponse">Ready to test...</pre>
+  </div>
+
+  <script>
+    // 1. التعديل الأول: البورت الصح بتاعك
+    const BASE_URL = "https://localhost:7232";
+
+    // 2. التعديل التاني: ضفنا /Api/V1/ لكل الراوتس
+    const ROUTES = {
+      login: "/Api/V1/Authentication/Login",
+      register: "/Api/V1/Authentication/Register",
+      submitMbti: "/Api/V1/Authentication/submit-mbti",
+      forgotPassword: "/Api/V1/Authentication/forgot-password",
+      updateFcm: "/Api/V1/Authentication/update-fcm-token",
+    };
+
+    let token = localStorage.getItem("jwt_token") || "";
+    updateTokenDisplay();
+
+    function updateTokenDisplay() {
+      document.getElementById("currentToken").innerText = token
+        ? token
+        : "No token yet. Please login.";
+    }
+
+    function clearToken() {
+      token = "";
+      localStorage.removeItem("jwt_token");
       updateTokenDisplay();
+      logResponse("Token cleared from LocalStorage.");
+    }
 
-      function updateTokenDisplay() {
-        document.getElementById("currentToken").innerText = token
-          ? token
-          : "No token yet. Please login.";
+    function logResponse(data) {
+      const consoleBox = document.getElementById("apiResponse");
+      if (typeof data === "object") {
+        consoleBox.innerText = JSON.stringify(data, null, 4);
+      } else {
+        consoleBox.innerText = data;
       }
+    }
 
-      function clearToken() {
-        token = "";
-        localStorage.removeItem("jwt_token");
-        updateTokenDisplay();
-        logResponse("Token cleared from LocalStorage.");
-      }
+    // --- API CALLS ---
 
-      function logResponse(data) {
-        const consoleBox = document.getElementById("apiResponse");
-        if (typeof data === "object") {
-          consoleBox.innerText = JSON.stringify(data, null, 4);
-        } else {
-          consoleBox.innerText = data;
+    async function login() {
+      const email = document.getElementById("loginEmail").value;
+      const password = document.getElementById("loginPassword").value;
+
+      try {
+        const response = await fetch(`${BASE_URL}${ROUTES.login}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await response.json();
+        logResponse(data);
+
+        // 3. التعديل التالت: قراءة التوكن من data.token مباشرة بناءً على شكل الرد في Swagger
+        if (response.ok && data.succeeded) {
+          token = data.token; // 👈 التعديل هنا
+          localStorage.setItem("jwt_token", token);
+          updateTokenDisplay();
         }
+      } catch (error) {
+        logResponse("Error: " + error);
       }
+    }
 
-      // --- API CALLS ---
+    async function register() {
+      const formData = new FormData();
+      formData.append("Email", document.getElementById("regEmail").value);
+      formData.append(
+        "Password",
+        document.getElementById("regPassword").value,
+      );
+      formData.append(
+        "FirstName",
+        document.getElementById("regFirstName").value,
+      );
+      formData.append(
+        "LastName",
+        document.getElementById("regLastName").value,
+      );
 
-      async function login() {
-        const email = document.getElementById("loginEmail").value;
-        const password = document.getElementById("loginPassword").value;
-
-        try {
-          const response = await fetch(`${BASE_URL}${ROUTES.login}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, password }),
-          });
-
-          const data = await response.json();
-          logResponse(data);
-
-          // 3. التعديل التالت: قراءة التوكن من data.token مباشرة بناءً على شكل الرد في Swagger
-          if (response.ok && data.succeeded) {
-            token = data.token; // 👈 التعديل هنا
-            localStorage.setItem("jwt_token", token);
-            updateTokenDisplay();
-          }
-        } catch (error) {
-          logResponse("Error: " + error);
-        }
+      try {
+        const response = await fetch(`${BASE_URL}${ROUTES.register}`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+        logResponse(data);
+      } catch (error) {
+        logResponse("Error: " + error);
       }
+    }
 
-      async function register() {
-        const formData = new FormData();
-        formData.append("Email", document.getElementById("regEmail").value);
-        formData.append(
-          "Password",
-          document.getElementById("regPassword").value,
-        );
-        formData.append(
-          "FirstName",
-          document.getElementById("regFirstName").value,
-        );
-        formData.append(
-          "LastName",
-          document.getElementById("regLastName").value,
-        );
+    async function submitMbti() {
+      const mbti = document.getElementById("mbtiValue").value;
 
-        try {
-          const response = await fetch(`${BASE_URL}${ROUTES.register}`, {
-            method: "POST",
-            body: formData,
-          });
-          const data = await response.json();
-          logResponse(data);
-        } catch (error) {
-          logResponse("Error: " + error);
-        }
+      try {
+        const response = await fetch(`${BASE_URL}${ROUTES.submitMbti}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ mbti: mbti }),
+        });
+        const data = await response.json();
+        logResponse(data);
+      } catch (error) {
+        logResponse("Error: " + error);
       }
+    }
 
-      async function submitMbti() {
-        const mbti = document.getElementById("mbtiValue").value;
+    async function forgotPassword() {
+      const email = document.getElementById("forgotEmail").value;
 
-        try {
-          const response = await fetch(`${BASE_URL}${ROUTES.submitMbti}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ mbti: mbti }),
-          });
-          const data = await response.json();
-          logResponse(data);
-        } catch (error) {
-          logResponse("Error: " + error);
-        }
+      try {
+        const response = await fetch(`${BASE_URL}${ROUTES.forgotPassword}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        const data = await response.json();
+        logResponse(data);
+      } catch (error) {
+        logResponse("Error: " + error);
       }
+    }
 
-      async function forgotPassword() {
-        const email = document.getElementById("forgotEmail").value;
+    async function updateFcmToken() {
+      const fcmToken = document.getElementById("fcmTokenInput").value;
 
-        try {
-          const response = await fetch(`${BASE_URL}${ROUTES.forgotPassword}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email }),
-          });
-          const data = await response.json();
-          logResponse(data);
-        } catch (error) {
-          logResponse("Error: " + error);
-        }
+      try {
+        const response = await fetch(`${BASE_URL}${ROUTES.updateFcm}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(fcmToken),
+        });
+        const data = await response.json();
+        logResponse(data);
+      } catch (error) {
+        logResponse("Error: " + error);
       }
+    }
+  </script>
+</body>
 
-      async function updateFcmToken() {
-        const fcmToken = document.getElementById("fcmTokenInput").value;
-
-        try {
-          const response = await fetch(`${BASE_URL}${ROUTES.updateFcm}`, {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(fcmToken),
-          });
-          const data = await response.json();
-          logResponse(data);
-        } catch (error) {
-          logResponse("Error: " + error);
-        }
-      }
-    </script>
-  </body>
 </html>
