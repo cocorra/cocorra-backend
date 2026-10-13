@@ -158,13 +158,14 @@ namespace Cocorra.API.Hubs
             return result;
         }
 
-        private static string ResolveDisplayName(ApplicationUser? user)
+        private static string ResolveDisplayName(ApplicationUser? user, string fallback = "User")
         {
-            if (user == null) return "User";
+            if (user == null) return fallback;
             var fullName = $"{user.FirstName} {user.LastName}".Trim();
             if (!string.IsNullOrWhiteSpace(fullName)) return fullName;
-            if (!string.IsNullOrWhiteSpace(user.UserName)) return user.UserName;
-            return "User";
+            if (!string.IsNullOrWhiteSpace(user.UserName)) return user.UserName.Trim();
+            if (!string.IsNullOrWhiteSpace(user.Email)) return user.Email.Trim();
+            return fallback;
         }
 
         /// <summary>
@@ -399,7 +400,7 @@ namespace Cocorra.API.Hubs
 
             var isHost = room.HostId == userId;
             var isOnStage = isHost || participant.IsOnStage;
-            var displayName = ResolveDisplayName(participant.User);
+            var displayName = ResolveDisplayName(participant.User, fallback: isHost ? "Host" : "User");
 
             await Clients.Group(roomId).SendAsync("UserJoined", new
             {
