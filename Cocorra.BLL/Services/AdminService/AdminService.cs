@@ -502,5 +502,114 @@ namespace Cocorra.BLL.Services.AdminService
 
             return Success(result, message: message);
         }
+
+        public async Task<Response<BroadcastNotificationResultDto>> BroadcastNotificationAsync(
+            SendBroadcastNotificationDto model, Guid adminId)
+        {
+            if (model == null)
+                return BadRequest<BroadcastNotificationResultDto>("Request model cannot be null.");
+
+            if (string.IsNullOrWhiteSpace(model.Title))
+                return BadRequest<BroadcastNotificationResultDto>("Title is required.");
+
+            var body = model.Body;
+            if (string.IsNullOrWhiteSpace(body))
+                return BadRequest<BroadcastNotificationResultDto>("Notification body or message is required.");
+
+            var query = _context.Users.AsNoTracking();
+
+            if (model.TargetStatus.HasValue)
+            {
+                query = query.Where(u => u.Status == model.TargetStatus.Value);
+            }
+            else
+            {
+                // By default, exclude banned and rejected accounts
+                query = query.Where(u => u.Status != UserStatus.Banned && u.Status != UserStatus.Rejected);
+            }
+
+            var targetUsers = await query
+                .Select(u => new { u.Id, u.FcmToken })
+                .ToListAsync();
+
+            if (targetUsers.Count == 0)
+            {
+                return Success(new BroadcastNotificationResultDto
+                {
+                    TotalTargetUsers = 0,
+                    TokensCount = 0,
+                    SuccessCount = 0,
+                    FailureCount = 0,
+                    InAppNotificationsCreated = 0
+                }, message: "No eligible users found to notify.");
+            }
+
+            var fcmTokens = targetUsers
+                .Where(u => !string.IsNullOrWhiteSpace(u.FcmToken))
+                .Select(u => u.FcmToken!)
+                .Distinct()
+                .ToList();
+
+            int inAppCount = 0;
+            if (model.SaveInAppNotification)
+            {
+                var now = DateTime.UtcNow;
+                var inAppNotifications = targetUsers.Select(u => new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = u.Id,
+                    Title = model.Title,
+                    Message = body,
+                    Type = NotificationType.System,
+                    IsRead = false,
+                    CreatedAt = now
+                }).ToList();
+
+                await _notificationRepo.AddRangeAsync(inAppNotifications);
+                inAppCount = inAppNotifications.Count;
+            }
+
+            int successCount = 0;
+            int failureCount = 0;
+
+            if (fcmTokens.Count > 0)
+            {
+                var pushResult = await _pushService.SendMulticastPushNotificationAsync(
+                    fcmTokens,
+                    model.Title,
+                    body,
+                    model.Data);
+
+                successCount = pushResult.SuccessCount;
+                failureCount = pushResult.FailureCount;
+            }
+
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.NotificationBroadcastSent,
+                adminId,
+                null,
+                null,
+                new
+                {
+                    title = model.Title,
+                    body,
+                    targetUsersCount = targetUsers.Count,
+                    tokensCount = fcmTokens.Count,
+                    successCount,
+                    failureCount,
+                    inAppNotificationsCreated = inAppCount
+                }));
+
+            var resultDto = new BroadcastNotificationResultDto
+            {
+                TotalTargetUsers = targetUsers.Count,
+                TokensCount = fcmTokens.Count,
+                SuccessCount = successCount,
+                FailureCount = failureCount,
+                InAppNotificationsCreated = inAppCount
+            };
+
+            return Success(resultDto, message: $"Broadcast notification sent to {fcmTokens.Count} token(s) and saved for {inAppCount} user(s).");
+        }
     }
 }

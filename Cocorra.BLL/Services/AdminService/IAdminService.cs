@@ -23,5 +23,9 @@ namespace Cocorra.BLL.Services.AdminService
         /// <see cref="BlockDeviceAndEmailDto"/>. adminId is required for attribution (AN-011).
         /// </summary>
         Task<Response<BlockDeviceAndEmailResultDto>> BlockDeviceAndEmailAsync(BlockDeviceAndEmailDto model, Guid adminId);
+        /// <summary>
+        /// Broadcast push notification to all users registered with FCM tokens, and optionally save in-app notification records.
+        /// </summary>
+        Task<Response<BroadcastNotificationResultDto>> BroadcastNotificationAsync(SendBroadcastNotificationDto model, Guid adminId);
     }
 }

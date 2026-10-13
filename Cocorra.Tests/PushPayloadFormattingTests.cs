@@ -258,4 +258,31 @@ public class PushPayloadFormattingTests
         Assert.True(response.Succeeded);
         Assert.Equal(envelope, response.Data!.Content);
     }
+
+    [Fact]
+    public async Task SendMulticastPushNotificationAsync_EmptyTokens_ReturnsZeroCounts()
+    {
+        var service = CreatePushService();
+        var result = await service.SendMulticastPushNotificationAsync(
+            Array.Empty<string>(), "Title", "Body");
+
+        Assert.Equal(0, result.SuccessCount);
+        Assert.Equal(0, result.FailureCount);
+        Assert.Empty(result.FailedTokens);
+    }
+
+    [Fact]
+    public async Task SendMulticastPushNotificationAsync_FirebaseNotInitialized_ReturnsFailureWithoutThrowing()
+    {
+        var service = CreatePushService();
+        var tokens = new[] { "token1", "token2" };
+
+        var result = await service.SendMulticastPushNotificationAsync(
+            tokens, "Title", "Body");
+
+        // When FirebaseApp is not initialized (unit test context), it fails gracefully without throwing
+        Assert.Equal(0, result.SuccessCount);
+        Assert.Equal(2, result.FailureCount);
+        Assert.Equal(2, result.FailedTokens.Count);
+    }
 }

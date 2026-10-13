@@ -164,5 +164,29 @@ namespace Cocorra.API.Controllers
 
             return Ok(result);
         }
+
+        [HttpPost(Router.AdminRouting.BroadcastNotification)]
+        [HttpPost(Router.AdminRouting.Prefix + "/Notifications/Broadcast")]
+        public async Task<IActionResult> BroadcastNotification([FromBody] SendBroadcastNotificationDto model)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            if (string.IsNullOrWhiteSpace(model.Body))
+            {
+                return BadRequest(new { succeeded = false, message = "Notification body or message is required." });
+            }
+
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var adminGuid))
+            {
+                return BadRequest(new { succeeded = false, message = "Could not resolve the acting admin identity." });
+            }
+
+            var result = await _adminService.BroadcastNotificationAsync(model, adminGuid);
+            if (!result.Succeeded)
+                return StatusCode((int)result.StatusCode, result);
+
+            return Ok(result);
+        }
     }
 }
