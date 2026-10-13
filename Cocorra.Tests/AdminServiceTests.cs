@@ -37,10 +37,12 @@ public class AdminServiceTests : IDisposable
 
     public void Dispose() => _host.Dispose();
 
-    private AdminService CreateService()
+    private AdminService CreateService() => CreateService(out _);
+
+    private AdminService CreateService(out AppDbContext db)
     {
         var scope = _host.CreateScope();
-        var db = (AppDbContext)scope.ServiceProvider.GetService(typeof(AppDbContext))!;
+        db = (AppDbContext)scope.ServiceProvider.GetService(typeof(AppDbContext))!;
         _configMock.Setup(c => c["AppSettings:BaseUrl"]).Returns("https://api.cocorra.com");
 
         return new AdminService(
@@ -354,5 +356,96 @@ public class AdminServiceTests : IDisposable
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
         Assert.Contains("Cannot perform actions on an Admin account", result.Message);
+    }
+
+    [Fact]
+    public async Task BroadcastNotificationAsync_MissingTitleOrBody_ReturnsBadRequest()
+    {
+        var service = CreateService();
+        var adminId = Guid.NewGuid();
+
+        var noTitle = await service.BroadcastNotificationAsync(new SendBroadcastNotificationDto { Title = "", Body = "Hello" }, adminId);
+        Assert.False(noTitle.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, noTitle.StatusCode);
+
+        var noBody = await service.BroadcastNotificationAsync(new SendBroadcastNotificationDto { Title = "Title", Body = "" }, adminId);
+        Assert.False(noBody.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, noBody.StatusCode);
+    }
+
+    [Fact]
+    public async Task BroadcastNotificationAsync_NoEligibleUsers_ReturnsSuccessWithZeroCounts()
+    {
+        var service = CreateService(out var db);
+        var adminId = Guid.NewGuid();
+
+        var result = await service.BroadcastNotificationAsync(
+            new SendBroadcastNotificationDto { Title = "Broadcast", Body = "Hello Everyone" }, adminId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, result.Data!.TotalTargetUsers);
+        Assert.Equal(0, result.Data!.TokensCount);
+        Assert.Equal(0, result.Data!.SuccessCount);
+    }
+
+    [Fact]
+    public async Task BroadcastNotificationAsync_SuccessfulBroadcast_SendsMulticastAndSavesInAppNotifications()
+    {
+        var service = CreateService(out var db);
+        var adminId = Guid.NewGuid();
+
+        var user1 = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "user1@test.com",
+            Email = "user1@test.com",
+            Status = UserStatus.Active,
+            FcmToken = "fcm_token_1"
+        };
+        var user2 = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "user2@test.com",
+            Email = "user2@test.com",
+            Status = UserStatus.Active,
+            FcmToken = "fcm_token_2"
+        };
+        var bannedUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "banned@test.com",
+            Email = "banned@test.com",
+            Status = UserStatus.Banned,
+            FcmToken = "fcm_banned"
+        };
+
+        db.Users.AddRange(user1, user2, bannedUser);
+        await db.SaveChangesAsync();
+
+        _pushServiceMock
+            .Setup(p => p.SendMulticastPushNotificationAsync(
+                It.Is<IReadOnlyList<string>>(tokens => tokens.Count == 2 && tokens.Contains("fcm_token_1") && tokens.Contains("fcm_token_2")),
+                "Important Update",
+                "App will update tonight",
+                null))
+            .ReturnsAsync(new MulticastPushResult(2, 0, Array.Empty<string>()));
+
+        var result = await service.BroadcastNotificationAsync(new SendBroadcastNotificationDto
+        {
+            Title = "Important Update",
+            Body = "App will update tonight",
+            SaveInAppNotification = true
+        }, adminId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, result.Data!.TotalTargetUsers);
+        Assert.Equal(2, result.Data!.TokensCount);
+        Assert.Equal(2, result.Data!.SuccessCount);
+        Assert.Equal(0, result.Data!.FailureCount);
+        Assert.Equal(2, result.Data!.InAppNotificationsCreated);
+
+        _notificationRepoMock.Verify(n => n.AddRangeAsync(
+            It.Is<ICollection<Notification>>(notifs => notifs.Count == 2 && notifs.All(x => x.Title == "Important Update"))),
+            Times.Once);
     }
 }

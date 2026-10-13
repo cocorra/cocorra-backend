@@ -382,4 +382,55 @@ public class AdminControllerTests
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(404, status.StatusCode);
     }
+
+    [Fact]
+    public async Task BroadcastNotification_ValidModel_CallsServiceAndReturnsOk()
+    {
+        var adminId = Guid.NewGuid();
+        var controller = CreateController(adminId: adminId);
+        var model = new SendBroadcastNotificationDto
+        {
+            Title = "System Notice",
+            Body = "Welcome to the new release"
+        };
+
+        var expectedResult = new Response<BroadcastNotificationResultDto>
+        {
+            Succeeded = true,
+            StatusCode = System.Net.HttpStatusCode.OK,
+            Data = new BroadcastNotificationResultDto
+            {
+                TotalTargetUsers = 10,
+                TokensCount = 8,
+                SuccessCount = 8,
+                FailureCount = 0,
+                InAppNotificationsCreated = 10
+            }
+        };
+
+        _adminServiceMock
+            .Setup(s => s.BroadcastNotificationAsync(model, adminId))
+            .ReturnsAsync(expectedResult);
+
+        var result = await controller.BroadcastNotification(model);
+
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(expectedResult, okResult.Value);
+    }
+
+    [Fact]
+    public async Task BroadcastNotification_EmptyBody_ReturnsBadRequest()
+    {
+        var controller = CreateController();
+        var model = new SendBroadcastNotificationDto
+        {
+            Title = "System Notice",
+            Body = ""
+        };
+
+        var result = await controller.BroadcastNotification(model);
+
+        var badResult = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.NotNull(badResult.Value);
+    }
 }

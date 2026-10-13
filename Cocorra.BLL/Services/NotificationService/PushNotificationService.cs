@@ -9,6 +9,7 @@ using EventTypes = Cocorra.DAL.Models.EventTypes;
 using FirebaseAdmin.Messaging;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Cocorra.BLL.Services.NotificationService
 {
@@ -199,6 +200,139 @@ namespace Cocorra.BLL.Services.NotificationService
                 // Catch-all so callers can await this without their own try/catch.
                 _logger.LogError(ex, "FCM push FAILED with unexpected exception. Type: {Type}", type);
             }
+        }
+
+        /// <summary>
+        /// Sends push notifications to multiple FCM registration tokens in batches (max 500 per batch per Firebase spec).
+        /// Never throws: errors are logged internally and captured in the returned <see cref="MulticastPushResult"/>.
+        /// </summary>
+        public async Task<MulticastPushResult> SendMulticastPushNotificationAsync(
+            IReadOnlyList<string> fcmTokens,
+            string title,
+            string body,
+            Dictionary<string, string>? data = null)
+        {
+            var type = data?.GetValueOrDefault("type", "system_broadcast") ?? "system_broadcast";
+            var correlationId = Guid.NewGuid();
+
+            var validTokens = fcmTokens
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct()
+                .ToList();
+
+            if (validTokens.Count == 0)
+            {
+                _logger.LogWarning("FCM multicast skipped: token list is empty. Type: {Type}", type);
+                return new MulticastPushResult(0, 0, Array.Empty<string>());
+            }
+
+            TrackAttempt(null, correlationId, type);
+
+            if (FirebaseMessaging.DefaultInstance == null)
+            {
+                TrackResult(null, correlationId, type, success: false,
+                    errorCode: "firebase_not_initialised", tokenInvalidated: false, latencyMs: 0);
+
+                _logger.LogError(
+                    "FCM multicast push FAILED: FirebaseMessaging.DefaultInstance is null. " +
+                    "Ensure firebase-config.json exists and FirebaseApp.Create() succeeded at startup. Type: {Type}",
+                    type);
+                return new MulticastPushResult(0, validTokens.Count, validTokens);
+            }
+
+            var displayBody = BuildDisplayBody(body, type);
+            var hasAlert = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(displayBody);
+
+            var payloadData = data is null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(data);
+
+            if (hasAlert)
+            {
+                payloadData["title"] = title ?? string.Empty;
+                payloadData["body"] = displayBody ?? string.Empty;
+            }
+            payloadData.TryAdd("type", type);
+
+            int totalSuccess = 0;
+            int totalFailure = 0;
+            var failedTokens = new List<string>();
+
+            var stopwatch = Stopwatch.StartNew();
+
+            foreach (var batch in validTokens.Chunk(500))
+            {
+                var multicastMessage = new MulticastMessage
+                {
+                    Tokens = batch,
+                    Data = payloadData,
+                    Android = new AndroidConfig
+                    {
+                        Priority = Priority.High
+                    },
+                    Apns = new ApnsConfig
+                    {
+                        Headers = new Dictionary<string, string>
+                        {
+                            { "apns-push-type", hasAlert ? "alert" : "background" },
+                            { "apns-priority", hasAlert ? "10" : "5" }
+                        },
+                        Aps = new Aps
+                        {
+                            ContentAvailable = !hasAlert
+                        }
+                    }
+                };
+
+                if (hasAlert)
+                {
+                    multicastMessage.Notification = new Notification
+                    {
+                        Title = title,
+                        Body = displayBody
+                    };
+                }
+
+                try
+                {
+                    var response = await FirebaseMessaging.DefaultInstance.SendEachForMulticastAsync(multicastMessage);
+                    totalSuccess += response.SuccessCount;
+                    totalFailure += response.FailureCount;
+
+                    for (int i = 0; i < response.Responses.Count; i++)
+                    {
+                        var sendResp = response.Responses[i];
+                        if (!sendResp.IsSuccess)
+                        {
+                            failedTokens.Add(batch[i]);
+                            if (sendResp.Exception is FirebaseMessagingException fme)
+                            {
+                                _logger.LogWarning("FCM multicast token failed. Error: {ErrorCode}, Token: ...{TokenSuffix}",
+                                    fme.MessagingErrorCode,
+                                    batch[i].Length > 8 ? batch[i][^8..] : batch[i]);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "FCM multicast batch failed with unexpected exception.");
+                    totalFailure += batch.Length;
+                    failedTokens.AddRange(batch);
+                }
+            }
+
+            stopwatch.Stop();
+
+            TrackResult(null, correlationId, type, success: totalFailure == 0,
+                errorCode: totalFailure > 0 ? "partial_or_full_multicast_failure" : null,
+                tokenInvalidated: false, latencyMs: stopwatch.ElapsedMilliseconds);
+
+            _logger.LogInformation(
+                "FCM multicast completed: {TotalSuccess} succeeded, {TotalFailure} failed out of {TotalTokens} tokens in {LatencyMs}ms.",
+                totalSuccess, totalFailure, validTokens.Count, stopwatch.ElapsedMilliseconds);
+
+            return new MulticastPushResult(totalSuccess, totalFailure, failedTokens);
         }
 
         /// <summary>

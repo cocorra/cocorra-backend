@@ -42,6 +42,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string InviteStats = Prefix + "/Invites/Stats";  // GET ?from=&to=&roomId=&inviterUserId=
             public const string SystemLogs = Prefix + "/SystemLogs";      // GET ?level=&search=&from=&to=&pageNumber=&pageSize=
             public const string AuditLogs = Prefix + "/AuditLogs";        // GET ?action=&actorUserId=&targetUserId=&search=&from=&to=&pageNumber=&pageSize=
+            public const string BroadcastNotification = Prefix + "/BroadcastNotification"; // POST
         }
         public static class RolesRouting
         {
