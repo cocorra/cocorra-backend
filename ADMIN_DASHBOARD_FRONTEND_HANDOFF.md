@@ -43,6 +43,7 @@ Three roles interact with system administration. Authorization is enforced at th
 | **Change user status** (verify/ban/reject/re-record) | `PUT /Admin/User/ChangeStatus/{id}` | ✅* | ✅* | ❌ |
 | **Bulk change user status** | `PUT /Admin/Users/BulkChangeStatus` | ✅* | ✅* | ❌ |
 | **Block device + email** (hard ban) | `POST /Admin/BlockDeviceAndEmail` | ✅* | ✅* | ❌ |
+| **Broadcast push notification** (FCM + In-App) | `POST /Admin/BroadcastNotification` | ✅ | ✅ | ❌ |
 | View / filter reports | `GET /Support/admin/reports` | ✅ | ✅ | ❌ |
 | Update report status | `PUT /Support/admin/reports/{id}/status` | ✅ | ✅ | ❌ |
 | Take action on report | `POST /Support/admin/reports/{id}/action` | ✅* | ✅* | ❌ |
@@ -84,6 +85,7 @@ Three roles interact with system administration. Authorization is enforced at th
   /admin/dashboard                      → DashboardOverviewComponent   (stats cards; analytics hidden for Moderator)
   /admin/users                          → UsersListComponent           (grid: search + pagination)
   /admin/users/:id                      → UserDetailsComponent         (profile, voice player, status actions)
+  /admin/notifications/broadcast        → BroadcastNotificationComponent (Admin & Moderator)
   /admin/reports                        → ReportsListComponent         (Admin & Moderator)
   /admin/reports/:id                    → ReportDetailComponent        (Admin & Moderator)
   /admin/support                        → SupportInboxComponent        (Admin & Moderator, SignalR live)
@@ -101,6 +103,7 @@ Three roles interact with system administration. Authorization is enforced at th
 **Smart / Container components** (own state, API calls, pagination, RBAC decisions):
 - `UsersListComponent` — holds `search`, `page`, `pageSize`, `totalCount`; calls the users query; owns optimistic grid updates after mutations.
 - `UserDetailsComponent` — fetches one user, orchestrates the ChangeStatus / BlockDevice commands, reacts to results.
+- `BroadcastNotificationComponent` — owns the broadcast push notification form (title, body, targetStatus, in-app toggle, payload data), calls `POST /Api/V1/Admin/BroadcastNotification`, presents confirmation modal, and displays delivery outcome stats.
 - `AnalyticsComponent` — owns the shared `from`/`to`/`granularity` filter state and fans out to the analytics endpoints.
 - `ReportsListComponent`, `SupportInboxComponent` — own their grids and SignalR subscriptions.
 
@@ -336,12 +339,64 @@ Sets user → Banned, locks out, invalidates the refresh token, clears the FCM t
 - **Errors:** self-block → `400`; user not found → `404`; malformed/missing email → `400` with the ASP.NET `ModelState` shape.
 - Patch the row's `status` to `Banned` in the grid store on success.
 
-### 5.4 Report moderation (Admin only)
+### 5.4 Broadcast Push Notifications — `POST /Api/V1/Admin/BroadcastNotification`
+Auth: **`Admin` or `Moderator`**.
+Alternative route: `POST /Api/V1/Admin/Notifications/Broadcast`.
+
+Sends a multicast push notification to all Firebase-registered devices in batches of up to 500, and optionally stores in-app `Notification` rows (Type: `NotificationType.System`) in the database.
+
+**Payload (`SendBroadcastNotificationDto`):**
+```json
+{
+  "title": "New feature available! 🚀",
+  "body": "Check out our updated live rooms experience.",
+  "data": {
+    "type": "system_broadcast",
+    "route": "/rooms"
+  },
+  "targetStatus": "Active",
+  "saveInAppNotification": true
+}
+```
+
+- `title` — required string (max 100 chars).
+- `body` (or `message`) — required string (max 500 chars).
+- `data` — optional dictionary of string key-values sent to client handlers.
+- `targetStatus` — optional string enum (`"Active" | "Pending" | "ReRecord"`). When omitted (`null`), broadcasts to all non-banned, non-rejected users.
+- `saveInAppNotification` — boolean (default `true`). Creates in-app `Notification` rows so users see the announcement in their in-app notification center.
+
+**Response (`Response<BroadcastNotificationResultDto>`):**
+```json
+{
+  "statusCode": 200,
+  "succeeded": true,
+  "message": "Broadcast notification sent to 150 token(s) and saved for 150 user(s).",
+  "errors": null,
+  "data": {
+    "totalTargetUsers": 150,
+    "tokensCount": 150,
+    "successCount": 150,
+    "failureCount": 0,
+    "inAppNotificationsCreated": 150
+  }
+}
+```
+
+**Angular UI handling directives:**
+- Provide live character counters for `title` (0/100) and `body` (0/500).
+- Include a **Confirm Modal** showing audience size before firing (e.g., *"Are you sure you want to broadcast this message to all eligible users?"*).
+- Disable the submit button and show a spinner while sending.
+- On success, display a summary card/toast indicating:
+  - Total users targeted.
+  - FCM tokens reached & successful push deliveries.
+  - In-app notification records created.
+
+### 5.5 Report moderation (Admin only)
 - **Update status** — `PUT /Api/V1/Support/admin/reports/{id}/status`, body `UpdateReportStatusDto { status }`.
 - **Take action** — `POST /Api/V1/Support/admin/reports/{id}/action`, body `TakeReportActionDto` (uses `AdminReportAction` enum — send as its **string** name).
 - Both use `ModelState` validation → invalid body returns `400` with the ASP.NET `ModelState` dictionary (different shape from `Response<T>` — handle both error shapes in the HTTP interceptor).
 
-### 5.5 Role management (Admin only)
+### 5.6 Role management (Admin only)
 - `POST /Api/V1/Roles/ManageUser` — `ManageUserRolesDto` to assign/revoke a user's roles.
 - `GET /Api/V1/Roles/List`, `/Roles/Users/{roleName}` for pickers.
 
@@ -386,6 +441,7 @@ Sets user → Banned, locks out, invalidates the refresh token, clears the FCM t
 | PUT | `/Api/V1/Admin/User/ChangeStatus/{id}` | Admin | Change status (body `{newStatus:"Banned"}`) |
 | PUT | `/Api/V1/Admin/Users/BulkChangeStatus` | Admin | Bulk change status (partial success) |
 | POST | `/Api/V1/Admin/BlockDeviceAndEmail` | Admin | Hard ban (body `{email}` **only** — see §5.3) |
+| POST | `/Api/V1/Admin/BroadcastNotification` | Admin, Moderator | Broadcast push notifications & in-app sync (§5.4) |
 | GET | `/Api/V1/Admin/Dashboard/Stats` | Admin, Coach | KPI cards |
 | GET | `/Api/V1/Analytics/*` | Admin, Coach | Analytics (see §4) |
 | GET | `/Api/V1/Support/admin/reports?category=&status=` | Admin | Reports grid |
