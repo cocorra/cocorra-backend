@@ -51,6 +51,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string GetRoleById = Prefix + "/{id}";            // GET
             public const string Create = Prefix + "/Create";               // POST
             public const string Update = Prefix + "/Update";               // PUT
+            public const string UpdateDisplayName = Prefix + "/{id}/DisplayName"; // PUT
             public const string Delete = Prefix + "/Delete/{id}";          // DELETE
             public const string ManageUserRoles = Prefix + "/ManageUser";  // POST
             public const string GetUsersInRole = Prefix + "/Users/{roleName}"; // GET

@@ -752,6 +752,27 @@ namespace Cocorra.DAL.Migrations
                     b.ToTable("Reports");
                 });
 
+            modelBuilder.Entity("Cocorra.DAL.Models.RoleDisplayName", b =>
+                {
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("RoleId");
+
+                    b.ToTable("RoleDisplayNames");
+                });
+
             modelBuilder.Entity("Cocorra.DAL.Models.Room", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1567,6 +1588,15 @@ namespace Cocorra.DAL.Migrations
                     b.Navigation("ReportedUser");
 
                     b.Navigation("Reporter");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.RoleDisplayName", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", null)
+                        .WithOne()
+                        .HasForeignKey("Cocorra.DAL.Models.RoleDisplayName", "RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cocorra.DAL.Models.Room", b =>

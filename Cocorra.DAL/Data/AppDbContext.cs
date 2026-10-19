@@ -39,6 +39,7 @@ namespace Cocorra.DAL.Data
         public DbSet<AggregationCheckpoint> AggregationCheckpoints { get; set; }
         public DbSet<SystemLog> SystemLogs { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
+        public DbSet<RoleDisplayName> RoleDisplayNames { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -465,6 +466,14 @@ namespace Cocorra.DAL.Data
                 e.HasIndex(x => new { x.Action, x.OccurredAtUtc });
                 e.HasIndex(x => new { x.ActorUserId, x.OccurredAtUtc });
                 e.HasIndex(x => new { x.TargetUserId, x.OccurredAtUtc });
+            });
+
+            builder.Entity<RoleDisplayName>(e =>
+            {
+                e.HasOne<IdentityRole<Guid>>()
+                    .WithOne()
+                    .HasForeignKey<RoleDisplayName>(x => x.RoleId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
         }
 
