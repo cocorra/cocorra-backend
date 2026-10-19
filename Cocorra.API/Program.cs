@@ -233,6 +233,11 @@ builder.Services.AddMediatR(cfg =>
     cfg.RegisterServicesFromAssembly(typeof(Cocorra.BLL.Events.UserRequestedToJoinRoomEvent).Assembly);
 });
 builder.Services.AddScoped<INotificationService, NotificationService>();
+// Admin broadcasts save in-app notifications in the request and send the pushes in the background.
+builder.Services.AddSingleton<BroadcastPushQueue>();
+builder.Services.AddSingleton<IBroadcastPushQueue>(sp => sp.GetRequiredService<BroadcastPushQueue>());
+builder.Services.AddHostedService<BroadcastPushSender>();
+builder.Services.AddScoped<IBroadcastNotificationService, BroadcastNotificationService>();
 builder.Services.AddScoped<Cocorra.BLL.Services.RealTimeNotifier.IRealTimeNotifier, Cocorra.API.Services.SignalRNotifier>();
 builder.Services.Configure<LiveKitSettings>(builder.Configuration.GetSection("LiveKit"));
 builder.Services.AddScoped<ILiveKitService, LiveKitService>();
