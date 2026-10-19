@@ -611,13 +611,19 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
+        var dbContext = services.GetRequiredService<AppDbContext>();
+        Console.WriteLine("Applying database migrations...");
+        await dbContext.Database.MigrateAsync();
+        Console.WriteLine("Database migrations applied successfully.");
+
         await RoleSeeder.SeedRolesAsync(services);
 
         await IdentitySeeder.SeedAsync(userManager, roleManager, app.Configuration);
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"An error occurred while seeding the database: {ex.Message}");
+        Console.WriteLine($"An error occurred while migrating or seeding the database: {ex.Message}");
+        throw;
     }
 }
 // Must run first: everything below (HTTPS redirection, rate limiting) reads the client IP/scheme.
