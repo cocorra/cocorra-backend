@@ -58,7 +58,8 @@ public class RolesServiceAuditTests : IDisposable
         var scope = _services.CreateScope();
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var service = new RolesService(roleMgr, userMgr, _auditLogMock.Object);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = new RolesService(roleMgr, userMgr, _auditLogMock.Object, db);
         return (service, roleMgr, userMgr);
     }
 
@@ -241,6 +242,77 @@ public class RolesServiceAuditTests : IDisposable
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
         Assert.Contains("Failed to create user", result.Message);
+        _auditLogMock.Verify(a => a.RecordAsync(It.IsAny<AuditEntry>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateRoleDisplayNameAsync_SetThenReset_KeepsRoleNameAndRecordsEachChange()
+    {
+        var (service, roleMgr, _) = CreateService();
+        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
+        var coach = await roleMgr.FindByNameAsync("Coach");
+        var actorUserId = Guid.NewGuid();
+
+        var captured = new List<AuditEntry>();
+        _auditLogMock.Setup(a => a.RecordAsync(It.IsAny<AuditEntry>()))
+            .Callback<AuditEntry>(e => captured.Add(e))
+            .Returns(Task.CompletedTask);
+
+        var set = await service.UpdateRoleDisplayNameAsync(coach!.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "  Mentor  " }, actorUserId);
+
+        Assert.True(set.Succeeded);
+        Assert.Equal("Coach", set.Data!.Name);
+        Assert.Equal("Mentor", set.Data.DisplayName);
+        Assert.True(await roleMgr.RoleExistsAsync("Coach"));
+
+        var listed = await service.GetRolesAsync();
+        Assert.Contains(listed.Data!, r => r.Name == "Coach" && r.DisplayName == "Mentor");
+
+        var reset = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "" }, actorUserId);
+
+        Assert.True(reset.Succeeded);
+        Assert.Equal("Coach", reset.Data!.DisplayName);
+
+        Assert.Equal(2, captured.Count);
+        Assert.All(captured, e =>
+        {
+            Assert.Equal(AuditActions.RoleDisplayNameChanged, e.Action);
+            Assert.Equal(actorUserId, e.ActorUserId);
+            Assert.Null(e.TargetUserId);
+            Assert.Equal("Coach", e.TargetDisplay);
+        });
+
+        var json = JsonSerializer.Serialize(captured[1].Details, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("Mentor", doc.RootElement.GetProperty("from").GetString());
+        Assert.Equal("Coach", doc.RootElement.GetProperty("to").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateRoleDisplayNameAsync_NameShownByAnotherRole_RejectsAndRecordsNothing()
+    {
+        var (service, roleMgr, _) = CreateService();
+        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
+        await roleMgr.CreateAsync(new IdentityRole<Guid>("Moderator"));
+        var coach = await roleMgr.FindByNameAsync("Coach");
+        var moderator = await roleMgr.FindByNameAsync("Moderator");
+
+        var sameAsName = await service.UpdateRoleDisplayNameAsync(coach!.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "moderator" }, Guid.NewGuid());
+        Assert.False(sameAsName.Succeeded);
+
+        await service.UpdateRoleDisplayNameAsync(moderator!.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "Guide" }, Guid.NewGuid());
+        _auditLogMock.Invocations.Clear();
+
+        var sameAsLabel = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "GUIDE" }, Guid.NewGuid());
+        Assert.False(sameAsLabel.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, sameAsLabel.StatusCode);
+
+        var tooLong = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = new string('x', 51) }, Guid.NewGuid());
+        Assert.False(tooLong.Succeeded);
+
+        var unchanged = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "Coach" }, Guid.NewGuid());
+        Assert.False(unchanged.Succeeded);
+
         _auditLogMock.Verify(a => a.RecordAsync(It.IsAny<AuditEntry>()), Times.Never);
     }
 }

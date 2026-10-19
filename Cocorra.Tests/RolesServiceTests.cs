@@ -55,7 +55,8 @@ public class RolesServiceTests : IDisposable
         var scope = _services.CreateScope();
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var service = new RolesService(roleMgr, userMgr, new Mock<IAuditLogService>().Object);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = new RolesService(roleMgr, userMgr, new Mock<IAuditLogService>().Object, db);
         return (service, roleMgr, userMgr);
     }
 
