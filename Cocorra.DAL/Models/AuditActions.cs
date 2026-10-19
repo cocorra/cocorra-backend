@@ -13,6 +13,7 @@ namespace Cocorra.DAL.Models
         public const string UserRolesChanged = "User.RolesChanged";
         public const string UserCreatedWithRole = "User.CreatedWithRole";
         public const string NotificationBroadcastSent = "Notification.BroadcastSent";
+        public const string RoleDisplayNameChanged = "Role.DisplayNameChanged";
 
         public static readonly IReadOnlySet<string> All = new HashSet<string>
         {
@@ -20,7 +21,8 @@ namespace Cocorra.DAL.Models
             UserDeviceAndEmailBlocked,
             UserRolesChanged,
             UserCreatedWithRole,
-            NotificationBroadcastSent
+            NotificationBroadcastSent,
+            RoleDisplayNameChanged
         };
     }
 }

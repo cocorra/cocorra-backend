@@ -41,6 +41,21 @@ namespace Cocorra.API.Controllers
             return Ok(result);
         }
 
+        [HttpPut(Router.RolesRouting.UpdateDisplayName)]
+        public async Task<IActionResult> UpdateRoleDisplayName([FromRoute] string id, [FromBody] UpdateRoleDisplayNameDto model)
+        {
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var adminGuid))
+            {
+                return BadRequest(new { succeeded = false, message = UnresolvedAdminMessage });
+            }
+
+            var result = await _rolesService.UpdateRoleDisplayNameAsync(id, model, adminGuid);
+
+            if (!result.Succeeded) return BadRequest(result);
+
+            return Ok(result);
+        }
+
         [HttpPost(Router.RolesRouting.ManageUserRoles)]
         public async Task<IActionResult> ManageUserRoles([FromBody] ManageUserRolesDto model)
         {

@@ -9,6 +9,7 @@ namespace Cocorra.BLL.Services.RolesService
     {
         Task<Response<List<RoleDto>>> GetRolesAsync();
         Task<Response<RoleDto>> GetRoleByIdAsync(string roleId);
+        Task<Response<RoleDto>> UpdateRoleDisplayNameAsync(string roleId, UpdateRoleDisplayNameDto model, Guid actorUserId);
         Task<Response<string>> ManageUserRolesAsync(ManageUserRolesDto model, Guid actorUserId);
         Task<Response<List<UserDto>>> GetUsersInRoleAsync(string roleName);
         Task<Response<UserDto>> CreateUserWithRoleAsync(CreateUserDto model, Guid actorUserId);
