@@ -6,6 +6,7 @@ using Cocorra.DAL.Data;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Models.Analytics;
+using Cocorra.DAL.Time;
 using Cocorra.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -294,7 +295,7 @@ namespace Cocorra.Tests
         public async Task GetGapReportAsync_FlagsMissingDates_AndNeverInterpolates()
         {
             var service = CreateService();
-            var today = DateTime.UtcNow.Date;
+            var today = CairoTime.Today;
 
             // Capture day-5 and day-3, skipping day-4 entirely.
             await service.CaptureSnapshotAsync(today.AddDays(-5));
@@ -321,7 +322,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task GetGapReportAsync_FlagsIncompleteDates()
         {
-            var day = DateTime.UtcNow.Date.AddDays(-2);
+            var day = CairoTime.Today.AddDays(-2);
 
             using (var scope = _host.CreateScope())
             {
@@ -346,7 +347,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task GetGapReportAsync_EmptyTable_ReportsNotMeasured_RatherThanEveryDateMissing()
         {
-            var today = DateTime.UtcNow.Date;
+            var today = CairoTime.Today;
 
             var report = await CreateService().GetGapReportAsync(today.AddDays(-30), today);
 

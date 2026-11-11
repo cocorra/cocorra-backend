@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cocorra.DAL.Data;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -78,9 +79,9 @@ namespace Cocorra.BLL.Services.Analytics
             bool force = false,
             CancellationToken cancellationToken = default)
         {
-            var from = fromDate.Date;
-            var to = toDate.Date;
-            var today = DateTime.UtcNow.Date;
+            var from = CairoTime.CalendarDateOf(fromDate);
+            var to = CairoTime.CalendarDateOf(toDate);
+            var today = CairoTime.Today;
 
             if (to > today)
             {

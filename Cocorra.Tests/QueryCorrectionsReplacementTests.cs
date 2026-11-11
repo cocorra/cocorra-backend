@@ -72,7 +72,7 @@ namespace Cocorra.Tests
                 var result = await CreateRepository(scope)
                     .GetWeeklyReturnRateAsync(week1.AddDays(-7), week3.AddDays(7));
 
-                var firstCohort = result.Cohorts.First(c => c.WeekStartUtc == week1.Date);
+                var firstCohort = result.Cohorts.First(c => c.WeekStart == week1.Date);
 
                 Assert.Equal(2, firstCohort.CohortSize);
                 Assert.Equal(1, firstCohort.ReturnedInLaterWeek);
@@ -125,7 +125,7 @@ namespace Cocorra.Tests
                 var result = await CreateRepository(scope)
                     .GetWeeklyReturnRateAsync(week1.AddDays(-7), week1.AddDays(14));
 
-                var firstCohort = result.Cohorts.First(c => c.WeekStartUtc == week1.Date);
+                var firstCohort = result.Cohorts.First(c => c.WeekStart == week1.Date);
 
                 Assert.Equal(1, firstCohort.CohortSize);
                 Assert.Equal(1, firstCohort.ReturnedInLaterWeek);

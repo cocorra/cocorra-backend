@@ -1,5 +1,6 @@
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS.AnalyticsDto;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -22,8 +23,8 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             DateTime toUtc,
             bool compareToPreviousPeriod)
         {
-            var fromDate = fromUtc.Date;
-            var toDate = toUtc.Date;
+            var fromDate = CairoTime.DateOf(fromUtc);
+            var toDate = CairoTime.DateOf(toUtc);
 
             // Equal-length preceding window, immediately adjacent. Comparing a 7-day period to a
             // 30-day one would produce a delta that is arithmetic rather than meaningful.
@@ -36,10 +37,10 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 From = fromUtc,
                 To = toUtc,
                 HasComparison = compareToPreviousPeriod,
-                PreviousFrom = compareToPreviousPeriod ? prevFromDate : null,
-                PreviousTo = compareToPreviousPeriod ? prevToDate.AddDays(1).AddTicks(-1) : null,
-                // "To" inside today means the window is still accumulating.
-                IsPartialPeriod = toUtc >= DateTime.UtcNow.Date
+                PreviousFrom = compareToPreviousPeriod ? CairoTime.StartOfDayUtc(prevFromDate) : null,
+                PreviousTo = compareToPreviousPeriod ? CairoTime.StartOfDayUtc(fromDate).AddTicks(-1) : null,
+                // "To" inside the current Cairo day means the window is still accumulating.
+                IsPartialPeriod = toUtc >= CairoTime.StartOfDayUtc(CairoTime.Today)
             };
 
             var earliest = await _context.DailyPlatformMetrics

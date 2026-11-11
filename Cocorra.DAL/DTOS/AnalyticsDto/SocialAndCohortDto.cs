@@ -82,7 +82,8 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
     /// <summary>AN-038 / M-103: weekly cohort retention grid.</summary>
     public class CohortGridRowDto
     {
-        public DateTime CohortWeekStartUtc { get; set; }
+        /// <summary>Cairo calendar date of the Monday that opens the cohort week.</summary>
+        public DateTime CohortWeekStart { get; set; }
         public int CohortSize { get; set; }
 
         /// <summary>

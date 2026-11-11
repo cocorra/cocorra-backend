@@ -57,11 +57,11 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
         public double? P90Hours { get; set; }
         public double? P99Hours { get; set; }
 
-        /// <summary>Latency split by the UTC day of week the submission arrived.</summary>
-        public IEnumerable<ReviewLatencyByBucketDto> ByDayOfWeekUtc { get; set; } = [];
+        /// <summary>Latency split by the Cairo day of week the submission arrived.</summary>
+        public IEnumerable<ReviewLatencyByBucketDto> ByDayOfWeek { get; set; } = [];
 
-        /// <summary>Latency split by the UTC hour the submission arrived.</summary>
-        public IEnumerable<ReviewLatencyByBucketDto> ByHourUtc { get; set; } = [];
+        /// <summary>Latency split by the Cairo hour the submission arrived.</summary>
+        public IEnumerable<ReviewLatencyByBucketDto> ByHour { get; set; } = [];
 
         /// <summary>
         /// Current pending-verification queue depth from the daily state snapshot, so a reader

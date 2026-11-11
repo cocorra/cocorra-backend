@@ -117,7 +117,6 @@ namespace Cocorra.Tests
                     ["Analytics:EnableNewEventEmission"] = "true",
                     ["Analytics:EnableHighFrequencyEvents"] = "true",
                     ["Analytics:EventChannelCapacity"] = "25000",
-                    ["Analytics:DisplayTimeZoneOffsetMinutes"] = "120",
                     ["Analytics:RawEventRetentionDays"] = "90"
                 })
                 .Build();
@@ -130,7 +129,6 @@ namespace Cocorra.Tests
             Assert.True(options.EnableNewEventEmission);
             Assert.True(options.EnableHighFrequencyEvents);
             Assert.Equal(25000, options.EventChannelCapacity);
-            Assert.Equal(120, options.DisplayTimeZoneOffsetMinutes);
             Assert.Equal(90, options.RawEventRetentionDays);
         }
 
@@ -144,10 +142,6 @@ namespace Cocorra.Tests
             // channel — the one failure mode the staged activation exists to prevent.
             Assert.False(options.EnableNewEventEmission);
             Assert.False(options.EnableHighFrequencyEvents);
-
-            // A missing display offset must fall back to the documented default, not to 0.
-            // Silently falling back to UTC is the failure AN-036 exists to prevent.
-            Assert.Equal(AnalyticsDisplayDefaults.TimeZoneOffsetMinutes, options.DisplayTimeZoneOffsetMinutes);
 
             Assert.Equal(180, options.RawEventRetentionDays);
             Assert.Equal(10_000, options.EventChannelCapacity);

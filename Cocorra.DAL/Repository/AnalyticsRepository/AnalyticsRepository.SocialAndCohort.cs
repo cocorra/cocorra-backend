@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Models;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -198,9 +199,9 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
 
             var weeksByUser = joins
                 .GroupBy(j => j.UserId)
-                .ToDictionary(g => g.Key, g => g.Select(j => StartOfWeekUtc(j.OccurredAtUtc)).Distinct().ToHashSet());
+                .ToDictionary(g => g.Key, g => g.Select(j => CairoTime.WeekOf(j.OccurredAtUtc)).Distinct().ToHashSet());
 
-            var allWeeks = joins.Select(j => StartOfWeekUtc(j.OccurredAtUtc)).Distinct().OrderBy(w => w).ToList();
+            var allWeeks = joins.Select(j => CairoTime.WeekOf(j.OccurredAtUtc)).Distinct().OrderBy(w => w).ToList();
             var lastWeek = allWeeks.Last();
 
             // A cohort is defined by a user's FIRST join week, so each user appears in exactly
@@ -230,7 +231,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
 
                 rows.Add(new CohortGridRowDto
                 {
-                    CohortWeekStartUtc = cohortWeek,
+                    CohortWeekStart = cohortWeek,
                     CohortSize = cohort.Count,
                     WeeklyRetentionPercent = retention
                 });

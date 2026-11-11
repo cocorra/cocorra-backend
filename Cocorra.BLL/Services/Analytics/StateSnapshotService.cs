@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models.Analytics;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -75,7 +76,7 @@ namespace Cocorra.BLL.Services.Analytics
             bool skipIfAlreadyCaptured = false,
             CancellationToken cancellationToken = default)
         {
-            var date = (targetDate ?? DateTime.UtcNow).Date;
+            var date = targetDate.HasValue ? CairoTime.CalendarDateOf(targetDate.Value) : CairoTime.Today;
             var computedAt = DateTime.UtcNow;
 
             if (skipIfAlreadyCaptured)
@@ -130,8 +131,8 @@ namespace Cocorra.BLL.Services.Analytics
             using var scope = _serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var from = fromDate.Date;
-            var to = toDate.Date;
+            var from = CairoTime.CalendarDateOf(fromDate);
+            var to = CairoTime.CalendarDateOf(toDate);
 
             return await context.DailyStateSnapshots
                 .AsNoTracking()
@@ -150,8 +151,8 @@ namespace Cocorra.BLL.Services.Analytics
             using var scope = _serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var requestedFrom = fromDate.Date;
-            var requestedTo = toDate.Date;
+            var requestedFrom = CairoTime.CalendarDateOf(fromDate);
+            var requestedTo = CairoTime.CalendarDateOf(toDate);
 
             var earliest = await context.DailyStateSnapshots
                 .AsNoTracking()
@@ -174,7 +175,7 @@ namespace Cocorra.BLL.Services.Analytics
             }
 
             var from = requestedFrom < earliest.Value ? earliest.Value : requestedFrom;
-            var today = DateTime.UtcNow.Date;
+            var today = CairoTime.Today;
             var to = requestedTo > today ? today : requestedTo;
 
             var counts = await context.DailyStateSnapshots
@@ -322,7 +323,7 @@ namespace Cocorra.BLL.Services.Analytics
         {
             try
             {
-                var today = DateTime.UtcNow.Date;
+                var today = CairoTime.Today;
                 var report = await GetGapReportAsync(today.AddDays(-GapScanDays), today, cancellationToken);
 
                 if (!report.HasGaps)
@@ -370,7 +371,7 @@ namespace Cocorra.BLL.Services.Analytics
                     // The startup run must not overwrite an existing reading for today: it fires
                     // at whatever hour the container happened to start, and queue depth varies
                     // through the day. Scheduled runs always write.
-                    await CaptureSnapshotAsync(DateTime.UtcNow.Date, isStartupRun, stoppingToken);
+                    await CaptureSnapshotAsync(CairoTime.Today, isStartupRun, stoppingToken);
                     isStartupRun = false;
 
                     await LogGapsAsync(stoppingToken);

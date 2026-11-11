@@ -9,6 +9,7 @@ using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Models.Analytics;
 using Cocorra.DAL.Repository.AnalyticsRepository;
+using Cocorra.DAL.Time;
 using Cocorra.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -182,7 +183,7 @@ namespace Cocorra.Tests
                 Assert.Single(result.Cohorts);
 
                 var row = result.Cohorts.Single();
-                Assert.Equal(week1.Date, row.CohortWeekStartUtc);
+                Assert.Equal(week1.Date, row.CohortWeekStart);
                 Assert.Equal(1, row.CohortSize);
                 Assert.All(row.WeeklyRetentionPercent, v => Assert.Equal(100.0, v));
 
@@ -196,7 +197,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task DecisionCenter_WithoutBaseline_AssertsNothing()
         {
-            var monday = StartOfWeek(DateTime.UtcNow.Date).AddDays(-7);
+            var monday = StartOfWeek(CairoTime.Today).AddDays(-7);
 
             using (var scope = _host.CreateScope())
             {
@@ -228,7 +229,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task DecisionCenter_WithBaseline_FlagsOnlyMovesBeyondNormalVariation()
         {
-            var thisWeek = StartOfWeek(DateTime.UtcNow.Date);
+            var thisWeek = StartOfWeek(CairoTime.Today);
 
             using (var scope = _host.CreateScope())
             {

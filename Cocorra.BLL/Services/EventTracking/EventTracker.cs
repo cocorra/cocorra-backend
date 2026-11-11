@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Cocorra.BLL.Base;
 using Cocorra.DAL.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -12,6 +13,12 @@ namespace Cocorra.BLL.Services.EventTracking
 {
     public class EventTracker : IEventTracker
     {
+        // Default property naming is kept: stored payloads are read back by their existing keys.
+        private static readonly JsonSerializerOptions PropertiesJsonOptions = new()
+        {
+            Converters = { new UtcDateTimeJsonConverter() }
+        };
+
         private readonly Channel<UserEvent> _queue;
         private readonly ILogger<EventTracker> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
@@ -106,7 +113,7 @@ namespace Cocorra.BLL.Services.EventTracking
                     }
                 }
 
-                var propertiesJson = properties is null ? null : JsonSerializer.Serialize(properties);
+                var propertiesJson = properties is null ? null : JsonSerializer.Serialize(properties, PropertiesJsonOptions);
 
                 // Deterministic EventId derivation if caller provided natural eventKey
                 var eventId = !string.IsNullOrWhiteSpace(eventKey)

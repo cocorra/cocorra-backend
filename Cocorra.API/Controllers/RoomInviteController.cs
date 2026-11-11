@@ -1,3 +1,4 @@
+using Cocorra.API.Filters;
 using Cocorra.BLL.Services.RoomInviteService;
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS.RoomInviteDto;
@@ -71,6 +72,7 @@ namespace Cocorra.API.Controllers
 
         [Authorize(Roles = "Admin")]
         [HttpGet(Router.AdminRouting.InviteStats)]
+        [RequireUtcOffset]
         public async Task<IActionResult> GetStats(
             [FromQuery] DateTime? from,
             [FromQuery] DateTime? to,

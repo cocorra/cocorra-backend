@@ -8,6 +8,7 @@ using Cocorra.DAL.Data;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Models.Analytics;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -135,7 +136,7 @@ namespace Cocorra.BLL.Services.Analytics
             _logger.LogInformation("AnalyticsAggregationService: Processing {Count} events past watermark {LastId}...", rawEvents.Count, lastId);
 
             var affectedDates = rawEvents
-                .Select(e => e.OccurredAtUtc.Date)
+                .Select(e => CairoTime.DateOf(e.OccurredAtUtc))
                 .Distinct()
                 .OrderBy(d => d)
                 .ToList();
@@ -169,57 +170,57 @@ namespace Cocorra.BLL.Services.Analytics
 
         internal static async Task AggregateDailyPlatformMetricsAsync(AppDbContext db, DateTime date, CancellationToken ct)
         {
-            var nextDate = date.AddDays(1);
+            var (dayStart, dayEnd) = CairoTime.DayRangeUtc(date);
 
             // Compute counts for this date
             var roomsCreated = await db.Rooms
                 .AsNoTracking()
-                .CountAsync(r => r.CreatedAt >= date && r.CreatedAt < nextDate, ct);
+                .CountAsync(r => r.CreatedAt >= dayStart && r.CreatedAt < dayEnd, ct);
 
             var roomsLive = await db.Rooms
                 .AsNoTracking()
-                .CountAsync(r => r.CreatedAt >= date && r.CreatedAt < nextDate && r.Status != RoomStatus.Scheduled, ct);
+                .CountAsync(r => r.CreatedAt >= dayStart && r.CreatedAt < dayEnd && r.Status != RoomStatus.Scheduled, ct);
 
             var distinctHosts = await db.Rooms
                 .AsNoTracking()
-                .Where(r => r.CreatedAt >= date && r.CreatedAt < nextDate)
+                .Where(r => r.CreatedAt >= dayStart && r.CreatedAt < dayEnd)
                 .Select(r => r.HostId)
                 .Distinct()
                 .CountAsync(ct);
 
             var distinctJoiners = await db.RoomParticipants
                 .AsNoTracking()
-                .Where(p => p.JoinedAt >= date && p.JoinedAt < nextDate && p.UserId != p.Room!.HostId)
+                .Where(p => p.JoinedAt >= dayStart && p.JoinedAt < dayEnd && p.UserId != p.Room!.HostId)
                 .Select(p => p.UserId)
                 .Distinct()
                 .CountAsync(ct);
 
             var distinctSpeakers = await db.RoomParticipants
                 .AsNoTracking()
-                .Where(p => p.JoinedAt >= date && p.JoinedAt < nextDate && p.UserId != p.Room!.HostId && p.TotalSpokenSeconds > 0)
+                .Where(p => p.JoinedAt >= dayStart && p.JoinedAt < dayEnd && p.UserId != p.Room!.HostId && p.TotalSpokenSeconds > 0)
                 .Select(p => p.UserId)
                 .Distinct()
                 .CountAsync(ct);
 
             var totalSpokenSeconds = await db.RoomParticipants
                 .AsNoTracking()
-                .Where(p => p.JoinedAt >= date && p.JoinedAt < nextDate && p.UserId != p.Room!.HostId)
+                .Where(p => p.JoinedAt >= dayStart && p.JoinedAt < dayEnd && p.UserId != p.Room!.HostId)
                 .SumAsync(p => (long)p.TotalSpokenSeconds, ct);
 
             var registrations = await db.Users
                 .AsNoTracking()
-                .CountAsync(u => u.CreatedAt >= date && u.CreatedAt < nextDate, ct);
+                .CountAsync(u => u.CreatedAt >= dayStart && u.CreatedAt < dayEnd, ct);
 
             var voiceSubmitted = await db.UserEvents
                 .AsNoTracking()
-                .Where(e => e.EventType == EventTypes.VoiceVerificationSubmitted && e.OccurredAtUtc >= date && e.OccurredAtUtc < nextDate)
+                .Where(e => e.EventType == EventTypes.VoiceVerificationSubmitted && e.OccurredAtUtc >= dayStart && e.OccurredAtUtc < dayEnd)
                 .Select(e => e.UserId)
                 .Distinct()
                 .CountAsync(ct);
 
             var voiceApproved = await db.UserEvents
                 .AsNoTracking()
-                .Where(e => e.EventType == EventTypes.ActivationCompleted && e.OccurredAtUtc >= date && e.OccurredAtUtc < nextDate)
+                .Where(e => e.EventType == EventTypes.ActivationCompleted && e.OccurredAtUtc >= dayStart && e.OccurredAtUtc < dayEnd)
                 .Select(e => e.UserId)
                 .Distinct()
                 .CountAsync(ct);

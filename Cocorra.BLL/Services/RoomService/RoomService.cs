@@ -91,11 +91,17 @@ public class RoomService : ResponseHandler, IRoomService
                 return BadRequest<Guid>("Room duration must be exactly 2 or 3 hours.");
             }
 
-            var status = RoomStatus.Live;
-            if (dto.ScheduledStartDate.HasValue && dto.ScheduledStartDate > DateTime.UtcNow)
+            if (dto.ScheduledStartDate is { Kind: DateTimeKind.Unspecified })
             {
-                status = RoomStatus.Scheduled;
+                return BadRequest<Guid>(
+                    "ScheduledStartDate must include a time zone offset, for example " +
+                    "2026-11-11T20:00:00Z or 2026-11-11T22:00:00+02:00.");
             }
+
+            var now = DateTime.UtcNow;
+            var scheduledStartUtc = dto.ScheduledStartDate?.ToUniversalTime();
+            // A start time already in the past means "start now": the room goes live immediately.
+            var status = scheduledStartUtc > now ? RoomStatus.Scheduled : RoomStatus.Live;
 
             // Handle room image upload
             string? imagePath = null;
@@ -118,12 +124,12 @@ public class RoomService : ResponseHandler, IRoomService
                 IsPrivate = dto.IsPrivate,
                 SelectionMode = dto.SelectionMode,
                 HostId = hostId,
-                StartDate = dto.ScheduledStartDate ?? DateTime.UtcNow,
+                StartDate = status == RoomStatus.Scheduled ? scheduledStartUtc!.Value : now,
                 Status = status,
                 // Go-live path 1 of 2 — created directly as live. StartDate is the scheduled
                 // time and is not a substitute: see Room.WentLiveAt.
-                WentLiveAt = status == RoomStatus.Live ? DateTime.UtcNow : null,
-                CreatedAt = DateTime.UtcNow,
+                WentLiveAt = status == RoomStatus.Live ? now : null,
+                CreatedAt = now,
                 ImagePath = imagePath,
                 DurationHours = dto.DurationHours,
                 Category = dto.Category

@@ -7,6 +7,7 @@ using Cocorra.DAL.Data;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Models.Analytics;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.BLL.Services.Analytics
@@ -28,11 +29,11 @@ namespace Cocorra.BLL.Services.Analytics
         /// </summary>
         internal static async Task AggregateDailyRoomMetricsAsync(AppDbContext db, DateTime date, CancellationToken ct)
         {
-            var nextDate = date.AddDays(1);
+            var (dayStart, dayEnd) = CairoTime.DayRangeUtc(date);
 
             var roomIds = await db.RoomParticipants
                 .AsNoTracking()
-                .Where(p => p.JoinedAt >= date && p.JoinedAt < nextDate)
+                .Where(p => p.JoinedAt >= dayStart && p.JoinedAt < dayEnd)
                 .Select(p => p.RoomId)
                 .Distinct()
                 .ToListAsync(ct);
@@ -57,7 +58,7 @@ namespace Cocorra.BLL.Services.Analytics
 
             var participantStats = await db.RoomParticipants
                 .AsNoTracking()
-                .Where(p => p.JoinedAt >= date && p.JoinedAt < nextDate && p.UserId != p.Room!.HostId)
+                .Where(p => p.JoinedAt >= dayStart && p.JoinedAt < dayEnd && p.UserId != p.Room!.HostId)
                 .GroupBy(p => p.RoomId)
                 .Select(g => new
                 {
@@ -74,7 +75,7 @@ namespace Cocorra.BLL.Services.Analytics
             var speakerCounts = await db.UserEvents
                 .AsNoTracking()
                 .Where(e => e.EventType == EventTypes.MicActivated
-                         && e.OccurredAtUtc >= date && e.OccurredAtUtc < nextDate
+                         && e.OccurredAtUtc >= dayStart && e.OccurredAtUtc < dayEnd
                          && e.RoomId != null && roomIds.Contains(e.RoomId.Value)
                          && e.UserId != null)
                 .Where(e => !db.Rooms.Any(r => r.Id == e.RoomId && r.HostId == e.UserId))
@@ -87,7 +88,7 @@ namespace Cocorra.BLL.Services.Analytics
             var reportCounts = await db.Reports
                 .AsNoTracking()
                 .Where(r => r.ReportedRoomId != null && roomIds.Contains(r.ReportedRoomId.Value)
-                         && r.CreatedAt >= date && r.CreatedAt < nextDate)
+                         && r.CreatedAt >= dayStart && r.CreatedAt < dayEnd)
                 .GroupBy(r => r.ReportedRoomId!.Value)
                 .Select(g => new { RoomId = g.Key, Count = g.Count() })
                 .ToListAsync(ct);
@@ -137,11 +138,11 @@ namespace Cocorra.BLL.Services.Analytics
         /// </summary>
         internal static async Task AggregateDailyHostMetricsAsync(AppDbContext db, DateTime date, CancellationToken ct)
         {
-            var nextDate = date.AddDays(1);
+            var (dayStart, dayEnd) = CairoTime.DayRangeUtc(date);
 
             var hostRows = await db.Rooms
                 .AsNoTracking()
-                .Where(r => r.CreatedAt >= date && r.CreatedAt < nextDate)
+                .Where(r => r.CreatedAt >= dayStart && r.CreatedAt < dayEnd)
                 .GroupBy(r => r.HostId)
                 .Select(g => new
                 {
@@ -160,7 +161,7 @@ namespace Cocorra.BLL.Services.Analytics
 
             var joinerCounts = await db.RoomParticipants
                 .AsNoTracking()
-                .Where(p => p.Room!.CreatedAt >= date && p.Room.CreatedAt < nextDate
+                .Where(p => p.Room!.CreatedAt >= dayStart && p.Room.CreatedAt < dayEnd
                          && hostIds.Contains(p.Room.HostId)
                          && p.UserId != p.Room!.HostId)
                 .GroupBy(p => p.Room!.HostId)
@@ -173,7 +174,7 @@ namespace Cocorra.BLL.Services.Analytics
                 .AsNoTracking()
                 .Where(r => r.ReportedRoomId != null
                          && db.Rooms.Any(room => room.Id == r.ReportedRoomId
-                                              && room.CreatedAt >= date && room.CreatedAt < nextDate
+                                              && room.CreatedAt >= dayStart && room.CreatedAt < dayEnd
                                               && hostIds.Contains(room.HostId)))
                 .Select(r => new
                 {
@@ -221,7 +222,7 @@ namespace Cocorra.BLL.Services.Analytics
         private async Task AggregateFunnelCohortsAsync(AppDbContext db, CancellationToken ct)
         {
             var trailingDays = _options.AggregationTrailingDays > 0 ? _options.AggregationTrailingDays : 45;
-            var windowStart = DateTime.UtcNow.Date.AddDays(-trailingDays);
+            var windowStart = CairoTime.StartOfDayUtc(CairoTime.Today.AddDays(-trailingDays));
 
             var steps = new[]
             {
@@ -263,7 +264,7 @@ namespace Cocorra.BLL.Services.Analytics
                 .GroupBy(e => e.UserId)
                 .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.EventType, x => x.FirstAt));
 
-            var cohortDateByUser = cohortUsers.ToDictionary(u => u.UserId, u => u.RegisteredAt.Date);
+            var cohortDateByUser = cohortUsers.ToDictionary(u => u.UserId, u => CairoTime.DateOf(u.RegisteredAt));
             var cohortDates = cohortDateByUser.Values.Distinct().ToList();
 
             var existingRows = await db.DailyFunnelMetrics

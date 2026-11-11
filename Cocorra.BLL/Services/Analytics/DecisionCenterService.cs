@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Models.Analytics;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -55,7 +56,7 @@ namespace Cocorra.BLL.Services.Analytics
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var today = DateTime.UtcNow.Date;
+            var today = CairoTime.Today;
 
             var daily = await db.DailyPlatformMetrics
                 .AsNoTracking()
@@ -64,7 +65,7 @@ namespace Cocorra.BLL.Services.Analytics
                 .ToListAsync(cancellationToken);
 
             var weeks = daily
-                .GroupBy(m => StartOfWeekUtc(m.Date))
+                .GroupBy(m => CairoTime.StartOfWeek(m.Date))
                 .OrderBy(g => g.Key)
                 .Select(g => new WeeklyRollup
                 {
@@ -81,7 +82,7 @@ namespace Cocorra.BLL.Services.Analytics
 
             // The current week is partial by definition; comparing a Tuesday against a full week
             // would report a collapse every Monday.
-            var completeWeeks = weeks.Where(w => w.WeekStart < StartOfWeekUtc(today)).ToList();
+            var completeWeeks = weeks.Where(w => w.WeekStart < CairoTime.StartOfWeek(today)).ToList();
             var weeksOfHistory = completeWeeks.Count;
             var hasBaseline = weeksOfHistory >= RequiredBaselineWeeks;
 
@@ -212,13 +213,6 @@ namespace Cocorra.BLL.Services.Analytics
                 "so this is unlikely to be ordinary week-to-week variation.";
 
             return signal;
-        }
-
-        private static DateTime StartOfWeekUtc(DateTime value)
-        {
-            var date = value.Date;
-            var offset = ((int)date.DayOfWeek + 6) % 7; // Monday = 0
-            return date.AddDays(-offset);
         }
 
         private sealed class WeeklyRollup

@@ -1,10 +1,9 @@
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.Analytics;
-using Cocorra.BLL.Services.EventTracking;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Repository.AnalyticsRepository;
+using Cocorra.DAL.Time;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
 
 namespace Cocorra.BLL.Services.AnalyticsService
 {
@@ -32,29 +31,16 @@ namespace Cocorra.BLL.Services.AnalyticsService
         // Cache TTL: 10 minutes — balances freshness vs. DB load.
         private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
-        /// <summary>
-        /// AN-036. Minutes to add to any UTC hour in a response to reach the audience's local
-        /// hour. Read from configuration once, with the shared default as the fallback.
-        /// </summary>
-        private readonly int _displayOffsetMinutes;
+        private const int DefaultWindowDays = 30;
 
-        /// <summary>
-        /// <paramref name="options"/> is optional so existing construction sites — including
-        /// the unit tests — keep working unchanged. A missing configuration section yields the
-        /// documented default rather than a zero offset, because silently falling back to UTC
-        /// is the failure this option exists to prevent.
-        /// </summary>
         public AnalyticsService(
             IAnalyticsRepository analyticsRepository,
             IMemoryCache cache,
-            IMetricRegistry metricRegistry,
-            IOptions<EventTrackingOptions>? options = null)
+            IMetricRegistry metricRegistry)
         {
             _analyticsRepository = analyticsRepository;
             _cache = cache;
             _metricRegistry = metricRegistry;
-            _displayOffsetMinutes = options?.Value.DisplayTimeZoneOffsetMinutes
-                                    ?? AnalyticsDisplayDefaults.TimeZoneOffsetMinutes;
         }
 
         /// <summary>
@@ -94,27 +80,36 @@ namespace Cocorra.BLL.Services.AnalyticsService
                     ? MetricTrustLevel.Unreliable.ToString()
                     : contracts.Max(c => Enum.Parse<MetricTrustLevel>(c.trustLevel)).ToString(),
                 metrics = contracts,
-                // AN-036. Every timestamp and hour bucket in the payload is UTC. This is the
-                // offset a client applies for display, and it is on the envelope rather than on
-                // individual DTOs so a caller cannot receive an hour-of-day series without it.
-                // Applying it server-side was rejected: the stored figure must stay unambiguous.
+                // AN-036. Timestamps are UTC instants. Calendar buckets (days, weeks, months)
+                // and hour-of-day buckets are already Cairo time, so a client renders them as-is
+                // and must not shift them again.
                 display = new
                 {
-                    timeZone = "UTC",
-                    suggestedDisplayOffsetMinutes = _displayOffsetMinutes
+                    timeZone = CairoTime.ZoneId
                 }
             };
         }
 
         // ── Helpers ────────────────────────────────────────────────────────
 
-        /// <summary>Resolves a nullable date; defaults to 30 days ago at midnight UTC.</summary>
-        private static DateTime ResolveFrom(DateTime? from)
-            => from?.ToUniversalTime() ?? DateTime.UtcNow.AddDays(-30).Date;
+        private static DateTime ResolveFrom(DateTime? from, int defaultDaysBack = DefaultWindowDays)
+            => UtcDateTime.Normalize(from) ?? CairoMidnightDaysAgo(defaultDaysBack);
 
-        /// <summary>Resolves a nullable date; defaults to end-of-today UTC.</summary>
+        /// <summary>Resolves a nullable instant; defaults to now.</summary>
         private static DateTime ResolveTo(DateTime? to)
-            => to?.ToUniversalTime() ?? DateTime.UtcNow;
+            => UtcDateTime.Normalize(to) ?? DateTime.UtcNow;
+
+        private static DateTime CairoMidnightDaysAgo(int days)
+            => CairoTime.StartOfDayUtc(CairoTime.Today.AddDays(-days));
+
+        /// <summary>
+        /// Cache key segment for a range. Bounds are keyed to the tick, so two requests share an
+        /// entry only when they ask for the same instants. An omitted <paramref name="to"/> means
+        /// "now" and is keyed as such, letting repeated default requests share the cached result
+        /// for the TTL instead of missing on every call.
+        /// </summary>
+        private static string RangeKey(DateTime fromUtc, DateTime? to)
+            => $"{fromUtc.Ticks}:{(to.HasValue ? UtcDateTime.Normalize(to.Value).Ticks.ToString() : "now")}";
 
         /// <summary>
         /// Thread-safe cache-get-or-create using a SemaphoreSlim to
@@ -154,7 +149,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:summary:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:summary:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _summaryLock, async () =>
             {
@@ -190,7 +185,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
 
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:users:{granularity.ToLower()}:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:users:{granularity.ToLower()}:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _userGrowthLock, () =>
                 _analyticsRepository.GetUserGrowthAsync(granularity, fromUtc, toUtc));
@@ -205,7 +200,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:rooms:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}:{topN}";
+            var key = $"analytics:rooms:{RangeKey(fromUtc, to)}:{topN}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _roomLock, () =>
                 _analyticsRepository.GetRoomAnalyticsAsync(fromUtc, toUtc, topN));
@@ -223,7 +218,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:social:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:social:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _socialLock, () =>
                 _analyticsRepository.GetSocialGraphAsync(fromUtc, toUtc));
@@ -235,7 +230,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:mbti:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:mbti:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _mbtiLock, () =>
                 _analyticsRepository.GetMbtiDichotomyAnalysisAsync(fromUtc, toUtc));
@@ -247,9 +242,9 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             // A cohort grid over 30 days would be four columns wide and say nothing, so the
             // default window is deliberately long.
-            var fromUtc = from?.ToUniversalTime() ?? DateTime.UtcNow.AddDays(-120).Date;
+            var fromUtc = ResolveFrom(from, defaultDaysBack: 120);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:cohortGrid:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:cohortGrid:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _cohortGridLock, () =>
                 _analyticsRepository.GetCohortGridAsync(fromUtc, toUtc));
@@ -272,9 +267,9 @@ namespace Cocorra.BLL.Services.AnalyticsService
 
             // Supply trends need a longer default window than 30 days: host retention is only
             // visible once a host has had time to come back.
-            var fromUtc = from?.ToUniversalTime() ?? DateTime.UtcNow.AddDays(-180).Date;
+            var fromUtc = ResolveFrom(from, defaultDaysBack: 180);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:supply:{granularity.ToLower()}:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:supply:{granularity.ToLower()}:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _supplyHealthLock, () =>
                 _analyticsRepository.GetSupplyHealthAsync(granularity, fromUtc, toUtc));
@@ -288,7 +283,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:reportRate:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:reportRate:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _reportRateLock, () =>
                 _analyticsRepository.GetReportRateByCategoryAsync(fromUtc, toUtc));
@@ -302,7 +297,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:reviewLatency:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:reviewLatency:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _reviewLatencyLock, () =>
                 _analyticsRepository.GetReviewLatencyAsync(fromUtc, toUtc));
@@ -316,7 +311,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:support:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:support:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _supportLock, () =>
                 _analyticsRepository.GetSupportAnalyticsAsync(fromUtc, toUtc));
@@ -339,7 +334,8 @@ namespace Cocorra.BLL.Services.AnalyticsService
             string? compareTo = "previous_period")
         {
             var toUtc = ResolveTo(to);
-            var fromUtc = from?.ToUniversalTime() ?? toUtc.Date.AddDays(-6);
+            var fromUtc = UtcDateTime.Normalize(from)
+                          ?? CairoTime.StartOfDayUtc(CairoTime.DateOf(toUtc).AddDays(-6));
 
             if (fromUtc > toUtc)
             {
@@ -365,7 +361,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
                     "'compareTo' must be 'previous_period' or 'none'.");
             }
 
-            var key = $"analytics:platformhealth:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}:{compare}";
+            var key = $"analytics:platformhealth:{RangeKey(fromUtc, to)}:{compare}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _platformHealthLock, () =>
                 _analyticsRepository.GetPlatformHealthAsync(fromUtc, toUtc, compare));
@@ -400,7 +396,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
                 return BadRequest<StageFunnelDto>("'from' must be earlier than or equal to 'to'.");
             }
 
-            var key = $"analytics:stagefunnel:{fromUtc:yyyyMMddHH}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:stagefunnel:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _stageFunnelLock, () =>
                 _analyticsRepository.GetStageFunnelAsync(fromUtc, toUtc));
@@ -429,7 +425,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
             var resolvedSteps = steps is { Length: > 0 } ? steps : DefaultActivationSteps;
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:activationFunnel:{string.Join("_", resolvedSteps)}:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:activationFunnel:{string.Join("_", resolvedSteps)}:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _activationFunnelLock, () =>
                 _analyticsRepository.GetActivationFunnelAsync(resolvedSteps, fromUtc, toUtc));
@@ -442,9 +438,9 @@ namespace Cocorra.BLL.Services.AnalyticsService
             DateTime? to = null)
         {
             // Return cohorts need more history than the 30-day default to be meaningful.
-            var fromUtc = from?.ToUniversalTime() ?? DateTime.UtcNow.AddDays(-84).Date;
+            var fromUtc = ResolveFrom(from, defaultDaysBack: 84);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:returnRate:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:returnRate:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _returnRateLock, () =>
                 _analyticsRepository.GetWeeklyReturnRateAsync(fromUtc, toUtc));
@@ -458,7 +454,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:participation:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:participation:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _participationLock, () =>
                 _analyticsRepository.GetParticipationStatsAsync(fromUtc, toUtc));
@@ -473,7 +469,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:reports:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}:{topN}";
+            var key = $"analytics:reports:{RangeKey(fromUtc, to)}:{topN}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _reportLock, () =>
                 _analyticsRepository.GetReportInsightsAsync(fromUtc, toUtc, topN));
@@ -492,7 +488,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
             var stepsKey = string.Join("_", steps);
-            var key = $"analytics:funnel:{stepsKey}:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:funnel:{stepsKey}:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _funnelLock, () =>
                 _analyticsRepository.GetFunnelAsync(steps, fromUtc, toUtc));
@@ -514,7 +510,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
 
             var cohortStartUtc = ResolveFrom(cohortStart);
             var cohortEndUtc = ResolveTo(cohortEnd);
-            var key = $"analytics:retention:{cohortEvent}:{activeEvent}:{cohortStartUtc:yyyyMMdd}:{cohortEndUtc:yyyyMMddHH}";
+            var key = $"analytics:retention:{cohortEvent}:{activeEvent}:{RangeKey(cohortStartUtc, cohortEnd)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _retentionLock, () =>
                 _analyticsRepository.GetRetentionCohortAsync(cohortEvent, activeEvent, cohortStartUtc, cohortEndUtc));
@@ -529,7 +525,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:activerooms:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}:{topN}";
+            var key = $"analytics:activerooms:{RangeKey(fromUtc, to)}:{topN}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _activeRoomsLock, () =>
                 _analyticsRepository.GetMostActiveRoomsAsync(fromUtc, toUtc, topN));
@@ -543,7 +539,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:peakhours:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:peakhours:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _peakHoursLock, () =>
                 _analyticsRepository.GetPeakActiveHoursAsync(fromUtc, toUtc));
@@ -557,7 +553,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:voicedropoff:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:voicedropoff:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _voiceDropOffLock, () =>
                 _analyticsRepository.GetVoiceVerificationDropOffAsync(fromUtc, toUtc));
@@ -571,7 +567,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:activepassive:{fromUtc:yyyyMMdd}:{toUtc:yyyyMMddHH}";
+            var key = $"analytics:activepassive:{RangeKey(fromUtc, to)}";
 
             var result = await GetOrCreateWithLockAsync(_cache, key, _activePassiveLock, () =>
                 _analyticsRepository.GetActiveVsPassiveRateAsync(fromUtc, toUtc));

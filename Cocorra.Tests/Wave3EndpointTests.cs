@@ -82,8 +82,6 @@ namespace Cocorra.Tests
                 Assert.Equal(5, march.RoomsCreated);
                 Assert.Equal(4, march.RoomsGoneLive);
                 Assert.Equal(2, march.DistinctHosts);
-
-                Assert.Equal(180, result.SuggestedDisplayOffsetMinutes);
             }
         }
 

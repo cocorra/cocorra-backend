@@ -1,3 +1,4 @@
+using Cocorra.API.Filters;
 using Cocorra.BLL.Services.Analytics;
 using Cocorra.BLL.Services.AnalyticsService;
 using Cocorra.DAL.AppMetaData;
@@ -13,11 +14,14 @@ namespace Cocorra.API.Controllers
     ///   - Require a valid JWT with VerificationStatus=Active (default policy).
     ///   - Require the Admin or Coach role.
     ///   - Default date range: last 30 days (resolved in the service layer).
-    ///   - All timestamps in request/response are UTC.
+    ///   - Range bounds (from/to) are instants and must carry an offset ("Z" or "+02:00");
+    ///     offset-less values are rejected with 400. Response timestamps are UTC; day, week,
+    ///     month and hour-of-day buckets are Africa/Cairo.
     ///   - Responses are cached for 10 minutes; simultaneous requests share one DB query.
     /// </summary>
     [ApiController]
     [Authorize(Roles = "Admin")]
+    [RequireUtcOffset]
     public class AnalyticsController : ControllerBase
     {
         private readonly IAnalyticsService _analyticsService;
@@ -43,8 +47,8 @@ namespace Cocorra.API.Controllers
         /// <summary>
         /// Full platform snapshot: users, rooms, participation, and reports in one call.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         [HttpGet(Router.AnalyticsRouting.Summary)]
         public async Task<IActionResult> GetPlatformSummary(
             [FromQuery] DateTime? from,
@@ -58,8 +62,8 @@ namespace Cocorra.API.Controllers
         /// User registration trends and status breakdown, bucketed by day or month.
         /// </summary>
         /// <param name="granularity">"daily" or "monthly" (default: "monthly").</param>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         /// <param name="limit">Number of top entries (MBTI, etc.) to return (default: 10).</param>
         [HttpGet(Router.AnalyticsRouting.UserGrowth)]
         public async Task<IActionResult> GetUserGrowth(
@@ -77,8 +81,8 @@ namespace Cocorra.API.Controllers
         /// <summary>
         /// Room creation stats: category breakdown, top rooms, public/private ratio.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         /// <param name="limit">Number of top rooms to return (default: 10).</param>
         [HttpGet(Router.AnalyticsRouting.Rooms)]
         public async Task<IActionResult> GetRoomAnalytics(
@@ -95,12 +99,12 @@ namespace Cocorra.API.Controllers
 
         /// <summary>
         /// Participation metrics: spoken-time totals, distinct non-host speakers, peak join
-        /// hours (UTC). Top speakers and hand-raise counts are deliberately absent — AN-005
+        /// hours (Cairo). Top speakers and hand-raise counts are deliberately absent — AN-005
         /// removed them from the contract rather than zeroing them, because neither is
         /// measurable from current data and a 0 would read as a fact.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         [HttpGet(Router.AnalyticsRouting.Participation)]
         public async Task<IActionResult> GetParticipationStats(
             [FromQuery] DateTime? from = null,
@@ -122,8 +126,8 @@ namespace Cocorra.API.Controllers
         /// in production every metric returns <c>isMeasured: false</c> with a reason — the value
         /// is unknown, not zero. <b>Clients must render that as a labelled gap.</b>
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 7 days ago — M-100's own window).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 6 days before to — M-100's 7-day window).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         /// <param name="compareTo">"previous_period" (default) or "none".</param>
         [HttpGet(Router.AnalyticsRouting.PlatformHealth)]
         public async Task<IActionResult> GetPlatformHealth(
@@ -154,8 +158,8 @@ namespace Cocorra.API.Controllers
         /// whatever the step genuinely saw, so a partially instrumented funnel still shows real
         /// numbers where it has them.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         [HttpGet(Router.AnalyticsRouting.StageFunnel)]
         public async Task<IActionResult> GetStageFunnel(
             [FromQuery] DateTime? from = null,
@@ -171,8 +175,8 @@ namespace Cocorra.API.Controllers
         /// <summary>
         /// Report insights: open vs resolved, category breakdown, most reported users.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         /// <param name="limit">Number of most-reported users to return (default: 10).</param>
         [HttpGet(Router.AnalyticsRouting.Reports)]
         public async Task<IActionResult> GetReportInsights(
@@ -391,6 +395,7 @@ namespace Cocorra.API.Controllers
         /// </summary>
         [HttpPost(Router.AnalyticsRouting.Backfill)]
         [Authorize(Roles = "Admin")]
+        [CalendarDates]
         public async Task<IActionResult> RunBackfill(
             [FromQuery] DateTime from,
             [FromQuery] DateTime to,
@@ -455,8 +460,8 @@ namespace Cocorra.API.Controllers
         /// <summary>
         /// Most active rooms ranked by room_joined events (actual attendance).
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         /// <param name="limit">Number of rooms to return (default: 10).</param>
         [HttpGet(Router.AnalyticsRouting.ActiveRooms)]
         public async Task<IActionResult> GetMostActiveRooms(
@@ -472,10 +477,10 @@ namespace Cocorra.API.Controllers
         }
 
         /// <summary>
-        /// Platform activity by UTC hour-of-day (0–23) — peak active hours.
+        /// Platform activity by Cairo hour-of-day (0–23) — peak active hours.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         [HttpGet(Router.AnalyticsRouting.PeakHours)]
         public async Task<IActionResult> GetPeakActiveHours(
             [FromQuery] DateTime? from = null,
@@ -488,8 +493,8 @@ namespace Cocorra.API.Controllers
         /// <summary>
         /// Voice-verification drop-off rate: distinct users who started vs. completed activation.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         [HttpGet(Router.AnalyticsRouting.VoiceDropOff)]
         public async Task<IActionResult> GetVoiceVerificationDropOff(
             [FromQuery] DateTime? from = null,
@@ -502,8 +507,8 @@ namespace Cocorra.API.Controllers
         /// <summary>
         /// Active (speakers) vs passive (listeners) participation rate among room joiners.
         /// </summary>
-        /// <param name="from">UTC start date (optional, default = 30 days ago).</param>
-        /// <param name="to">UTC end date (optional, default = now).</param>
+        /// <param name="from">Start instant with offset (optional, default = Cairo midnight 30 days ago).</param>
+        /// <param name="to">End instant with offset (optional, default = now).</param>
         [HttpGet(Router.AnalyticsRouting.ActiveVsPassive)]
         public async Task<IActionResult> GetActiveVsPassiveRate(
             [FromQuery] DateTime? from = null,

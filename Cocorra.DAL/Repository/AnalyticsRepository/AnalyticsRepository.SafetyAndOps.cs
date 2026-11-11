@@ -1,6 +1,7 @@
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -145,7 +146,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             var allHours = measured.Select(m => m.Hours).ToList();
 
             var byDay = measured
-                .GroupBy(m => m.SubmittedAt.DayOfWeek)
+                .GroupBy(m => CairoTime.DateOf(m.SubmittedAt).DayOfWeek)
                 .OrderBy(g => (int)g.Key)
                 .Select(g => new ReviewLatencyByBucketDto
                 {
@@ -157,7 +158,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 .ToList();
 
             var byHour = measured
-                .GroupBy(m => m.SubmittedAt.Hour)
+                .GroupBy(m => CairoTime.HourOf(m.SubmittedAt))
                 .OrderBy(g => g.Key)
                 .Select(g => new ReviewLatencyByBucketDto
                 {
@@ -174,7 +175,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 .AsNoTracking()
                 .Where(s => s.MetricKey == "pending_verification_queue")
                 .OrderByDescending(s => s.Date)
-                .Select(s => new { s.Value, s.Date })
+                .Select(s => new { s.Value, s.ComputedAtUtc })
                 .FirstOrDefaultAsync();
 
             var earliestSubmission = await _context.UserEvents
@@ -193,10 +194,10 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 P50Hours = Percentile(allHours, 0.50),
                 P90Hours = Percentile(allHours, 0.90),
                 P99Hours = Percentile(allHours, 0.99),
-                ByDayOfWeekUtc = byDay,
-                ByHourUtc = byHour,
+                ByDayOfWeek = byDay,
+                ByHour = byHour,
                 CurrentPendingQueueDepth = latestQueueDepth?.Value,
-                QueueDepthAsOfUtc = latestQueueDepth?.Date,
+                QueueDepthAsOfUtc = latestQueueDepth?.ComputedAtUtc,
                 DataAvailableFromUtc = earliestSubmission
             };
         }
