@@ -15,7 +15,7 @@ namespace Cocorra.DAL.Models.Analytics
 
         /// <summary>The date this snapshot represents (stored as date).</summary>
         [Column(TypeName = "date")]
-        public DateTime Date { get; set; }
+        public DateOnly Date { get; set; }
 
         /// <summary>
         /// Key identifying the metric: 'pending_verification_queue', 'rerecord_queue',

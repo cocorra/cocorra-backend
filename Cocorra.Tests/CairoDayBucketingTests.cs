@@ -48,18 +48,18 @@ public class CairoDayBucketingTests : IDisposable
             await db.SaveChangesAsync();
 
             await AnalyticsAggregationService.AggregateDailyPlatformMetricsAsync(
-                db, new DateTime(2026, 11, 11), CancellationToken.None);
+                db, new DateOnly(2026, 11, 11), CancellationToken.None);
             await db.SaveChangesAsync();
 
             await AnalyticsAggregationService.AggregateDailyPlatformMetricsAsync(
-                db, new DateTime(2026, 11, 10), CancellationToken.None);
+                db, new DateOnly(2026, 11, 10), CancellationToken.None);
             await db.SaveChangesAsync();
 
             var registrations = await db.DailyPlatformMetrics
                 .ToDictionaryAsync(m => m.Date, m => m.NewRegistrations);
 
-            Assert.Equal(2, registrations[new DateTime(2026, 11, 11)]);
-            Assert.Equal(1, registrations[new DateTime(2026, 11, 10)]);
+            Assert.Equal(2, registrations[new DateOnly(2026, 11, 11)]);
+            Assert.Equal(1, registrations[new DateOnly(2026, 11, 10)]);
         }
     }
 
@@ -77,10 +77,10 @@ public class CairoDayBucketingTests : IDisposable
             await db.SaveChangesAsync();
 
             await AnalyticsAggregationService.AggregateDailyPlatformMetricsAsync(
-                db, new DateTime(2026, 4, 24), CancellationToken.None);
+                db, new DateOnly(2026, 4, 24), CancellationToken.None);
             await db.SaveChangesAsync();
 
-            var day = await db.DailyPlatformMetrics.SingleAsync(m => m.Date == new DateTime(2026, 4, 24));
+            var day = await db.DailyPlatformMetrics.SingleAsync(m => m.Date == new DateOnly(2026, 4, 24));
 
             Assert.Equal(2, day.NewRegistrations);
         }

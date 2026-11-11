@@ -13,7 +13,7 @@ namespace Cocorra.DAL.Models.Analytics
         public long Id { get; set; }
 
         [Column(TypeName = "date")]
-        public DateTime CohortDate { get; set; }
+        public DateOnly CohortDate { get; set; }
 
         [Required, MaxLength(64)]
         [Column(TypeName = "varchar(64)")]

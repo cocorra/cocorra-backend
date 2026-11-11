@@ -61,7 +61,7 @@ namespace Cocorra.BLL.Services.Analytics
             var lastSnapshot = await db.DailyStateSnapshots
                 .AsNoTracking()
                 .OrderByDescending(s => s.Date)
-                .Select(s => (DateTime?)s.Date)
+                .Select(s => (DateOnly?)s.Date)
                 .FirstOrDefaultAsync(cancellationToken);
 
             var lagHours = checkpoint is null

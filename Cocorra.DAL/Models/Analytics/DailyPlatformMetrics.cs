@@ -12,7 +12,7 @@ namespace Cocorra.DAL.Models.Analytics
         public long Id { get; set; }
 
         [Column(TypeName = "date")]
-        public DateTime Date { get; set; }
+        public DateOnly Date { get; set; }
 
         public int RoomsCreated { get; set; }
         public int RoomsGoneLive { get; set; }

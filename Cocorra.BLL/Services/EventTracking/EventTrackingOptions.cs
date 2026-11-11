@@ -28,8 +28,6 @@ namespace Cocorra.BLL.Services.EventTracking
 
         public int AggregationTrailingDays { get; set; } = 45;
 
-        public int SnapshotHourUtc { get; set; } = 0;
-
         /// <summary>
         /// AN-017/AN-018 gate. These are the only changes that add load to a shared bounded
         /// resource (the event channel), which is why they are the one thing worth flagging —

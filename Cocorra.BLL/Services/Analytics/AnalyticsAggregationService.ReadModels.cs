@@ -27,7 +27,7 @@ namespace Cocorra.BLL.Services.Analytics
         /// RM-2 — per room, per day. Room dimensions are denormalised onto the row so a later
         /// category or capacity change cannot retroactively rewrite history.
         /// </summary>
-        internal static async Task AggregateDailyRoomMetricsAsync(AppDbContext db, DateTime date, CancellationToken ct)
+        internal static async Task AggregateDailyRoomMetricsAsync(AppDbContext db, DateOnly date, CancellationToken ct)
         {
             var (dayStart, dayEnd) = CairoTime.DayRangeUtc(date);
 
@@ -136,7 +136,7 @@ namespace Cocorra.BLL.Services.Analytics
         /// which are relational and never purged, so this is the one read model that can be
         /// backfilled across the platform's whole history.
         /// </summary>
-        internal static async Task AggregateDailyHostMetricsAsync(AppDbContext db, DateTime date, CancellationToken ct)
+        internal static async Task AggregateDailyHostMetricsAsync(AppDbContext db, DateOnly date, CancellationToken ct)
         {
             var (dayStart, dayEnd) = CairoTime.DayRangeUtc(date);
 

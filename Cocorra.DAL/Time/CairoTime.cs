@@ -8,8 +8,8 @@ namespace Cocorra.DAL.Time
     /// compared in UTC everywhere; this class only answers "which Cairo day, week, month or hour
     /// does this instant belong to" and "where does a Cairo day start in UTC".
     ///
-    /// Calendar values (days, weeks, months) are returned as midnight DateTimes with
-    /// <see cref="DateTimeKind.Unspecified"/>, because they name a date, not an instant.
+    /// Calendar values (days, weeks, months) are <see cref="DateOnly"/>, because they name a
+    /// date, not an instant.
     /// </summary>
     public static class CairoTime
     {
@@ -19,46 +19,44 @@ namespace Cocorra.DAL.Time
 
         public static TimeZoneInfo Zone { get; } = TimeZoneInfo.FindSystemTimeZoneById(ZoneId);
 
-        public static DateTime Today => DateOf(DateTime.UtcNow);
+        public static DateOnly Today => DateOf(DateTime.UtcNow);
 
         public static DateTime ToLocal(DateTime utc) =>
             TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Zone);
 
-        public static DateTime DateOf(DateTime utc) => ToLocal(utc).Date;
+        public static DateOnly DateOf(DateTime utc) => DateOnly.FromDateTime(ToLocal(utc));
 
         /// <summary>
         /// Reads a caller-supplied calendar date. A value without an offset ("2026-11-11") is the
         /// Cairo date exactly as written; a value carrying an offset is an instant and is mapped
         /// to the Cairo date it falls on.
         /// </summary>
-        public static DateTime CalendarDateOf(DateTime value) =>
-            value.Kind == DateTimeKind.Unspecified ? value.Date : DateOf(value.ToUniversalTime());
+        public static DateOnly CalendarDateOf(DateTime value) =>
+            value.Kind == DateTimeKind.Unspecified ? DateOnly.FromDateTime(value) : DateOf(value.ToUniversalTime());
 
         public static int HourOf(DateTime utc) => ToLocal(utc).Hour;
 
-        public static DateTime WeekOf(DateTime utc) => StartOfWeek(DateOf(utc));
+        public static DateOnly WeekOf(DateTime utc) => StartOfWeek(DateOf(utc));
 
-        public static DateTime MonthOf(DateTime utc) => StartOfMonth(DateOf(utc));
+        public static DateOnly MonthOf(DateTime utc) => StartOfMonth(DateOf(utc));
 
-        /// <summary>Weeks start on Monday.</summary>
-        public static DateTime StartOfWeek(DateTime localDate)
+        /// <summary>Weeks start on Saturday, following the Egyptian working week.</summary>
+        public static DateOnly StartOfWeek(DateOnly date)
         {
-            var date = localDate.Date;
-            var daysSinceMonday = ((int)date.DayOfWeek + 6) % 7;
-            return date.AddDays(-daysSinceMonday);
+            var daysSinceSaturday = ((int)date.DayOfWeek + 1) % 7;
+            return date.AddDays(-daysSinceSaturday);
         }
 
-        public static DateTime StartOfMonth(DateTime localDate) =>
-            new(localDate.Year, localDate.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        public static DateOnly StartOfMonth(DateOnly date) => new(date.Year, date.Month, 1);
 
         /// <summary>
         /// The UTC instant at which the given Cairo calendar date begins. Egypt moves its clocks
         /// forward at local midnight, so on that date 00:00 does not exist and the day begins at
         /// the first valid local time instead.
         /// </summary>
-        public static DateTime StartOfDayUtc(DateTime localDate)
+        public static DateTime StartOfDayUtc(DateOnly date)
         {
-            var localStart = DateTime.SpecifyKind(localDate.Date, DateTimeKind.Unspecified);
+            var localStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
             while (Zone.IsInvalidTime(localStart))
             {
                 localStart = localStart.Add(SpringForwardProbeStep);
@@ -100,7 +98,7 @@ namespace Cocorra.DAL.Time
         }
 
         /// <summary>Half-open UTC range [start, end) covering one Cairo calendar date (23–25 hours).</summary>
-        public static (DateTime StartUtc, DateTime EndUtc) DayRangeUtc(DateTime localDate) =>
-            (StartOfDayUtc(localDate), StartOfDayUtc(localDate.Date.AddDays(1)));
+        public static (DateTime StartUtc, DateTime EndUtc) DayRangeUtc(DateOnly date) =>
+            (StartOfDayUtc(date), StartOfDayUtc(date.AddDays(1)));
     }
 }

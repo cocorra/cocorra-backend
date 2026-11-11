@@ -252,7 +252,6 @@ namespace Cocorra.BLL.Services.AnalyticsService
         }
 
         private static readonly SemaphoreSlim _supplyHealthLock = new(1, 1);
-        private static readonly SemaphoreSlim _reportRateLock = new(1, 1);
         private static readonly SemaphoreSlim _reviewLatencyLock = new(1, 1);
         private static readonly SemaphoreSlim _supportLock = new(1, 1);
 
@@ -276,16 +275,17 @@ namespace Cocorra.BLL.Services.AnalyticsService
             return Success(result, BuildMeta(MetricRegistry.ActiveHosts, MetricRegistry.HostRetention, MetricRegistry.HostConcentration));
         }
 
+        /// <summary>
+        /// Deliberately uncached: the Safety page shows these counts next to the live report
+        /// insights, so a cached count would hide a report submitted within the cache TTL.
+        /// </summary>
         public async Task<Response<ReportRateInsightsDto>> GetReportRateByCategoryAsync(
             DateTime? from = null,
             DateTime? to = null)
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:reportRate:{RangeKey(fromUtc, to)}";
-
-            var result = await GetOrCreateWithLockAsync(_cache, key, _reportRateLock, () =>
-                _analyticsRepository.GetReportRateByCategoryAsync(fromUtc, toUtc));
+            var result = await _analyticsRepository.GetReportRateByCategoryAsync(fromUtc, toUtc);
 
             return Success(result, BuildMeta(MetricRegistry.ReportRateByCategory, MetricRegistry.ReportRate));
         }

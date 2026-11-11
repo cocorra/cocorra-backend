@@ -28,7 +28,7 @@ public class CairoTimeTests
     {
         var instant = Utc(utc);
 
-        Assert.Equal(new DateTime(year, month, day), CairoTime.DateOf(instant));
+        Assert.Equal(new DateOnly(year, month, day), CairoTime.DateOf(instant));
         Assert.Equal(hour, CairoTime.HourOf(instant));
     }
 
@@ -40,7 +40,7 @@ public class CairoTimeTests
     public void DayRangeUtc_CoversTheCairoDay_WithItsRealLength(
         int year, int month, int day, string expectedStart, string expectedEnd, int expectedHours)
     {
-        var (start, end) = CairoTime.DayRangeUtc(new DateTime(year, month, day));
+        var (start, end) = CairoTime.DayRangeUtc(new DateOnly(year, month, day));
 
         Assert.Equal(Utc(expectedStart), start);
         Assert.Equal(Utc(expectedEnd), end);
@@ -104,8 +104,7 @@ public class CairoTimeTests
 
         var result = CairoTime.CalendarDateOf(input);
 
-        Assert.Equal(new DateTime(2026, 11, 11), result);
-        Assert.Equal(DateTimeKind.Unspecified, result.Kind);
+        Assert.Equal(new DateOnly(2026, 11, 11), result);
     }
 
     [Fact]
@@ -113,50 +112,46 @@ public class CairoTimeTests
     {
         var result = CairoTime.CalendarDateOf(Utc("2026-11-10T22:30:00Z"));
 
-        Assert.Equal(new DateTime(2026, 11, 11), result);
+        Assert.Equal(new DateOnly(2026, 11, 11), result);
     }
 
     [Theory]
-    [InlineData(2026, 11, 15, 2026, 11, 9)]
-    [InlineData(2026, 11, 9, 2026, 11, 9)]
-    public void StartOfWeek_StartsOnMonday(
+    [InlineData(2026, 11, 14, 2026, 11, 14)]
+    [InlineData(2026, 11, 15, 2026, 11, 14)]
+    [InlineData(2026, 11, 16, 2026, 11, 14)]
+    [InlineData(2026, 11, 17, 2026, 11, 14)]
+    [InlineData(2026, 11, 18, 2026, 11, 14)]
+    [InlineData(2026, 11, 19, 2026, 11, 14)]
+    [InlineData(2026, 11, 20, 2026, 11, 14)]
+    [InlineData(2026, 10, 1, 2026, 9, 26)]
+    public void StartOfWeek_StartsOnSaturday(
         int year, int month, int day, int expectedYear, int expectedMonth, int expectedDay)
     {
-        var result = CairoTime.StartOfWeek(new DateTime(year, month, day));
+        var result = CairoTime.StartOfWeek(new DateOnly(year, month, day));
 
-        Assert.Equal(new DateTime(expectedYear, expectedMonth, expectedDay), result);
+        Assert.Equal(new DateOnly(expectedYear, expectedMonth, expectedDay), result);
     }
 
-    [Fact]
-    public void WeekOf_InstantThatIsCairoMonday_ReturnsTheSameMonday()
+    [Theory]
+    [InlineData("2026-11-13T21:59:59Z", 2026, 11, 7)]
+    [InlineData("2026-11-13T22:00:00Z", 2026, 11, 14)]
+    public void WeekOf_SaturdayCairoMidnight_StartsTheNewWeek(
+        string utc, int expectedYear, int expectedMonth, int expectedDay)
     {
-        Assert.Equal(new DateTime(2026, 11, 16), CairoTime.WeekOf(Utc("2026-11-15T22:30:00Z")));
+        Assert.Equal(
+            new DateOnly(expectedYear, expectedMonth, expectedDay),
+            CairoTime.WeekOf(Utc(utc)));
     }
 
     [Fact]
     public void MonthOf_InstantThatIsCairoDecemberFirst_ReturnsDecemberFirst()
     {
-        Assert.Equal(new DateTime(2026, 12, 1), CairoTime.MonthOf(Utc("2026-11-30T22:30:00Z")));
-    }
-
-    [Fact]
-    public void CalendarValues_AreReturnedAsUnspecified()
-    {
-        var instant = Utc("2026-11-15T22:30:00Z");
-
-        Assert.Equal(DateTimeKind.Unspecified, CairoTime.DateOf(instant).Kind);
-        Assert.Equal(DateTimeKind.Unspecified, CairoTime.WeekOf(instant).Kind);
-        Assert.Equal(DateTimeKind.Unspecified, CairoTime.MonthOf(instant).Kind);
-        Assert.Equal(DateTimeKind.Unspecified, CairoTime.StartOfWeek(new DateTime(2026, 11, 15)).Kind);
-        Assert.Equal(DateTimeKind.Unspecified, CairoTime.StartOfMonth(new DateTime(2026, 11, 15)).Kind);
-        Assert.Equal(
-            DateTimeKind.Unspecified,
-            CairoTime.CalendarDateOf(Utc("2026-11-10T22:30:00Z")).Kind);
+        Assert.Equal(new DateOnly(2026, 12, 1), CairoTime.MonthOf(Utc("2026-11-30T22:30:00Z")));
     }
 
     [Fact]
     public void StartOfDayUtc_ReturnsUtcKind()
     {
-        Assert.Equal(DateTimeKind.Utc, CairoTime.StartOfDayUtc(new DateTime(2026, 11, 11)).Kind);
+        Assert.Equal(DateTimeKind.Utc, CairoTime.StartOfDayUtc(new DateOnly(2026, 11, 11)).Kind);
     }
 }

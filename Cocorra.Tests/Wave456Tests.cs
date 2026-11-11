@@ -161,7 +161,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task CohortGrid_AssignsEachUserToExactlyOneCohort_AndFlagsThinHistory()
         {
-            var week1 = new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc); // Monday
+            var week1 = new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc);
             var user = Guid.NewGuid();
 
             using (var scope = _host.CreateScope())
@@ -183,7 +183,7 @@ namespace Cocorra.Tests
                 Assert.Single(result.Cohorts);
 
                 var row = result.Cohorts.Single();
-                Assert.Equal(week1.Date, row.CohortWeekStart);
+                Assert.Equal(new DateOnly(2026, 5, 30), row.CohortWeekStart);
                 Assert.Equal(1, row.CohortSize);
                 Assert.All(row.WeeklyRetentionPercent, v => Assert.Equal(100.0, v));
 
@@ -194,24 +194,27 @@ namespace Cocorra.Tests
 
         // ── AN-039 ──────────────────────────────────────────────────────────
 
+        private static readonly DateTimeOffset DecisionCenterNow = new(2026, 11, 11, 10, 0, 0, TimeSpan.Zero);
+        private static readonly DateOnly DecisionCenterToday = CairoTime.DateOf(DecisionCenterNow.UtcDateTime);
+
         [Fact]
         public async Task DecisionCenter_WithoutBaseline_AssertsNothing()
         {
-            var monday = StartOfWeek(CairoTime.Today).AddDays(-7);
+            var weekStart = CairoTime.StartOfWeek(DecisionCenterToday).AddDays(-7);
 
             using (var scope = _host.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 db.DailyPlatformMetrics.Add(new DailyPlatformMetrics
                 {
-                    Date = monday, DistinctJoiningUsers = 40, DistinctSpeakingUsers = 10,
+                    Date = weekStart, DistinctJoiningUsers = 40, DistinctSpeakingUsers = 10,
                     DistinctActiveHosts = 3, RoomsGoneLive = 5, NewRegistrations = 20,
                     VoiceVerificationsSubmitted = 10, VoiceVerificationsApproved = 8
                 });
                 await db.SaveChangesAsync();
             }
 
-            var service = new DecisionCenterService(_host.Services);
+            var service = new DecisionCenterService(_host.Services, new FixedTimeProvider(DecisionCenterNow));
             var result = await service.GetDecisionCenterAsync();
 
             Assert.False(result.HasBaseline);
@@ -229,7 +232,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task DecisionCenter_WithBaseline_FlagsOnlyMovesBeyondNormalVariation()
         {
-            var thisWeek = StartOfWeek(CairoTime.Today);
+            var thisWeek = CairoTime.StartOfWeek(DecisionCenterToday);
 
             using (var scope = _host.CreateScope())
             {
@@ -257,7 +260,7 @@ namespace Cocorra.Tests
                 await db.SaveChangesAsync();
             }
 
-            var result = await new DecisionCenterService(_host.Services).GetDecisionCenterAsync();
+            var result = await new DecisionCenterService(_host.Services, new FixedTimeProvider(DecisionCenterNow)).GetDecisionCenterAsync();
 
             Assert.True(result.HasBaseline);
             Assert.Null(result.BaselineCaveat);
@@ -278,7 +281,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task DecisionCenter_EverySignalNamesAContractAndADecision()
         {
-            var result = await new DecisionCenterService(_host.Services).GetDecisionCenterAsync();
+            var result = await new DecisionCenterService(_host.Services, new FixedTimeProvider(DecisionCenterNow)).GetDecisionCenterAsync();
             var registry = new MetricRegistry();
 
             // A signal nobody would act on does not belong on the page, and a signal whose
@@ -288,12 +291,6 @@ namespace Cocorra.Tests
                 Assert.NotNull(registry.GetContract(sig.MetricKey));
                 Assert.False(string.IsNullOrWhiteSpace(sig.DecisionSupported));
             });
-        }
-
-        private static DateTime StartOfWeek(DateTime value)
-        {
-            var date = value.Date;
-            return date.AddDays(-(((int)date.DayOfWeek + 6) % 7));
         }
     }
 }

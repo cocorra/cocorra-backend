@@ -11,13 +11,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Cocorra.BLL.Services.EventTracking;
 
 namespace Cocorra.BLL.Services.Analytics
 {
     /// <summary>
-    /// RM-5: StateSnapshotService runs daily (scheduled at 00:15 UTC with startup delay)
+    /// RM-5: StateSnapshotService runs daily (scheduled at 00:15 Cairo time with startup delay)
     /// to capture point-in-time state counts (pending queue, rerecord queue, active totals,
     /// FCM coverage, open reports) into DailyStateSnapshots with idempotent UPSERT semantics.
     ///
@@ -29,13 +27,15 @@ namespace Cocorra.BLL.Services.Analytics
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<StateSnapshotService> _logger;
-        private readonly EventTrackingOptions _options;
+        private readonly TimeProvider _timeProvider;
 
         /// <summary>Attempts for the persist step, to absorb a concurrent insert on the natural key.</summary>
         private const int MaxPersistAttempts = 3;
 
         /// <summary>Trailing window scanned for gaps after each capture.</summary>
         private const int GapScanDays = 30;
+
+        private static readonly TimeSpan ScheduledRunAfterCairoDayStart = TimeSpan.FromMinutes(15);
 
         // Metric Keys constants
         public const string MetricPendingQueue = "pending_verification_queue";
@@ -63,21 +63,38 @@ namespace Cocorra.BLL.Services.Analytics
         public StateSnapshotService(
             IServiceProvider serviceProvider,
             ILogger<StateSnapshotService> logger,
-            IOptions<EventTrackingOptions>? options = null)
+            TimeProvider timeProvider)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
-            _options = options?.Value ?? new EventTrackingOptions();
+            _timeProvider = timeProvider;
+        }
+
+        private DateOnly CairoToday => CairoTime.DateOf(_timeProvider.GetUtcNow().UtcDateTime);
+
+        /// <summary>
+        /// The first scheduled run strictly after <paramref name="nowUtc"/>: 15 minutes after a
+        /// Cairo day starts, so each reading is taken at the same Cairo hour all year. On the
+        /// spring-forward date Cairo midnight does not exist and the day starts at 01:00, so that
+        /// run is at 01:15.
+        /// </summary>
+        internal static DateTime NextScheduledRunUtc(DateTime nowUtc)
+        {
+            var today = CairoTime.DateOf(nowUtc);
+            var todaysRun = CairoTime.StartOfDayUtc(today) + ScheduledRunAfterCairoDayStart;
+            return todaysRun > nowUtc
+                ? todaysRun
+                : CairoTime.StartOfDayUtc(today.AddDays(1)) + ScheduledRunAfterCairoDayStart;
         }
 
         /// <inheritdoc />
         public async Task<List<DailyStateSnapshot>> CaptureSnapshotAsync(
-            DateTime? targetDate = null,
+            DateOnly? targetDate = null,
             bool skipIfAlreadyCaptured = false,
             CancellationToken cancellationToken = default)
         {
-            var date = targetDate.HasValue ? CairoTime.CalendarDateOf(targetDate.Value) : CairoTime.Today;
-            var computedAt = DateTime.UtcNow;
+            var date = targetDate ?? CairoToday;
+            var computedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
             if (skipIfAlreadyCaptured)
             {
@@ -124,15 +141,12 @@ namespace Cocorra.BLL.Services.Analytics
 
         /// <inheritdoc />
         public async Task<List<DailyStateSnapshot>> GetSnapshotsAsync(
-            DateTime fromDate,
-            DateTime toDate,
+            DateOnly from,
+            DateOnly to,
             CancellationToken cancellationToken = default)
         {
             using var scope = _serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-            var from = CairoTime.CalendarDateOf(fromDate);
-            var to = CairoTime.CalendarDateOf(toDate);
 
             return await context.DailyStateSnapshots
                 .AsNoTracking()
@@ -144,20 +158,17 @@ namespace Cocorra.BLL.Services.Analytics
 
         /// <inheritdoc />
         public async Task<SnapshotGapReport> GetGapReportAsync(
-            DateTime fromDate,
-            DateTime toDate,
+            DateOnly requestedFrom,
+            DateOnly requestedTo,
             CancellationToken cancellationToken = default)
         {
             using var scope = _serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var requestedFrom = CairoTime.CalendarDateOf(fromDate);
-            var requestedTo = CairoTime.CalendarDateOf(toDate);
-
             var earliest = await context.DailyStateSnapshots
                 .AsNoTracking()
                 .OrderBy(s => s.Date)
-                .Select(s => (DateTime?)s.Date)
+                .Select(s => (DateOnly?)s.Date)
                 .FirstOrDefaultAsync(cancellationToken);
 
             // Nothing captured yet: the whole range is "not measured", which is not the same
@@ -167,7 +178,7 @@ namespace Cocorra.BLL.Services.Analytics
             {
                 return new SnapshotGapReport
                 {
-                    DataAvailableFromUtc = null,
+                    DataAvailableFrom = null,
                     FromDate = requestedFrom,
                     ToDate = requestedTo,
                     ExpectedMetricsPerDate = ExpectedMetricKeys.Length
@@ -175,7 +186,7 @@ namespace Cocorra.BLL.Services.Analytics
             }
 
             var from = requestedFrom < earliest.Value ? earliest.Value : requestedFrom;
-            var today = CairoTime.Today;
+            var today = CairoToday;
             var to = requestedTo > today ? today : requestedTo;
 
             var counts = await context.DailyStateSnapshots
@@ -187,8 +198,8 @@ namespace Cocorra.BLL.Services.Analytics
 
             var countByDate = counts.ToDictionary(c => c.Date, c => c.Keys);
 
-            var missing = new List<DateTime>();
-            var incomplete = new List<DateTime>();
+            var missing = new List<DateOnly>();
+            var incomplete = new List<DateOnly>();
 
             for (var day = from; day <= to; day = day.AddDays(1))
             {
@@ -204,7 +215,7 @@ namespace Cocorra.BLL.Services.Analytics
 
             return new SnapshotGapReport
             {
-                DataAvailableFromUtc = earliest,
+                DataAvailableFrom = earliest,
                 FromDate = from,
                 ToDate = to,
                 MissingDates = missing,
@@ -259,7 +270,7 @@ namespace Cocorra.BLL.Services.Analytics
         }
 
         private async Task<List<DailyStateSnapshot>> LoadSnapshotsForDateAsync(
-            DateTime date,
+            DateOnly date,
             CancellationToken cancellationToken)
         {
             using var scope = _serviceProvider.CreateScope();
@@ -277,7 +288,7 @@ namespace Cocorra.BLL.Services.Analytics
         /// change tracker behind for the retry.
         /// </summary>
         private async Task<List<DailyStateSnapshot>> PersistSnapshotAsync(
-            DateTime date,
+            DateOnly date,
             Dictionary<string, double> metrics,
             DateTime computedAt,
             CancellationToken cancellationToken)
@@ -323,7 +334,7 @@ namespace Cocorra.BLL.Services.Analytics
         {
             try
             {
-                var today = CairoTime.Today;
+                var today = CairoToday;
                 var report = await GetGapReportAsync(today.AddDays(-GapScanDays), today, cancellationToken);
 
                 if (!report.HasGaps)
@@ -371,23 +382,17 @@ namespace Cocorra.BLL.Services.Analytics
                     // The startup run must not overwrite an existing reading for today: it fires
                     // at whatever hour the container happened to start, and queue depth varies
                     // through the day. Scheduled runs always write.
-                    await CaptureSnapshotAsync(CairoTime.Today, isStartupRun, stoppingToken);
+                    await CaptureSnapshotAsync(CairoToday, isStartupRun, stoppingToken);
                     isStartupRun = false;
 
                     await LogGapsAsync(stoppingToken);
 
-                    // Next run at the configured hour (Analytics:SnapshotHourUtc), 15 past.
-                    var now = DateTime.UtcNow;
-                    var hour = _options.SnapshotHourUtc is >= 0 and <= 23 ? _options.SnapshotHourUtc : 0;
-                    var nextRun = now.Date.AddDays(1).AddHours(hour).AddMinutes(15);
+                    var now = _timeProvider.GetUtcNow().UtcDateTime;
+                    var nextRun = NextScheduledRunUtc(now);
                     var delay = nextRun - now;
-                    if (delay <= TimeSpan.Zero)
-                    {
-                        delay = TimeSpan.FromMinutes(15);
-                    }
 
                     _logger.LogInformation("StateSnapshotService scheduled next run at {NextRun:yyyy-MM-dd HH:mm:ss} UTC (in {Hours:N1} hours).", nextRun, delay.TotalHours);
-                    await Task.Delay(delay, stoppingToken);
+                    await Task.Delay(delay, _timeProvider, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {

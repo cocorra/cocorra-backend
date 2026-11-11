@@ -84,10 +84,10 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
         public bool HasComparison { get; set; }
 
         /// <summary>
-        /// True when <c>To</c> falls inside the current UTC day, so the window is still filling.
+        /// True when <c>To</c> falls inside the current Cairo day, so the window is still filling.
         /// Must be labelled ("week to date") and must never be plotted as a completed period:
         /// without this the current period always looks like a decline, and a dashboard that
-        /// shows a drop every Monday trains its readers to ignore drops.
+        /// shows a drop at the start of every period trains its readers to ignore drops.
         /// </summary>
         public bool IsPartialPeriod { get; set; }
 

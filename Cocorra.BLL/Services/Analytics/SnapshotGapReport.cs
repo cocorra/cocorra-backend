@@ -16,19 +16,19 @@ namespace Cocorra.BLL.Services.Analytics
         /// Dates before this were never measured — they are not counted as gaps,
         /// because the service did not exist yet.
         /// </summary>
-        public DateTime? DataAvailableFromUtc { get; init; }
+        public DateOnly? DataAvailableFrom { get; init; }
 
-        /// <summary>Start of the examined range, clamped to <see cref="DataAvailableFromUtc"/>.</summary>
-        public DateTime FromDate { get; init; }
+        /// <summary>Start of the examined range, clamped to <see cref="DataAvailableFrom"/>.</summary>
+        public DateOnly FromDate { get; init; }
 
-        /// <summary>End of the examined range, clamped to today (UTC).</summary>
-        public DateTime ToDate { get; init; }
+        /// <summary>End of the examined range, clamped to today (Cairo).</summary>
+        public DateOnly ToDate { get; init; }
 
         /// <summary>Dates inside the range with no snapshot rows at all.</summary>
-        public List<DateTime> MissingDates { get; init; } = new();
+        public List<DateOnly> MissingDates { get; init; } = new();
 
         /// <summary>Dates with some rows but fewer than the full expected metric set.</summary>
-        public List<DateTime> IncompleteDates { get; init; } = new();
+        public List<DateOnly> IncompleteDates { get; init; } = new();
 
         /// <summary>How many metric keys a complete date is expected to carry.</summary>
         public int ExpectedMetricsPerDate { get; init; }

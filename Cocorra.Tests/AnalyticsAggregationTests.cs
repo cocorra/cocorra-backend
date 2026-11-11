@@ -7,6 +7,7 @@ using Cocorra.DAL.Data;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Models.Analytics;
+using Cocorra.DAL.Time;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,7 +76,7 @@ namespace Cocorra.Tests
                 anchor = anchor.AddMinutes(-2);
             }
 
-            var today = anchor.Date;
+            var today = CairoTime.DateOf(anchor);
             var hostId = Guid.NewGuid();
             var userId = Guid.NewGuid();
 

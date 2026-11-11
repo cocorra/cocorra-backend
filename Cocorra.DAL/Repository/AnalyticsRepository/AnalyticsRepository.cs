@@ -359,8 +359,8 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     .Where(e =>
                     {
                         var cohortDate = userCohortMap[e.UserId];
-                        var timeDiff = CairoTime.DateOf(e.OccurredAtUtc) - CairoTime.DateOf(cohortDate);
-                        return timeDiff.Days == day;
+                        var daysSinceCohort = CairoTime.DateOf(e.OccurredAtUtc).DayNumber - CairoTime.DateOf(cohortDate).DayNumber;
+                        return daysSinceCohort == day;
                     })
                     .Select(e => e.UserId)
                     .Distinct()

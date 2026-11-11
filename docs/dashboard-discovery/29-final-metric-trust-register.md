@@ -89,7 +89,7 @@
 | | |
 |---|---|
 | **Definition** | Of non-host users who joined in week N, the share who joined again in any later week |
-| **Population** | Non-host joiners, grouped by ISO week (Monday 00:00 UTC) |
+| **Population** | Non-host joiners, grouped by Cairo week (Saturday 00:00 Africa/Cairo) |
 | **Formula** | `COUNT(DISTINCT ReturningJoiners) / COUNT(DISTINCT CohortJoiners) * 100` |
 | **Data source** | `UserEvents` (`room_joined`) |
 | **Endpoint** | `GET /Analytics/Return/Weekly` |

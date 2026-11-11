@@ -5,8 +5,8 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
     /// </summary>
     public class WeeklyReturnCohortDto
     {
-        /// <summary>Cairo calendar date of the Monday that opens the cohort week.</summary>
-        public DateTime WeekStart { get; set; }
+        /// <summary>Cairo calendar date of the Saturday that opens the cohort week.</summary>
+        public DateOnly WeekStart { get; set; }
 
         /// <summary>Distinct non-host users with a room_joined event in this week.</summary>
         public int CohortSize { get; set; }

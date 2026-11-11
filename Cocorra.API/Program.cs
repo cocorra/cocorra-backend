@@ -289,6 +289,7 @@ builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 builder.Services.AddSingleton<IMetricRegistry, MetricRegistry>();
 builder.Services.AddSingleton<EventPipelineMetrics>();
 builder.Services.AddSingleton<IPipelineHealthService, PipelineHealthService>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IDecisionCenterService, DecisionCenterService>();
 builder.Services.AddScoped<IAnalyticsBackfillService, AnalyticsBackfillService>();
 builder.Services.AddSingleton<StateSnapshotService>();

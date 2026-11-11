@@ -168,7 +168,7 @@ namespace Cocorra.BLL.Services.Analytics
             return rawEvents.Count;
         }
 
-        internal static async Task AggregateDailyPlatformMetricsAsync(AppDbContext db, DateTime date, CancellationToken ct)
+        internal static async Task AggregateDailyPlatformMetricsAsync(AppDbContext db, DateOnly date, CancellationToken ct)
         {
             var (dayStart, dayEnd) = CairoTime.DayRangeUtc(date);
 

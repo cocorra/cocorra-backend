@@ -171,12 +171,12 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
         /// Cairo day or month buckets covering [from, to]. Each bucket is its Cairo calendar
         /// date, for the label, and the last UTC tick that still belongs to it.
         /// </summary>
-        private static List<(DateTime LocalDate, DateTime EndUtc)> BuildBucketBoundaries(
+        private static List<(DateOnly LocalDate, DateTime EndUtc)> BuildBucketBoundaries(
             DateTime from,
             DateTime to,
             bool isMonthly)
         {
-            var buckets = new List<(DateTime, DateTime)>();
+            var buckets = new List<(DateOnly, DateTime)>();
             var cursor = isMonthly ? CairoTime.MonthOf(from) : CairoTime.DateOf(from);
 
             while (CairoTime.StartOfDayUtc(cursor) <= to)

@@ -209,7 +209,7 @@ Immediately after a first deployment, this is **expected and correct**:
 | `eventsEnqueued` / `eventsPersisted` | small and rising | Ungated events (`room_joined`, `mic_activated`, `session_started`) still emit with the flags off |
 | `eventsDroppedOnEnqueue` | **`0`** | Anything else is R-1 and blocks Stage B |
 | `deadLetterBacklog` | **`0`** | — |
-| `lastSnapshotDate` | `null` until `SnapshotHourUtc` (00:00 UTC) passes | **The RM-5 clock starts at the first successful run and cannot be backfilled** |
+| `lastSnapshotDate` | `null` until the first capture, about 2 minutes after startup; then daily at 00:15 Cairo time | **The RM-5 clock starts at the first successful run and cannot be backfilled** |
 | `countersSinceUtc` | this deployment's start time | Counters are process-local and reset on restart |
 
 - [ ] After 15 minutes: `aggregationLagHours` is a number, `aggregationConsecutiveFailures` is `0`

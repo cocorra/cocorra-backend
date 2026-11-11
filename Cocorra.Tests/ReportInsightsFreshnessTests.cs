@@ -59,6 +59,47 @@ public class ReportInsightsFreshnessTests : IDisposable
         Assert.Equal(2, second.OpenReports);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReportSubmittedAfterFirstCall_AppearsInSecondCallReportRateTotal(bool explicitBounds)
+    {
+        var reporterId = Guid.NewGuid();
+
+        using (var seedScope = _host.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Users.Add(User(reporterId));
+            db.Reports.Add(Report(reporterId, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        DateTime? from = explicitBounds ? DateTime.UtcNow.AddDays(-1) : null;
+        DateTime? to = explicitBounds ? DateTime.UtcNow.AddHours(1) : null;
+
+        using var readScope = _host.CreateScope();
+        var readDb = readScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = new AnalyticsService(
+            new AnalyticsRepository(readDb),
+            new MemoryCache(new MemoryCacheOptions()),
+            new MetricRegistry());
+
+        var first = (await service.GetReportRateByCategoryAsync(from, to)).Data!;
+        Assert.Equal(1, first.TotalReports);
+        Assert.Equal(1, first.ReportsWithoutRoomContext);
+
+        using (var insertScope = _host.CreateScope())
+        {
+            var db = insertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Reports.Add(Report(reporterId, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var second = (await service.GetReportRateByCategoryAsync(from, to)).Data!;
+        Assert.Equal(2, second.TotalReports);
+        Assert.Equal(2, second.ReportsWithoutRoomContext);
+    }
+
     private static ApplicationUser User(Guid id) => new()
     {
         Id = id,

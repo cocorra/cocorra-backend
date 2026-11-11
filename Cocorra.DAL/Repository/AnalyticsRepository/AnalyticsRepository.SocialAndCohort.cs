@@ -219,7 +219,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     continue;
                 }
 
-                var weeksAvailable = (int)((lastWeek - cohortWeek).TotalDays / 7);
+                var weeksAvailable = (lastWeek.DayNumber - cohortWeek.DayNumber) / 7;
                 var retention = new List<double?>();
 
                 for (var offset = 0; offset <= weeksAvailable; offset++)

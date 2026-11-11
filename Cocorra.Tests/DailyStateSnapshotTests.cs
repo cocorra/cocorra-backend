@@ -17,12 +17,15 @@ namespace Cocorra.Tests
 {
     public class DailyStateSnapshotTests : IDisposable
     {
+        private static readonly DateTimeOffset Now = new(2026, 11, 11, 10, 0, 0, TimeSpan.Zero);
+        private static readonly DateOnly Today = CairoTime.DateOf(Now.UtcDateTime);
+
         private readonly SqliteTestHost _host = new();
 
         public void Dispose() => _host.Dispose();
 
-        private StateSnapshotService CreateService() =>
-            new(_host.Services, NullLogger<StateSnapshotService>.Instance);
+        private StateSnapshotService CreateService(DateTimeOffset? now = null) =>
+            new(_host.Services, NullLogger<StateSnapshotService>.Instance, new FixedTimeProvider(now ?? Now));
 
         [Fact]
         public void ProviderGuard_TestHostUsesSqlite_NotInMemory()
@@ -42,7 +45,7 @@ namespace Cocorra.Tests
             using var scope = _host.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var date = new DateTime(2026, 9, 1);
+            var date = new DateOnly(2026, 9, 1);
 
             // First insert succeeds
             db.DailyStateSnapshots.Add(new DailyStateSnapshot
@@ -70,7 +73,7 @@ namespace Cocorra.Tests
         public async Task CaptureSnapshotAsync_CalculatesAllStateMetricsAccurately()
         {
             // Arrange — seed test data
-            var testDate = new DateTime(2026, 9, 1);
+            var testDate = new DateOnly(2026, 9, 1);
             var reporterId = Guid.NewGuid();
 
             using (var scope = _host.CreateScope())
@@ -143,7 +146,7 @@ namespace Cocorra.Tests
                 await db.SaveChangesAsync();
             }
 
-            var results = await CreateService().CaptureSnapshotAsync(new DateTime(2026, 9, 1));
+            var results = await CreateService().CaptureSnapshotAsync(new DateOnly(2026, 9, 1));
             var map = results.ToDictionary(r => r.MetricKey, r => r.Value);
 
             var numerator = map[StateSnapshotService.MetricActiveUsersWithFcm];
@@ -160,7 +163,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task CaptureSnapshotAsync_IsIdempotent_UpdatesExistingRowWithoutDuplication()
         {
-            var testDate = new DateTime(2026, 9, 1);
+            var testDate = new DateOnly(2026, 9, 1);
             var userId = Guid.NewGuid();
             var expectedRows = StateSnapshotService.ExpectedMetricKeys.Length;
 
@@ -213,7 +216,7 @@ namespace Cocorra.Tests
             // A pre-existing row planted by "another writer" between read and write is the
             // shape of the race. CaptureSnapshotAsync must reconcile it as an update rather
             // than surfacing UX_DailyStateSnapshots_Date_MetricKey to a request-path caller.
-            var testDate = new DateTime(2026, 9, 1);
+            var testDate = new DateOnly(2026, 9, 1);
 
             using (var scope = _host.CreateScope())
             {
@@ -246,7 +249,7 @@ namespace Cocorra.Tests
             // A container restart must not replace a scheduled 00:15 reading with an
             // arbitrary-hour one: queue depth varies through the day, so a series mixing
             // capture hours is not comparable.
-            var testDate = new DateTime(2026, 9, 1);
+            var testDate = new DateOnly(2026, 9, 1);
             var service = CreateService();
 
             var scheduled = await service.CaptureSnapshotAsync(testDate);
@@ -275,9 +278,9 @@ namespace Cocorra.Tests
         {
             var service = CreateService();
 
-            var day1 = new DateTime(2026, 9, 1);
-            var day2 = new DateTime(2026, 9, 2);
-            var day3 = new DateTime(2026, 9, 3);
+            var day1 = new DateOnly(2026, 9, 1);
+            var day2 = new DateOnly(2026, 9, 2);
+            var day3 = new DateOnly(2026, 9, 3);
 
             await service.CaptureSnapshotAsync(day1);
             await service.CaptureSnapshotAsync(day2);
@@ -292,10 +295,23 @@ namespace Cocorra.Tests
         }
 
         [Fact]
+        public async Task CaptureSnapshotAsync_JustAfterCairoMidnight_LabelsTheNewCairoDate()
+        {
+            // 22:30 UTC in November is 00:30 the next day in Cairo (UTC+2).
+            var justAfterCairoMidnight = new DateTimeOffset(2026, 11, 11, 22, 30, 0, TimeSpan.Zero);
+            var service = CreateService(justAfterCairoMidnight);
+
+            var results = await service.CaptureSnapshotAsync();
+
+            Assert.Equal(StateSnapshotService.ExpectedMetricKeys.Length, results.Count);
+            Assert.All(results, s => Assert.Equal(new DateOnly(2026, 11, 12), s.Date));
+        }
+
+        [Fact]
         public async Task GetGapReportAsync_FlagsMissingDates_AndNeverInterpolates()
         {
             var service = CreateService();
-            var today = CairoTime.Today;
+            var today = Today;
 
             // Capture day-5 and day-3, skipping day-4 entirely.
             await service.CaptureSnapshotAsync(today.AddDays(-5));
@@ -303,7 +319,7 @@ namespace Cocorra.Tests
 
             var report = await service.GetGapReportAsync(today.AddDays(-30), today);
 
-            Assert.Equal(today.AddDays(-5), report.DataAvailableFromUtc);
+            Assert.Equal(today.AddDays(-5), report.DataAvailableFrom);
             // Range is clamped to the first capture, so nothing before day-5 is claimed as a gap.
             Assert.Equal(today.AddDays(-5), report.FromDate);
             Assert.True(report.HasGaps);
@@ -322,7 +338,7 @@ namespace Cocorra.Tests
         [Fact]
         public async Task GetGapReportAsync_FlagsIncompleteDates()
         {
-            var day = CairoTime.Today.AddDays(-2);
+            var day = Today.AddDays(-2);
 
             using (var scope = _host.CreateScope())
             {
@@ -347,11 +363,11 @@ namespace Cocorra.Tests
         [Fact]
         public async Task GetGapReportAsync_EmptyTable_ReportsNotMeasured_RatherThanEveryDateMissing()
         {
-            var today = CairoTime.Today;
+            var today = Today;
 
             var report = await CreateService().GetGapReportAsync(today.AddDays(-30), today);
 
-            Assert.Null(report.DataAvailableFromUtc);
+            Assert.Null(report.DataAvailableFrom);
             Assert.False(report.HasGaps);
             Assert.Empty(report.MissingDates);
         }

@@ -9,11 +9,11 @@ namespace Cocorra.BLL.Services.Analytics
     public interface IStateSnapshotService
     {
         /// <summary>
-        /// Captures and persists the daily state snapshot for a given date (defaults to today UTC).
+        /// Captures and persists the daily state snapshot for a given Cairo date (defaults to today).
         /// Idempotent on (Date, MetricKey): re-running updates in place, and a concurrent insert
         /// by another writer is retried as an update rather than surfacing a constraint violation.
         /// </summary>
-        /// <param name="targetDate">Date to label the snapshot with. Defaults to today (UTC).</param>
+        /// <param name="targetDate">Cairo date to label the snapshot with. Defaults to today in Cairo.</param>
         /// <param name="skipIfAlreadyCaptured">
         /// When true, returns the existing rows untouched if the date already has a snapshot.
         /// Used by the startup run so a container restart cannot overwrite a 00:15 reading
@@ -21,7 +21,7 @@ namespace Cocorra.BLL.Services.Analytics
         /// capture hours is not comparable.
         /// </param>
         Task<List<DailyStateSnapshot>> CaptureSnapshotAsync(
-            DateTime? targetDate = null,
+            DateOnly? targetDate = null,
             bool skipIfAlreadyCaptured = false,
             CancellationToken cancellationToken = default);
 
@@ -30,12 +30,12 @@ namespace Cocorra.BLL.Services.Analytics
         /// dates with no snapshot are simply absent. Call <see cref="GetGapReportAsync"/>
         /// to find out which those are — do not treat absence as zero.
         /// </summary>
-        Task<List<DailyStateSnapshot>> GetSnapshotsAsync(DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
+        Task<List<DailyStateSnapshot>> GetSnapshotsAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Reports which dates in the range are missing or incomplete, so uninstrumented
         /// periods can be rendered as visible gaps rather than interpolated or shown as zero.
         /// </summary>
-        Task<SnapshotGapReport> GetGapReportAsync(DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
+        Task<SnapshotGapReport> GetGapReportAsync(DateOnly requestedFrom, DateOnly requestedTo, CancellationToken cancellationToken = default);
     }
 }
