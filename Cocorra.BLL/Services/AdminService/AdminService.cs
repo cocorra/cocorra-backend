@@ -254,7 +254,7 @@ namespace Cocorra.BLL.Services.AdminService
                             };
                             if (banLockoutEnd.HasValue)
                             {
-                                banData["lockout_end"] = banLockoutEnd.Value.ToString("o");
+                                banData["lockout_end"] = banLockoutEnd.Value.UtcDateTime.ToString("O");
                             }
                             await _pushService.SendPushNotificationAsync(user.FcmToken, "", "", banData);
                             break;

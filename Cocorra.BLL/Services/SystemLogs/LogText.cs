@@ -1,4 +1,5 @@
 using System;
+using Cocorra.BLL.Base;
 
 namespace Cocorra.BLL.Services.SystemLogs
 {
@@ -21,12 +22,7 @@ namespace Cocorra.BLL.Services.SystemLogs
         /// Stored timestamps are UTC. A filter value without an offset is read as UTC too, so the
         /// same query string means the same instant regardless of the server's time zone.
         /// </summary>
-        public static DateTime? ToUtc(DateTime? value) => value?.Kind switch
-        {
-            DateTimeKind.Local => value.Value.ToUniversalTime(),
-            DateTimeKind.Unspecified => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc),
-            _ => value
-        };
+        public static DateTime? ToUtc(DateTime? value) => UtcDateTime.Normalize(value);
 
         /// <summary>EF materializes datetime2 as Unspecified; marking it UTC makes it serialize with "Z".</summary>
         public static DateTime AsUtc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);

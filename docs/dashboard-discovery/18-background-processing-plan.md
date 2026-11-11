@@ -188,7 +188,7 @@ Capture pure-state counts that have no event trail (`17-` RM-5).
 | Aspect | Specification |
 |---|---|
 | **Trigger** | Timer. |
-| **Schedule** | Daily at 00:15 UTC — after the date boundary, before the first aggregation run of the day. |
+| **Schedule** | Daily at 00:15 Africa/Cairo — after the Cairo date boundary, before the first aggregation run of the day. |
 | **Batch strategy** | None. Five `COUNT` queries against existing tables. |
 | **Checkpoint** | The natural key `(Date, MetricKey)` is the checkpoint. A row's existence means the day is captured. |
 | **Retry** | **NEW and necessary.** On failure, retry within the same day. **INFERENCE** — this is the one job where a missed run is *unrecoverable*: the count cannot be reconstructed after the fact. Unlike the aggregator, it cannot simply catch up next cycle. |
@@ -229,7 +229,7 @@ open_reports                  COUNT(Reports WHERE Status = 'Open')
 |---|---|
 | `EventFlushService` | Immediate — ingestion must never wait |
 | `AnalyticsAggregationService` | Delay ~2 minutes, then hourly |
-| `StateSnapshotService` | Delay ~5 minutes, then daily at 00:15 UTC |
+| `StateSnapshotService` | Delay ~5 minutes, then daily at 00:15 Africa/Cairo |
 | `EventCleanupService` | **Delay, then scheduled** — currently runs immediately at startup |
 
 **INFERENCE** — without staggering, a container restart fires a mass delete, a full aggregation pass, and a snapshot simultaneously while the API is also serving its first requests. The current startup-triggered purge is the worst offender because it is the heaviest.
@@ -272,7 +272,6 @@ Analytics:
   AggregationIntervalMinutes    default 60
   AggregationBatchSize          default 50000
   AggregationTrailingDays       default 45
-  SnapshotHourUtc               default 0
 ```
 
 **FACT** — `Program.cs:205-207` already throws at startup if `Analytics:IpHashSalt` is absent. **RECOMMENDATION** — extend that guard to validate the new numeric values are within sane bounds, so a misconfigured batch size fails at startup rather than at 3am.
@@ -286,7 +285,7 @@ Analytics:
 | `EventFlushService` | **MODIFY** | Channel read | Continuous | Channel itself | **Bounded + backoff** | `UNIQUE(EventId)` | **Dead-letter** |
 | `EventCleanupService` | **MODIFY** | Timer | Daily, low-traffic hour | Cutoff predicate | Next cycle | Inherent | Next cycle |
 | `AnalyticsAggregationService` | **NEW** | Timer | Hourly at :05 | `LastProcessedEventId` | Watermark not advanced | UPSERT on natural key | Automatic |
-| `StateSnapshotService` | **NEW** | Timer | Daily 00:15 UTC | `(Date, MetricKey)` | **Same-day retry** | UPSERT | **None — gaps permanent** |
+| `StateSnapshotService` | **NEW** | Timer | Daily 00:15 Africa/Cairo | `(Date, MetricKey)` | **Same-day retry** | UPSERT | **None — gaps permanent** |
 
 **Three conclusions (INFERENCE).**
 

@@ -41,6 +41,11 @@ namespace Cocorra.DAL.Data
         public DbSet<AuditLog> AuditLogs { get; set; }
         public DbSet<RoleDisplayName> RoleDisplayNames { get; set; }
 
+        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        {
+            configurationBuilder.Properties<DateTime>().HaveConversion<UtcKindConverter>();
+        }
+
         protected override void OnModelCreating(ModelBuilder builder)
         {
             base.OnModelCreating(builder);

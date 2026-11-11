@@ -11,6 +11,10 @@ public class CreateRoomDto
 
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Planned start as an instant with an offset ("Z" or "+02:00"); offset-less values are
+    /// rejected. Omitted or in the past, the room goes live immediately.
+    /// </summary>
     public DateTime? ScheduledStartDate { get; set; }
 
     /// <summary>

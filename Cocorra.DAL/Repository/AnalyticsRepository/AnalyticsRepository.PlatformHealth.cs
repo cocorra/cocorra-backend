@@ -1,5 +1,6 @@
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS.AnalyticsDto;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -22,12 +23,12 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             DateTime toUtc,
             bool compareToPreviousPeriod)
         {
-            var fromDate = fromUtc.Date;
-            var toDate = toUtc.Date;
+            var fromDate = CairoTime.DateOf(fromUtc);
+            var toDate = CairoTime.DateOf(toUtc);
 
             // Equal-length preceding window, immediately adjacent. Comparing a 7-day period to a
             // 30-day one would produce a delta that is arithmetic rather than meaningful.
-            var spanDays = Math.Max(1, (toDate - fromDate).Days + 1);
+            var spanDays = Math.Max(1, toDate.DayNumber - fromDate.DayNumber + 1);
             var prevToDate = fromDate.AddDays(-1);
             var prevFromDate = prevToDate.AddDays(-(spanDays - 1));
 
@@ -36,19 +37,19 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 From = fromUtc,
                 To = toUtc,
                 HasComparison = compareToPreviousPeriod,
-                PreviousFrom = compareToPreviousPeriod ? prevFromDate : null,
-                PreviousTo = compareToPreviousPeriod ? prevToDate.AddDays(1).AddTicks(-1) : null,
-                // "To" inside today means the window is still accumulating.
-                IsPartialPeriod = toUtc >= DateTime.UtcNow.Date
+                PreviousFrom = compareToPreviousPeriod ? CairoTime.StartOfDayUtc(prevFromDate) : null,
+                PreviousTo = compareToPreviousPeriod ? CairoTime.StartOfDayUtc(fromDate).AddTicks(-1) : null,
+                // "To" inside the current Cairo day means the window is still accumulating.
+                IsPartialPeriod = toUtc >= CairoTime.StartOfDayUtc(CairoTime.Today)
             };
 
             var earliest = await _context.DailyPlatformMetrics
                 .AsNoTracking()
                 .OrderBy(m => m.Date)
-                .Select(m => (DateTime?)m.Date)
+                .Select(m => (DateOnly?)m.Date)
                 .FirstOrDefaultAsync();
 
-            result.DataAvailableFromUtc = earliest;
+            result.DataAvailableFromUtc = earliest is { } earliestDate ? CairoTime.StartOfDayUtc(earliestDate) : null;
             result.ReadModelsPopulated = earliest is not null;
 
             var current = await _context.DailyPlatformMetrics
@@ -96,13 +97,13 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     "M-100", "Weekly Participating Users", "count",
                     Sum(current, r => r.DistinctJoiningUsers),
                     havePrevious ? Sum(previous, r => r.DistinctJoiningUsers) : null,
-                    haveCurrent, gapReason, earliest,
+                    haveCurrent, gapReason, result.DataAvailableFromUtc,
                     Router.AnalyticsRouting.Participation),
 
                 BuildMetric(
                     "M-101", "Speaking Conversion Rate", "percent",
                     Conversion(current), havePrevious ? Conversion(previous) : null,
-                    haveCurrent, gapReason, earliest,
+                    haveCurrent, gapReason, result.DataAvailableFromUtc,
                     Router.AnalyticsRouting.StageFunnel),
 
                 BuildMetric(
@@ -113,28 +114,28 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     // metric's limitations rather than silently approximated.
                     current.Count == 0 ? null : current.Max(r => (double)r.DistinctActiveHosts),
                     havePrevious ? previous.Max(r => (double)r.DistinctActiveHosts) : null,
-                    haveCurrent, gapReason, earliest,
+                    haveCurrent, gapReason, result.DataAvailableFromUtc,
                     Router.AnalyticsRouting.SupplyHealth),
 
                 BuildMetric(
                     "M-205", "Rooms Gone Live", "count",
                     Sum(current, r => r.RoomsGoneLive),
                     havePrevious ? Sum(previous, r => r.RoomsGoneLive) : null,
-                    haveCurrent, gapReason, earliest,
+                    haveCurrent, gapReason, result.DataAvailableFromUtc,
                     Router.AnalyticsRouting.Rooms),
 
                 BuildMetric(
                     "M-508", "New Activations", "count",
                     Sum(current, r => r.VoiceVerificationsApproved),
                     havePrevious ? Sum(previous, r => r.VoiceVerificationsApproved) : null,
-                    haveCurrent, gapReason, earliest,
+                    haveCurrent, gapReason, result.DataAvailableFromUtc,
                     Router.AnalyticsRouting.ActivationFunnel),
 
                 BuildMetric(
                     "M-501", "New Registrations", "count",
                     Sum(current, r => r.NewRegistrations),
                     havePrevious ? Sum(previous, r => r.NewRegistrations) : null,
-                    haveCurrent, gapReason, earliest,
+                    haveCurrent, gapReason, result.DataAvailableFromUtc,
                     Router.AnalyticsRouting.UserGrowth)
             };
 

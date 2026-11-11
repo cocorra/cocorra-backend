@@ -50,7 +50,7 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
         public long UnaggregatedEventCount { get; set; }
 
         // ── Snapshot coverage ───────────────────────────────────────────────
-        public DateTime? LastSnapshotDate { get; set; }
+        public DateOnly? LastSnapshotDate { get; set; }
 
         /// <summary>
         /// Dates in the last 30 days with no state snapshot. These are permanent holes: state

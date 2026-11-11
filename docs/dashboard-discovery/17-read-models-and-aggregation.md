@@ -246,7 +246,7 @@ RM-1 … RM-4  (indefinite retention)
 dbo.AspNetUsers, dbo.Reports, dbo.Rooms   (current state)
         │
         ▼
-StateSnapshotService : BackgroundService            [daily, 00:15 UTC]
+StateSnapshotService : BackgroundService            [daily, 00:15 Africa/Cairo]
         │  └─ idempotent UPSERT on (Date, MetricKey)
         ▼
 RM-5  (indefinite retention)
@@ -355,7 +355,7 @@ For each affected (Date, RoomId):
 | **RM-2** `DailyRoomMetrics` | M-203, M-400, M-401, M-402, M-403, M-501 | `UserEvents`, `Rooms` | Hourly | Per room-day, indefinite |
 | **RM-3** `DailyHostMetrics` | M-200, M-201, M-202, M-204 | `Rooms`, `UserEvents` | Hourly | Per host-day, indefinite |
 | **RM-4** `DailyFunnelMetrics` | M-300, M-400 | `UserEvents` | Hourly, 45-day trailing recompute | Per cohort-day, indefinite |
-| **RM-5** `DailyStateSnapshots` | M-303, token coverage, open reports | `AspNetUsers`, `Reports` | Daily 00:15 UTC | Daily, indefinite |
+| **RM-5** `DailyStateSnapshots` | M-303, token coverage, open reports | `AspNetUsers`, `Reports` | Daily 00:15 Africa/Cairo | Daily, indefinite |
 
 **Three conclusions (INFERENCE).**
 

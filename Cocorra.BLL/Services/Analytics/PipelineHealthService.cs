@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.DAL.Data;
+using Cocorra.DAL.Time;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,13 +55,13 @@ namespace Cocorra.BLL.Services.Analytics
             var watermark = checkpoint?.LastProcessedEventId ?? 0;
             var unaggregated = await db.UserEvents.LongCountAsync(e => e.Id > watermark, cancellationToken);
 
-            var today = DateTime.UtcNow.Date;
+            var today = CairoTime.Today;
             var gapReport = await _snapshots.GetGapReportAsync(today.AddDays(-30), today, cancellationToken);
 
             var lastSnapshot = await db.DailyStateSnapshots
                 .AsNoTracking()
                 .OrderByDescending(s => s.Date)
-                .Select(s => (DateTime?)s.Date)
+                .Select(s => (DateOnly?)s.Date)
                 .FirstOrDefaultAsync(cancellationToken);
 
             var lagHours = checkpoint is null

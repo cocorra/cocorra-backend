@@ -23,7 +23,10 @@ namespace Cocorra.BLL.Services.AuditLogs
         private const int MaxUserAgentLength = 512;
 
         // The dashboard reads details keys as-is, so they are stored in the API's casing.
-        private static readonly JsonSerializerOptions DetailsJsonOptions = new(JsonSerializerDefaults.Web);
+        private static readonly JsonSerializerOptions DetailsJsonOptions = new(JsonSerializerDefaults.Web)
+        {
+            Converters = { new UtcDateTimeJsonConverter() }
+        };
 
         private readonly IAuditLogRepository _auditLogRepo;
         private readonly IHttpContextAccessor _httpContextAccessor;

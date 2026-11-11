@@ -50,11 +50,11 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
     }
 
     /// <summary>
-    /// AN-020 / B-3: when rooms actually run, in UTC, with the offset a reader should apply.
+    /// AN-020 / B-3: when rooms actually run, by Cairo hour of day (0–23).
     /// </summary>
     public class HostSchedulePointDto
     {
-        public int HourUtc { get; set; }
+        public int Hour { get; set; }
         public int RoomsStarted { get; set; }
     }
 
@@ -67,14 +67,7 @@ namespace Cocorra.DAL.DTOS.AnalyticsDto
         public IEnumerable<ActiveHostsDataPointDto> ActiveHosts { get; set; } = [];
         public HostRetentionDto HostRetention { get; set; } = new();
         public HostConcentrationDto Concentration { get; set; } = new();
-        public IEnumerable<HostSchedulePointDto> ScheduleByHourUtc { get; set; } = [];
-
-        /// <summary>
-        /// Minutes to add to the UTC hours above for the platform's predominant local time
-        /// (UTC+3). Returned rather than applied server-side so the caller decides how to
-        /// present it and the underlying figure stays unambiguous.
-        /// </summary>
-        public int SuggestedDisplayOffsetMinutes { get; set; } = AnalyticsDisplayDefaults.TimeZoneOffsetMinutes;
+        public IEnumerable<HostSchedulePointDto> ScheduleByHour { get; set; } = [];
 
         /// <summary>
         /// Earliest room creation backing this series. Rooms are relational and never purged,

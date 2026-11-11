@@ -60,13 +60,11 @@ Setting `EnableHighFrequencyEvents: true` while `EnableNewEventEmission` is `fal
 | `AggregationIntervalMinutes` | `60` | |
 | `AggregationBatchSize` | `50000` | |
 | `AggregationTrailingDays` | `45` | Funnel-cohort recomputation window |
-| `SnapshotHourUtc` | `0` | When `StateSnapshotService` captures state |
 
-## Display and logging
+## Logging
 
 | Key | Default | Notes |
 |---|:--:|---|
-| `DisplayTimeZoneOffsetMinutes` | `180` | AN-036. A **display hint only** — surfaced as `Meta.display.suggestedDisplayOffsetMinutes`. Changing it never changes what is stored or how anything is bucketed. |
 | `StructuredLogPath` | *(unset)* | AN-042. Unset keeps current stdout-only behaviour. Set to a path **on a mounted volume** to also write newline-delimited JSON that survives a container restart. |
 | `StructuredLogMinimumLevel` | `Warning` | |
 

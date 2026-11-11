@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Models.Analytics;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -31,6 +32,7 @@ namespace Cocorra.BLL.Services.Analytics
     public class DecisionCenterService : IDecisionCenterService
     {
         private readonly IServiceProvider _serviceProvider;
+        private readonly TimeProvider _timeProvider;
 
         /// <summary>
         /// Weeks of history before any signal may be called significant. Four to six weeks was
@@ -45,9 +47,10 @@ namespace Cocorra.BLL.Services.Analytics
         /// </summary>
         private const double SignificanceSigma = 2.0;
 
-        public DecisionCenterService(IServiceProvider serviceProvider)
+        public DecisionCenterService(IServiceProvider serviceProvider, TimeProvider timeProvider)
         {
             _serviceProvider = serviceProvider;
+            _timeProvider = timeProvider;
         }
 
         public async Task<DecisionCenterDto> GetDecisionCenterAsync(CancellationToken cancellationToken = default)
@@ -55,7 +58,7 @@ namespace Cocorra.BLL.Services.Analytics
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var today = DateTime.UtcNow.Date;
+            var today = CairoTime.DateOf(_timeProvider.GetUtcNow().UtcDateTime);
 
             var daily = await db.DailyPlatformMetrics
                 .AsNoTracking()
@@ -64,7 +67,7 @@ namespace Cocorra.BLL.Services.Analytics
                 .ToListAsync(cancellationToken);
 
             var weeks = daily
-                .GroupBy(m => StartOfWeekUtc(m.Date))
+                .GroupBy(m => CairoTime.StartOfWeek(m.Date))
                 .OrderBy(g => g.Key)
                 .Select(g => new WeeklyRollup
                 {
@@ -80,8 +83,8 @@ namespace Cocorra.BLL.Services.Analytics
                 .ToList();
 
             // The current week is partial by definition; comparing a Tuesday against a full week
-            // would report a collapse every Monday.
-            var completeWeeks = weeks.Where(w => w.WeekStart < StartOfWeekUtc(today)).ToList();
+            // would report a collapse at the start of every week.
+            var completeWeeks = weeks.Where(w => w.WeekStart < CairoTime.StartOfWeek(today)).ToList();
             var weeksOfHistory = completeWeeks.Count;
             var hasBaseline = weeksOfHistory >= RequiredBaselineWeeks;
 
@@ -118,7 +121,7 @@ namespace Cocorra.BLL.Services.Analytics
 
             return new DecisionCenterDto
             {
-                GeneratedAtUtc = DateTime.UtcNow,
+                GeneratedAtUtc = _timeProvider.GetUtcNow().UtcDateTime,
                 Signals = signals,
                 WeeksOfHistory = weeksOfHistory,
                 HasBaseline = hasBaseline,
@@ -214,16 +217,9 @@ namespace Cocorra.BLL.Services.Analytics
             return signal;
         }
 
-        private static DateTime StartOfWeekUtc(DateTime value)
-        {
-            var date = value.Date;
-            var offset = ((int)date.DayOfWeek + 6) % 7; // Monday = 0
-            return date.AddDays(-offset);
-        }
-
         private sealed class WeeklyRollup
         {
-            public DateTime WeekStart { get; init; }
+            public DateOnly WeekStart { get; init; }
             public int DistinctJoiningUsers { get; init; }
             public int DistinctSpeakingUsers { get; init; }
             public int DistinctActiveHosts { get; init; }

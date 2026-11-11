@@ -1,5 +1,6 @@
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Enums;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -30,6 +31,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     r.HostId,
                     r.CreatedAt,
                     r.StartDate,
+                    r.WentLiveAt,
                     r.Status
                 })
                 .ToListAsync();
@@ -42,8 +44,8 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             // ── B-1: distinct active hosts per period ───────────────────────
             var activeHosts = roomsInWindow
                 .GroupBy(r => isMonthly
-                    ? new DateTime(r.CreatedAt.Year, r.CreatedAt.Month, 1)
-                    : r.CreatedAt.Date)
+                    ? CairoTime.MonthOf(r.CreatedAt)
+                    : CairoTime.DateOf(r.CreatedAt))
                 .OrderBy(g => g.Key)
                 .Select(g => new ActiveHostsDataPointDto
                 {
@@ -122,10 +124,11 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             };
 
             // ── B-3: when rooms actually run ────────────────────────────────
+            // StartDate is the planned start of a scheduled room; WentLiveAt is when it opened.
             var schedule = roomsInWindow
-                .GroupBy(r => r.StartDate.Hour)
+                .GroupBy(r => CairoTime.HourOf(r.WentLiveAt ?? r.StartDate))
                 .OrderBy(g => g.Key)
-                .Select(g => new HostSchedulePointDto { HourUtc = g.Key, RoomsStarted = g.Count() })
+                .Select(g => new HostSchedulePointDto { Hour = g.Key, RoomsStarted = g.Count() })
                 .ToList();
 
             var earliestRoom = await _context.Rooms
@@ -142,7 +145,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 ActiveHosts = activeHosts,
                 HostRetention = hostRetention,
                 Concentration = concentration,
-                ScheduleByHourUtc = schedule,
+                ScheduleByHour = schedule,
                 DataAvailableFromUtc = earliestRoom
             };
         }

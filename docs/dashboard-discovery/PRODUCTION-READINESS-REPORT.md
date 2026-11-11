@@ -343,8 +343,6 @@ Earlier documentation stated *"the baseline clock starts when `EnableHighFrequen
 | `Analytics__AggregationIntervalMinutes` | No | `appsettings.json` | `60` |
 | `Analytics__AggregationBatchSize` | No | `appsettings.json` | `50000` |
 | `Analytics__AggregationTrailingDays` | No | `appsettings.json` | `45` |
-| `Analytics__SnapshotHourUtc` | No | `appsettings.json` | `0` |
-| `Analytics__DisplayTimeZoneOffsetMinutes` | No | `appsettings.json` | `180` — display hint only, never affects storage or bucketing |
 | `Analytics__StructuredLogPath` | No | env | **unset** → stdout only. **Recommended before Stage B**, pointed at a mounted volume |
 | `Analytics__StructuredLogMinimumLevel` | No | `appsettings.json` | `Warning` |
 

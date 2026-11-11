@@ -233,7 +233,7 @@ namespace Cocorra.BLL.Services.SupportService
                         var data = new Dictionary<string, string>
                         {
                             { "type", "account_locked" },
-                            { "lockout_end", muteLockoutEnd.ToString("o") }
+                            { "lockout_end", muteLockoutEnd.UtcDateTime.ToString("O") }
                         };
                         await _pushService.SendPushNotificationAsync(
                             muteUser.FcmToken, "", "", data);
@@ -280,7 +280,7 @@ namespace Cocorra.BLL.Services.SupportService
                         var data = new Dictionary<string, string>
                         {
                             { "type", "account_locked" },
-                            { "lockout_end", DateTimeOffset.UtcNow.AddYears(100).ToString("o") }
+                            { "lockout_end", DateTimeOffset.UtcNow.AddYears(100).UtcDateTime.ToString("O") }
                         };
                         await _pushService.SendPushNotificationAsync(
                             banUser.FcmToken, "", "", data);

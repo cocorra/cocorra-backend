@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -24,22 +25,19 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
         {
             var isMonthly = granularity.Equals("monthly", StringComparison.OrdinalIgnoreCase);
 
-            // ── Registrations per bucket, aggregated server-side (M-501) ────
-            // The previous implementation pulled every user row in the window into memory and
-            // grouped in LINQ-to-Objects.
-            var registrationBuckets = isMonthly
-                ? await _context.Users
-                    .AsNoTracking()
-                    .Where(u => u.CreatedAt >= from && u.CreatedAt <= to)
-                    .GroupBy(u => new { u.CreatedAt.Year, u.CreatedAt.Month })
-                    .Select(g => new { Bucket = new DateTime(g.Key.Year, g.Key.Month, 1), Count = g.Count() })
-                    .ToListAsync()
-                : await _context.Users
-                    .AsNoTracking()
-                    .Where(u => u.CreatedAt >= from && u.CreatedAt <= to)
-                    .GroupBy(u => u.CreatedAt.Date)
-                    .Select(g => new { Bucket = g.Key, Count = g.Count() })
-                    .ToListAsync();
+            // ── Registrations per Cairo bucket (M-501) ──────────────────────
+            // Counted per UTC hour in SQL so only hour rows, not user rows, leave the database.
+            var hourlyRegistrations = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.CreatedAt >= from && u.CreatedAt <= to)
+                .GroupBy(u => new { u.CreatedAt.Date, u.CreatedAt.Hour })
+                .Select(g => new UtcHourCount { Date = g.Key.Date, Hour = g.Key.Hour, Count = g.Count() })
+                .ToListAsync();
+
+            var registrationBuckets = hourlyRegistrations
+                .GroupBy(h => isMonthly ? CairoTime.MonthOf(h.StartUtc) : CairoTime.DateOf(h.StartUtc))
+                .Select(g => new { Bucket = g.Key, Count = g.Sum(h => h.Count) })
+                .ToList();
 
             var dataPoints = registrationBuckets
                 .OrderBy(b => b.Bucket)
@@ -129,7 +127,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             var latestStatus = new Dictionary<Guid, UserStatus>();
             var eventIndex = 0;
 
-            foreach (var (bucketStart, bucketEnd) in buckets)
+            foreach (var (bucketLabelDate, bucketEnd) in buckets)
             {
                 while (eventIndex < statusEvents.Count && statusEvents[eventIndex].OccurredAtUtc <= bucketEnd)
                 {
@@ -155,7 +153,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
 
                 series.Add(new StatusAtTimeDataPointDto
                 {
-                    Period = isMonthly ? bucketStart.ToString("yyyy-MM") : bucketStart.ToString("yyyy-MM-dd"),
+                    Period = isMonthly ? bucketLabelDate.ToString("yyyy-MM") : bucketLabelDate.ToString("yyyy-MM-dd"),
                     ActiveUsers = latestStatus.Count(kv => kv.Value == UserStatus.Active),
                     BannedUsers = latestStatus.Count(kv => kv.Value == UserStatus.Banned),
                     RejectedUsers = latestStatus.Count(kv => kv.Value == UserStatus.Rejected),
@@ -169,32 +167,23 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             return (series, availableFrom);
         }
 
-        private static List<(DateTime Start, DateTime End)> BuildBucketBoundaries(
+        /// <summary>
+        /// Cairo day or month buckets covering [from, to]. Each bucket is its Cairo calendar
+        /// date, for the label, and the last UTC tick that still belongs to it.
+        /// </summary>
+        private static List<(DateOnly LocalDate, DateTime EndUtc)> BuildBucketBoundaries(
             DateTime from,
             DateTime to,
             bool isMonthly)
         {
-            var buckets = new List<(DateTime, DateTime)>();
+            var buckets = new List<(DateOnly, DateTime)>();
+            var cursor = isMonthly ? CairoTime.MonthOf(from) : CairoTime.DateOf(from);
 
-            if (isMonthly)
+            while (CairoTime.StartOfDayUtc(cursor) <= to)
             {
-                var cursor = new DateTime(from.Year, from.Month, 1);
-                while (cursor <= to)
-                {
-                    var next = cursor.AddMonths(1);
-                    buckets.Add((cursor, next.AddTicks(-1)));
-                    cursor = next;
-                }
-            }
-            else
-            {
-                var cursor = from.Date;
-                while (cursor <= to)
-                {
-                    var next = cursor.AddDays(1);
-                    buckets.Add((cursor, next.AddTicks(-1)));
-                    cursor = next;
-                }
+                var next = isMonthly ? cursor.AddMonths(1) : cursor.AddDays(1);
+                buckets.Add((cursor, CairoTime.StartOfDayUtc(next).AddTicks(-1)));
+                cursor = next;
             }
 
             return buckets;

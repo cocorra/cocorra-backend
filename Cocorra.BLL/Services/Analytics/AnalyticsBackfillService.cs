@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cocorra.DAL.Data;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -12,14 +13,14 @@ namespace Cocorra.BLL.Services.Analytics
 {
     public class BackfillResult
     {
-        public DateTime FromDate { get; set; }
-        public DateTime ToDate { get; set; }
+        public DateOnly FromDate { get; set; }
+        public DateOnly ToDate { get; set; }
         public int DatesProcessed { get; set; }
         public int DatesSkipped { get; set; }
         public bool Completed { get; set; }
 
         /// <summary>Where to resume from if the run was interrupted or throttled out.</summary>
-        public DateTime? ResumeFromDate { get; set; }
+        public DateOnly? ResumeFromDate { get; set; }
 
         public List<string> Notes { get; set; } = new();
     }
@@ -78,9 +79,9 @@ namespace Cocorra.BLL.Services.Analytics
             bool force = false,
             CancellationToken cancellationToken = default)
         {
-            var from = fromDate.Date;
-            var to = toDate.Date;
-            var today = DateTime.UtcNow.Date;
+            var from = CairoTime.CalendarDateOf(fromDate);
+            var to = CairoTime.CalendarDateOf(toDate);
+            var today = CairoTime.Today;
 
             if (to > today)
             {

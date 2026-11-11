@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using System.Threading.RateLimiting;
 using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.SystemLogs;
+using Cocorra.BLL.Base;
 using Cocorra.API.Hubs;
 using Cocorra.API.Seeder;
 using Cocorra.BLL.Services.AdminService;
@@ -75,7 +76,10 @@ builder.Services.AddControllers()
         // so this is backward-compatible for any legacy clients.
         options.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter());
+        options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter());
     });
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()));
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
@@ -168,7 +172,8 @@ builder.Services.AddSignalR(options =>
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.MaximumReceiveMessageSize = 32 * 1024; // 32KB max per message
     options.StreamBufferCapacity = 10;
-});
+}).AddJsonProtocol(options =>
+    options.PayloadSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()));
 builder.Services.AddScoped<IBlockedDevicesRepository, BlockedDevicesRepository>();
 builder.Services.AddScoped<IBlockedDevicesService, BlockedDevicesService>();
 builder.Services.AddScoped<IUploadVoice, UploadVoice>();
@@ -284,6 +289,7 @@ builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 builder.Services.AddSingleton<IMetricRegistry, MetricRegistry>();
 builder.Services.AddSingleton<EventPipelineMetrics>();
 builder.Services.AddSingleton<IPipelineHealthService, PipelineHealthService>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IDecisionCenterService, DecisionCenterService>();
 builder.Services.AddScoped<IAnalyticsBackfillService, AnalyticsBackfillService>();
 builder.Services.AddSingleton<StateSnapshotService>();

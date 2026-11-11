@@ -2,6 +2,7 @@ using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -114,9 +115,9 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 return new ParticipationStatsDto { From = from, To = to };
             }
 
-            // ── Peak hours (UTC) ───────────────────────────────────────────
+            // ── Peak hours (Cairo) ─────────────────────────────────────────
             var peakHours = participants
-                .GroupBy(p => p.JoinedAt.Hour)
+                .GroupBy(p => CairoTime.HourOf(p.JoinedAt))
                 .Select(g => new PeakHourDto { Hour = g.Key, JoinCount = g.Count() })
                 .OrderBy(h => h.Hour)
                 .ToList();
@@ -358,8 +359,8 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                     .Where(e =>
                     {
                         var cohortDate = userCohortMap[e.UserId];
-                        var timeDiff = e.OccurredAtUtc.Date - cohortDate.Date;
-                        return timeDiff.Days == day;
+                        var daysSinceCohort = CairoTime.DateOf(e.OccurredAtUtc).DayNumber - CairoTime.DateOf(cohortDate).DayNumber;
+                        return daysSinceCohort == day;
                     })
                     .Select(e => e.UserId)
                     .Distinct()
@@ -426,28 +427,41 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 .ToList();
         }
 
-        // Peak active hours — grouped by UTC hour-of-day (DateTime.Hour → DATEPART on SQL Server).
+        /// <summary>
+        /// Peak active hours by Cairo hour-of-day. Active users are distinct per Cairo hour, and
+        /// one Cairo hour maps to a different UTC hour on either side of a DST change, so rows are
+        /// grouped by UTC hour and user within each constant-offset span, then merged in memory.
+        /// </summary>
         public async Task<List<HourlyActivityDto>> GetPeakActiveHoursAsync(
             DateTime from,
             DateTime to)
         {
-            var rows = await _context.UserEvents
-                .AsNoTracking()
-                .Where(e => e.OccurredAtUtc >= from && e.OccurredAtUtc <= to)
-                .GroupBy(e => e.OccurredAtUtc.Hour)
-                .Select(g => new HourlyActivityDto
+            var activity = new List<(int CairoHour, Guid? UserId, int Events)>();
+
+            foreach (var (startUtc, endUtc, offset) in CairoTime.OffsetPeriods(from, to))
+            {
+                var rows = await _context.UserEvents
+                    .AsNoTracking()
+                    .Where(e => e.OccurredAtUtc >= startUtc && e.OccurredAtUtc < endUtc)
+                    .GroupBy(e => new { e.OccurredAtUtc.Hour, e.UserId })
+                    .Select(g => new { g.Key.Hour, g.Key.UserId, Events = g.Count() })
+                    .ToListAsync();
+
+                activity.AddRange(rows.Select(r => ((r.Hour + offset.Hours) % 24, r.UserId, r.Events)));
+            }
+
+            var byHour = activity
+                .GroupBy(a => a.CairoHour)
+                .ToDictionary(g => g.Key, g => new HourlyActivityDto
                 {
                     Hour = g.Key,
-                    EventCount = g.Count(),
-                    ActiveUsers = g.Select(x => x.UserId).Distinct().Count()
-                })
-                .ToListAsync();
+                    EventCount = g.Sum(a => a.Events),
+                    ActiveUsers = g.Where(a => a.UserId != null).Select(a => a.UserId).Distinct().Count()
+                });
 
             // Fill 0–23 so the dashboard chart always has every hour.
             return Enumerable.Range(0, 24)
-                .Select(h => rows.FirstOrDefault(r => r.Hour == h)
-                             ?? new HourlyActivityDto { Hour = h })
-                .OrderBy(r => r.Hour)
+                .Select(h => byHour.GetValueOrDefault(h) ?? new HourlyActivityDto { Hour = h })
                 .ToList();
         }
 

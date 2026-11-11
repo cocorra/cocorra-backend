@@ -7,6 +7,7 @@ using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Models.Analytics;
 using Cocorra.DAL.Repository.AnalyticsRepository;
+using Cocorra.DAL.Time;
 using Cocorra.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -82,8 +83,6 @@ namespace Cocorra.Tests
                 Assert.Equal(5, march.RoomsCreated);
                 Assert.Equal(4, march.RoomsGoneLive);
                 Assert.Equal(2, march.DistinctHosts);
-
-                Assert.Equal(180, result.SuggestedDisplayOffsetMinutes);
             }
         }
 
@@ -204,7 +203,7 @@ namespace Cocorra.Tests
 
                 db.DailyStateSnapshots.Add(new DailyStateSnapshot
                 {
-                    Date = from.Date,
+                    Date = CairoTime.DateOf(from),
                     MetricKey = StateSnapshotService.MetricPendingQueue,
                     Value = 12,
                     ComputedAtUtc = from
@@ -287,6 +286,7 @@ namespace Cocorra.Tests
         {
             var host = Guid.NewGuid();
             var day = new DateTime(2026, 5, 10, 0, 0, 0, DateTimeKind.Utc);
+            var dayDate = CairoTime.DateOf(day);
 
             using (var scope = _host.CreateScope())
             {
@@ -312,11 +312,11 @@ namespace Cocorra.Tests
             using (var scope = _host.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                Assert.Equal(1, await db.DailyPlatformMetrics.CountAsync(m => m.Date == day));
+                Assert.Equal(1, await db.DailyPlatformMetrics.CountAsync(m => m.Date == dayDate));
 
                 // RM-3 is the standout: it derives from Rooms, which is never purged, so host
                 // history reconstructs from the platform's first day.
-                Assert.Equal(1, await db.DailyHostMetrics.CountAsync(m => m.Date == day && m.HostId == host));
+                Assert.Equal(1, await db.DailyHostMetrics.CountAsync(m => m.Date == dayDate && m.HostId == host));
             }
 
             // Forced re-run recomputes in place: still exactly one row.
@@ -326,7 +326,7 @@ namespace Cocorra.Tests
             using (var scope = _host.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                Assert.Equal(1, await db.DailyPlatformMetrics.CountAsync(m => m.Date == day));
+                Assert.Equal(1, await db.DailyPlatformMetrics.CountAsync(m => m.Date == dayDate));
             }
         }
 

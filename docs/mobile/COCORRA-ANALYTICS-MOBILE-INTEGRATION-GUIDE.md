@@ -36,7 +36,7 @@ Exactly **two** items, and only one is urgent:
 | # | Item | Priority |
 |:--:|---|---|
 | **1** | **Persist the `CocorraSessionId` cookie across requests and app restarts** — or tell us you cannot, so we can replace the mechanism. See §4. | **HIGH** |
-| **2** | Apply `Meta.display.suggestedDisplayOffsetMinutes` when displaying any hour-of-day or daily analytics figure. Only relevant if the app shows analytics. See §6. | MEDIUM |
+| **2** | Send every `from` / `to` and `ScheduledStartDate` with an offset (`Z` or `+02:00`); offset-less values are now rejected with `400`. Show analytics hour and day buckets as-is: they are already Cairo time. See §6. | **HIGH** |
 
 ### 🔵 OPTIONAL FUTURE MOBILE WORK
 
@@ -59,8 +59,8 @@ Three client-observed events are already allowlisted and ready whenever you want
 |---|---|:--:|---|:--:|
 | **Persist `CocorraSessionId` cookie** | Session grouping and the legacy retention metric depend on it. If it is not persisted, every request looks like a new session | **HIGH** | Configure a persistent cookie jar on your HTTP client, **or confirm you cannot** so AN-035 can proceed | Cookie is issued; **persistence is client-side and unverified** |
 | **Do not duplicate server events** | Double counting corrupts every rate | **HIGH** | Audit for any client-side `room_joined` / `mic_on` / `registered` analytics calls and remove them | ✅ Yes — all emitted server-side |
-| **Apply the display timezone offset** | Server computes in UTC; users are UTC+2/+3. An unconverted hour chart points at a slot 2–3h off | MEDIUM | Read `Meta.display.suggestedDisplayOffsetMinutes`, apply for display only | ✅ Offset returned on every response |
-| **Never send local times** | Mixed timezones in one column is unrecoverable | MEDIUM | Send UTC ISO-8601 for any `from` / `to` parameter | ✅ Server treats input as UTC |
+| **Do not shift analytics buckets** | Day, week, month and hour-of-day buckets are already Africa/Cairo. Shifting them again moves every bar 2–3h | MEDIUM | Render bucket values as-is | ✅ Server buckets in Cairo time, DST-aware |
+| **Always send an offset** | `2026-11-11T22:00:00` could be UTC or Cairo, two hours apart | **HIGH** | Send `from` / `to` / `ScheduledStartDate` as ISO-8601 with `Z` or an explicit offset | ✅ Offset-less values are rejected with `400` |
 | **Render "not measured" as a gap, never 0** | A 0 for an uninstrumented step is a fabricated finding | **HIGH** *(if the app shows analytics)* | Branch on `isMeasured` / `null`, never coerce | ✅ Server returns `null` + a reason |
 | **AN-032** — in-room chat volume | If in-room chat is substantial, "passive" participants may be actively typing, and the Active-vs-Passive metric needs reinterpreting | LOW | **Answer one question**: does the app have in-room group chat, and roughly how much is it used? See §5 | ❌ Measurement not run |
 | **AN-035** — session signal replacement | The cookie mechanism may not survive on mobile | MEDIUM | Depends on your answer to §4. If cookies cannot persist, implement a client-generated session ID header | ❌ Blocked on evidence |
@@ -296,15 +296,17 @@ Direct messaging and the friend graph — `GET /Analytics/Social` (M-701):
 
 | Layer | Rule |
 |---|---|
-| **Storage** | **UTC, always.** Every timestamp column is UTC. Non-negotiable. |
-| **Server calculation** | **UTC, always.** Daily buckets are UTC days; hourly buckets are UTC hours. A server that bucketed in local time would produce series that shift under it twice a year. |
-| **Request parameters** | Send **UTC ISO-8601**. `from` / `to` are treated as UTC. **Never send local time.** |
-| **Response timestamps** | UTC. Field names ending `Utc` are explicit about it. |
-| **Display** | **Client converts.** The server states the offset; it never applies it. |
+| **Storage** | **UTC, always.** Every timestamp column is UTC. |
+| **Business calendar** | **Africa/Cairo**, DST-aware. Daily, weekly (Saturday start) and monthly buckets are Cairo calendar periods; hour-of-day buckets are Cairo hours. |
+| **Request parameters** | Instants (`from`, `to`, `ScheduledStartDate`) must carry an offset: `2026-11-11T20:00:00Z` or `2026-11-11T22:00:00+02:00`. Offset-less values return `400`. URL-encode `+` as `%2B` in query strings. |
+| **Response timestamps** | UTC instants, always ending in `Z`. Convert to the device time zone for display. |
+| **Calendar values** | Bucket dates such as `weekStart` / `cohortWeekStart` are Cairo dates sent as date-only `YYYY-MM-DD`, with no time or offset. Parse them as calendar dates; do not convert them to device time or parse them as UTC midnight, or a viewer west of UTC sees the previous day. |
 
-## The offset
+Exception: `POST /Analytics/System/Backfill` takes `from` / `to` as plain Cairo calendar dates (`2026-11-11`).
 
-Every analytics response now carries:
+## The display envelope
+
+Every analytics response carries:
 
 ```json
 {
@@ -314,30 +316,32 @@ Every analytics response now carries:
     "trustLevel": "Verified",
     "metrics": [ ],
     "display": {
-      "timeZone": "UTC",
-      "suggestedDisplayOffsetMinutes": 180
+      "timeZone": "Africa/Cairo"
     }
   }
 }
 ```
 
-`suggestedDisplayOffsetMinutes` defaults to **180** (UTC+3) and is configurable server-side via `Analytics:DisplayTimeZoneOffsetMinutes`.
+`suggestedDisplayOffsetMinutes` has been removed, from `meta.display` and from the Supply Health payload. A fixed offset was wrong for half the year, because Egypt observes DST.
 
-`GET /Analytics/Supply/Health` also returns `suggestedDisplayOffsetMinutes` on the payload itself, for the schedule heatmap.
+Renamed fields, because their values are no longer UTC:
+
+| Endpoint | Old field | New field |
+|---|---|---|
+| `GET /Analytics/Supply/Health` | `scheduleByHourUtc[].hourUtc` | `scheduleByHour[].hour` |
+| `GET /Analytics/Review/Latency` | `byDayOfWeekUtc`, `byHourUtc` | `byDayOfWeek`, `byHour` |
+| `GET /Analytics/Return/Weekly` | `cohorts[].weekStartUtc` | `cohorts[].weekStart` |
+| `GET /Analytics/Return/CohortGrid` | `cohorts[].cohortWeekStartUtc` | `cohorts[].cohortWeekStart` |
 
 ## What mobile should do
 
 | Do | Don't |
 |---|---|
-| Add the offset to any **hour-of-day** figure before display | Convert stored values or send converted values back |
-| Add it to **daily buckets** if you label them as local days | Use the **device** timezone for these charts |
-| Label the axis so the reader knows which it is | Silently mix UTC and local on one chart |
+| Show hour-of-day and day buckets exactly as served, labelled "Cairo time" | Add any offset to a bucket |
+| Convert response **instants** (`…Utc` fields) to device time for display | Convert calendar bucket dates to device time |
+| Send instants with `Z` or an explicit offset | Send `DateTime.toIso8601String()` of a local `DateTime`, which has no offset |
 
-> **Use the server's offset, not `DateTime.now().timeZoneOffset`.**
->
-> This is counter-intuitive and it is deliberate. The server offset represents the **audience's** predominant timezone; the device offset represents **one viewer's**. An admin in London reading Cocorra's peak-hours chart needs to know when the *Cocorra audience* is active, not what time it is in London. Using the device offset would shift the chart by the viewer's location and make two admins in different countries disagree about when the platform's peak is.
->
-> For a user-facing "your room starts in 20 minutes", the device timezone is correct. For analytics, it is not.
+> In Dart, `DateTime.now().toUtc().toIso8601String()` ends in `Z` and is accepted. `DateTime.now().toIso8601String()` has no offset and is rejected.
 
 ## Not yet served
 
@@ -355,9 +359,9 @@ Every analytics response now carries:
 |---|---|
 | **Authentication** | JWT bearer. Default policy requires `VerificationStatus = Active`. |
 | **Authorization** | `Admin` **or** `Coach`, except where marked Admin-only |
-| **Date parameters** | `from`, `to` — UTC, optional. Default: last 30 days *(except Platform Health: 7 days)* |
-| **Timezone** | All UTC. Apply `Meta.display.suggestedDisplayOffsetMinutes` for display |
-| **Caching** | 10 minutes server-side; concurrent identical requests share one query |
+| **Date parameters** | `from`, `to` — instants with an offset, optional. Offset-less values return `400`. Default: from Cairo midnight 30 days ago to now *(Platform Health: 7 Cairo days)* |
+| **Timezone** | Instants are UTC. Day, week, month and hour buckets are Africa/Cairo (§6) |
+| **Caching** | 10 minutes server-side; concurrent identical requests share one query. `GET /Analytics/Reports` and `GET /Analytics/Safety/ReportRate` are not cached and always read the database |
 | **Errors** | `400` invalid range or parameter · `401` no/expired token · `403` wrong role · `200` with empty payload when there is simply no data |
 | **Trust metadata** | `Meta.trustLevel` (weakest component) + `Meta.metrics[]` (per-metric contract) on every response |
 
@@ -388,7 +392,7 @@ Every analytics response now carries:
 | `GET /Analytics/Participation` | Spoken time, distinct speakers, peak hours | Admin, Coach | `from`, `to` | CONDITIONALLY RELIABLE |
 | `GET /Analytics/Reports` | Report counts by status and category | Admin, Coach | `from`, `to`, `limit` | VERIFIED |
 | `GET /Analytics/Rooms/Active` | Rooms ranked by joins | Admin, Coach | `from`, `to`, `limit` | VERIFIED |
-| `GET /Analytics/PeakHours` | Joins by UTC hour | Admin, Coach | `from`, `to` | CONDITIONALLY RELIABLE |
+| `GET /Analytics/PeakHours` | All tracked events and distinct users by Cairo hour | Admin, Coach | `from`, `to` | CONDITIONALLY RELIABLE |
 | `GET /Analytics/VoiceVerification/DropOff` | Verification stage counts | Admin, Coach | `from`, `to` | VERIFIED |
 | `GET /Analytics/Participation/ActiveVsPassive` | Speakers vs listeners | Admin, Coach | `from`, `to` | Mixed |
 | `GET /Analytics/Funnel` | **Legacy** non-sequential funnel | Admin, Coach | `steps`, `from`, `to` | Superseded |
@@ -445,7 +449,8 @@ The backend's core-loop instrumentation is complete and server-side. Your existi
 - [ ] **Answer §4**: does the HTTP client persist cookies across requests and restarts? *(the answer alone unblocks AN-035)*
 - [ ] If not, and if session metrics are wanted: implement `X-Cocorra-Session-Id` — GUID on cold start, secure storage, rotate after idle
 - [ ] **Answer §5**: does in-room group chat exist and is it used?
-- [ ] If the app shows analytics: apply `Meta.display.suggestedDisplayOffsetMinutes` to hour-of-day charts
+- [ ] Every `from` / `to` / `ScheduledStartDate` sent carries `Z` or an explicit offset
+- [ ] If the app shows analytics: render hour and day buckets as-is, labelled Cairo time
 - [ ] If the app shows analytics: render `isMeasured: false` / `null` as a labelled gap, never `0`
 
 ## Phase 3 — Optional / advanced instrumentation
@@ -536,12 +541,12 @@ REQUIRED
 [ ] Answered §4 — does the HTTP client persist cookies across requests AND restarts?
 [ ] Answered §5 — does in-room group chat exist, and is it used?
 [ ] Analytics failures never surface to the user (no retry, no error, no UI block)
-[ ] Any from/to parameters sent are UTC ISO-8601, never local time
+[ ] Every from / to / ScheduledStartDate sent carries Z or an explicit offset (offset-less → 400)
 
 REQUIRED IF THE APP DISPLAYS ANALYTICS
 
-[ ] Meta.display.suggestedDisplayOffsetMinutes applied to hour-of-day charts
-[ ] Server offset used, NOT DateTime.now().timeZoneOffset
+[ ] Hour-of-day and day buckets rendered as served (already Cairo time), never shifted
+[ ] Calendar bucket dates (weekStart, cohortWeekStart) read as dates, not converted to device time
 [ ] isMeasured:false / null renders as a labelled gap using notMeasuredReason — never 0
 [ ] Meta.trustLevel respected: Unreliable is not displayed at all
 [ ] ConditionallyReliable conditions rendered inline, not in a tooltip

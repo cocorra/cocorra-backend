@@ -1,5 +1,6 @@
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Models;
+using Cocorra.DAL.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cocorra.DAL.Repository.AnalyticsRepository
@@ -46,10 +47,10 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
             // Per user, which weeks did they join in at all.
             var weeksByUser = joins
                 .GroupBy(j => j.UserId)
-                .ToDictionary(g => g.Key, g => g.Select(j => StartOfWeekUtc(j.OccurredAtUtc)).Distinct().ToHashSet());
+                .ToDictionary(g => g.Key, g => g.Select(j => CairoTime.WeekOf(j.OccurredAtUtc)).Distinct().ToHashSet());
 
             var allWeeks = joins
-                .Select(j => StartOfWeekUtc(j.OccurredAtUtc))
+                .Select(j => CairoTime.WeekOf(j.OccurredAtUtc))
                 .Distinct()
                 .OrderBy(w => w)
                 .ToList();
@@ -73,7 +74,7 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
 
                 cohorts.Add(new WeeklyReturnCohortDto
                 {
-                    WeekStartUtc = week,
+                    WeekStart = week,
                     CohortSize = cohort.Count,
                     ReturnedInLaterWeek = returned,
                     ReturnRatePercent = Math.Round((double)returned / cohort.Count * 100, 2),
@@ -211,14 +212,6 @@ namespace Cocorra.DAL.Repository.AnalyticsRepository
                 Steps = result,
                 DataAvailableFromUtc = stepEvents.Min(e => e.FirstOccurredAtUtc)
             };
-        }
-
-        /// <summary>Monday 00:00 UTC of the week containing <paramref name="value"/>.</summary>
-        private static DateTime StartOfWeekUtc(DateTime value)
-        {
-            var date = value.Date;
-            var offset = ((int)date.DayOfWeek + 6) % 7; // Monday = 0
-            return date.AddDays(-offset);
         }
 
         /// <summary>

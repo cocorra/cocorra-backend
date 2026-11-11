@@ -264,11 +264,11 @@ namespace Cocorra.BLL.Services.Analytics
                     MetricKey = PeakActiveHours,
                     Name = "Peak Active Hours",
                     BusinessPurpose = "Informs when to schedule rooms and when to staff admin review.",
-                    TechnicalDefinition = "room_joined events grouped by UTC hour of day.",
-                    Formula = "COUNT(room_joined) GROUP BY HOUR(OccurredAtUtc)",
+                    TechnicalDefinition = "room_joined events grouped by Africa/Cairo hour of day.",
+                    Formula = "COUNT(room_joined) GROUP BY CairoHour(OccurredAtUtc)",
                     TrustLevel = MetricTrustLevel.ConditionallyReliable,
                     Exclusions = { "None" },
-                    Limitations = { "Reported in UTC while the user base is predominantly UTC+2/+3, so displayed peaks are shifted from local time" },
+                    Limitations = { "On the two DST change days a year one Cairo hour is skipped or counted twice" },
                     ValidationMethod = "Hour buckets sum to the total join count for the window."
                 }
             },

@@ -5,6 +5,7 @@ using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.AnalyticsDto;
 using Cocorra.DAL.Models.Analytics;
 using Cocorra.DAL.Repository.AnalyticsRepository;
+using Cocorra.DAL.Time;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,7 +49,7 @@ namespace Cocorra.Tests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.DailyPlatformMetrics.Add(new DailyPlatformMetrics
             {
-                Date = date.Date,
+                Date = DateOnly.FromDateTime(date),
                 DistinctJoiningUsers = joiners,
                 DistinctSpeakingUsers = speakers,
                 DistinctActiveHosts = hosts,
@@ -98,7 +99,7 @@ namespace Cocorra.Tests
 
             // The pipeline IS running — that is a different statement from "this window has data".
             Assert.True(result.ReadModelsPopulated);
-            Assert.Equal(_today.AddDays(-90).Date, result.DataAvailableFromUtc);
+            Assert.Equal(CairoTime.StartOfDayUtc(DateOnly.FromDateTime(_today.AddDays(-90))), result.DataAvailableFromUtc);
             Assert.All(result.Metrics, m => Assert.False(m.IsMeasured));
             Assert.Contains("Backfill", Metric(result, "M-100").NotMeasuredReason!);
         }
@@ -163,8 +164,8 @@ namespace Cocorra.Tests
             var wpu = Metric(result, "M-100");
 
             Assert.True(result.HasComparison);
-            Assert.Equal(_today.AddDays(-6).Date, result.PreviousFrom!.Value.Date);
-            Assert.Equal(_today.AddDays(-4).Date, result.PreviousTo!.Value.Date);
+            Assert.Equal(DateOnly.FromDateTime(_today.AddDays(-6)), CairoTime.DateOf(result.PreviousFrom!.Value));
+            Assert.Equal(DateOnly.FromDateTime(_today.AddDays(-4)), CairoTime.DateOf(result.PreviousTo!.Value));
 
             Assert.Equal(60, wpu.Value);
             Assert.Equal(20, wpu.PreviousValue);
