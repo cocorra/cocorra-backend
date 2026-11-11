@@ -20,7 +20,6 @@ namespace Cocorra.BLL.Services.AnalyticsService
         private static readonly SemaphoreSlim _userGrowthLock = new(1, 1);
         private static readonly SemaphoreSlim _roomLock = new(1, 1);
         private static readonly SemaphoreSlim _participationLock = new(1, 1);
-        private static readonly SemaphoreSlim _reportLock = new(1, 1);
         private static readonly SemaphoreSlim _funnelLock = new(1, 1);
         private static readonly SemaphoreSlim _retentionLock = new(1, 1);
         private static readonly SemaphoreSlim _activeRoomsLock = new(1, 1);
@@ -462,6 +461,10 @@ namespace Cocorra.BLL.Services.AnalyticsService
             return Success(result, BuildMeta(MetricRegistry.RoomParticipation, MetricRegistry.SpeakingConversion));
         }
 
+        /// <summary>
+        /// Deliberately uncached: moderators act on the report counts, so a cached
+        /// count would hide a report submitted within the cache TTL.
+        /// </summary>
         public async Task<Response<ReportInsightsDto>> GetReportInsightsAsync(
             DateTime? from = null,
             DateTime? to = null,
@@ -469,10 +472,7 @@ namespace Cocorra.BLL.Services.AnalyticsService
         {
             var fromUtc = ResolveFrom(from);
             var toUtc = ResolveTo(to);
-            var key = $"analytics:reports:{RangeKey(fromUtc, to)}:{topN}";
-
-            var result = await GetOrCreateWithLockAsync(_cache, key, _reportLock, () =>
-                _analyticsRepository.GetReportInsightsAsync(fromUtc, toUtc, topN));
+            var result = await _analyticsRepository.GetReportInsightsAsync(fromUtc, toUtc, topN);
 
             return Success(result, BuildMeta(MetricRegistry.ReportRate));
         }

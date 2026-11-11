@@ -361,7 +361,7 @@ Renamed fields, because their values are no longer UTC:
 | **Authorization** | `Admin` **or** `Coach`, except where marked Admin-only |
 | **Date parameters** | `from`, `to` — instants with an offset, optional. Offset-less values return `400`. Default: from Cairo midnight 30 days ago to now *(Platform Health: 7 Cairo days)* |
 | **Timezone** | Instants are UTC. Day, week, month and hour buckets are Africa/Cairo (§6) |
-| **Caching** | 10 minutes server-side; concurrent identical requests share one query |
+| **Caching** | 10 minutes server-side; concurrent identical requests share one query. `GET /Analytics/Reports` is not cached and always reads the database |
 | **Errors** | `400` invalid range or parameter · `401` no/expired token · `403` wrong role · `200` with empty payload when there is simply no data |
 | **Trust metadata** | `Meta.trustLevel` (weakest component) + `Meta.metrics[]` (per-metric contract) on every response |
 
