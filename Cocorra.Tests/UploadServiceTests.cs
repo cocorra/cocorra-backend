@@ -258,4 +258,29 @@ public class UploadServiceTests
 
         Assert.Equal("Error:ServerException", result);
     }
+
+    // =========================================================================
+    // Payload signing
+    // =========================================================================
+
+    // REGRESSION GUARD. DisablePayloadSigning = true was once set on both uploads "for MinIO
+    // performance"; over http://minio:9000 the SDK then throws "When DisablePayloadSigning is
+    // true, the request must be sent over HTTPS" and every upload fails. Left unset, the SDK
+    // sends a signed aws-chunked payload (STREAMING-AWS4-HMAC-SHA256-PAYLOAD), which works
+    // over plain HTTP.
+    [Fact]
+    public async Task Uploads_DoNotDisablePayloadSigning()
+    {
+        _s3Mock.Setup(s => s.PutObjectAsync(It.IsAny<PutObjectRequest>(), default))
+            .ReturnsAsync(new PutObjectResponse());
+
+        var jpegBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46 };
+        await CreateImageService().SaveImageAsync(CreateMockFormFile("avatar.jpg", "image/jpeg", jpegBytes));
+
+        var mp3Bytes = new byte[] { 0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        await CreateVoiceService().SaveVoice(CreateMockFormFile("voice.mp3", "audio/mpeg", mp3Bytes));
+
+        _s3Mock.Verify(s => s.PutObjectAsync(It.IsAny<PutObjectRequest>(), default), Times.Exactly(2));
+        _s3Mock.Verify(s => s.PutObjectAsync(It.Is<PutObjectRequest>(r => r.DisablePayloadSigning == true), default), Times.Never);
+    }
 }
