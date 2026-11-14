@@ -30,3 +30,8 @@
 
 # Uploaded user content (mounted as volume)
 **/wwwroot/Uploads/
+
+# Secrets: production configuration comes from .env / mounts at runtime,
+# never from the build context, so it cannot end up in an image layer.
+**/appsettings.Production.json
+**/.env
