@@ -4,8 +4,21 @@ set -euo pipefail
 
 cd /opt/cocorra/api
 
+BACKUP_SCRIPT=/opt/cocorra/infra/backup.sh
+
 [ -f .env ] || { echo "ERROR: .env missing"; exit 1; }
 [ -f firebase-config.json ] || { echo "ERROR: firebase-config.json missing"; exit 1; }
+
+# Checked before anything changes: the deploy must not continue without a database backup.
+if [ ! -f "$BACKUP_SCRIPT" ]; then
+  echo "ERROR: $BACKUP_SCRIPT is missing, so no pre-deploy database backup can be taken."
+  echo "       Install it from deploy/backup.sh in the repository, then: chmod +x $BACKUP_SCRIPT"
+  exit 1
+fi
+if [ ! -x "$BACKUP_SCRIPT" ]; then
+  echo "ERROR: $BACKUP_SCRIPT is not executable. Fix: chmod +x $BACKUP_SCRIPT"
+  exit 1
+fi
 
 # The container runs as the aspnet image's non-root user (UID 1654), which does not own the
 # file, so it can only read it through the "other" read bit. Without it the API throws at
@@ -36,7 +49,7 @@ PREV_TAG=$(grep -oP '^IMAGE_TAG=\K.*' .env || true)
 echo "Deploying $TAG (previous: ${PREV_TAG:-none})"
 
 echo "==> Pre-deploy database backup"
-/opt/cocorra/infra/backup.sh
+"$BACKUP_SCRIPT"
 
 echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
 trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
