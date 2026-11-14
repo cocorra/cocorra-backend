@@ -48,8 +48,9 @@ services:
       # - Analytics__EnableHighFrequencyEvents=true   # Stage C (also raise the channel capacity first)
       # - Analytics__EventChannelCapacity=25000       # Stage C, in a SEPARATE earlier deploy
 
-      # Override connection string via environment variable if needed:
-      # - ConnectionStrings__DefaultConnection=Server=YOUR_DB_HOST;Database=CocorraDb;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;MultipleActiveResultSets=True;
+      # REQUIRED. appsettings.json has no connection string, so without this the API has
+      # no database and exits at startup when migrations run.
+      - "ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING:?set DB_CONNECTION_STRING in .env — see .env.example}"
     volumes:
       # Persist user-uploaded files (images, voice recordings)
       - cocorra-uploads:/app/wwwroot/Uploads
