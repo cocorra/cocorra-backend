@@ -68,6 +68,38 @@ else
 
 var jwtSettings = builder.Configuration.GetSection("JWTSetting");
 
+// Fail fast if the JWT signing key is missing or still the tracked development value: anyone
+// holding the key can forge tokens for any user, including admins. HS256 needs at least 32 bytes.
+var jwtSecurityKey = jwtSettings["securityKey"];
+if (string.IsNullOrWhiteSpace(jwtSecurityKey)
+    || jwtSecurityKey.Length < 32
+    || jwtSecurityKey.StartsWith("LocalDev", StringComparison.Ordinal)   // the appsettings.json value
+    || jwtSecurityKey.StartsWith("CHANGE_ME", StringComparison.Ordinal)) // the .env.example placeholder
+    throw new InvalidOperationException(
+        "JWTSetting:securityKey is not configured, shorter than 32 characters, or still the "
+        + "development placeholder from appsettings.json. Anyone who knows it can forge tokens.\n"
+        + "\n"
+        + "LOCAL DEVELOPMENT:\n"
+        + "    dotnet user-secrets set \"JWTSetting:securityKey\" \"$(openssl rand -base64 48)\" --project Cocorra.API\n"
+        + "\n"
+        + "PRODUCTION — set JWT_SECURITY_KEY in the .env file next to docker-compose.yml.\n"
+        + "  Generate a value with: openssl rand -base64 48");
+
+// Fail fast if the seeded admin password is missing or still the tracked development value:
+// IdentitySeeder creates the admin account with it on an empty database.
+var seedAdminPassword = builder.Configuration["SeedAdmin:Password"];
+if (string.IsNullOrWhiteSpace(seedAdminPassword)
+    || seedAdminPassword.StartsWith("LocalDev", StringComparison.Ordinal)   // the appsettings.json value
+    || seedAdminPassword.StartsWith("CHANGE_ME", StringComparison.Ordinal)) // the .env.example placeholder
+    throw new InvalidOperationException(
+        "SeedAdmin:Password is not configured or is still the development placeholder from "
+        + "appsettings.json, which is readable by anyone with repository access.\n"
+        + "\n"
+        + "LOCAL DEVELOPMENT:\n"
+        + "    dotnet user-secrets set \"SeedAdmin:Password\" \"<a strong password>\" --project Cocorra.API\n"
+        + "\n"
+        + "PRODUCTION — set SEED_ADMIN_PASSWORD in the .env file next to docker-compose.yml.");
+
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {

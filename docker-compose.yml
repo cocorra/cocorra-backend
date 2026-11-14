@@ -33,6 +33,13 @@ services:
       # only the codes currently outstanding (users request a new one).
       - "Otp__HmacKey=${OTP_HMAC_KEY:?set OTP_HMAC_KEY in .env — generate a value with openssl rand -base64 32}"
 
+      # REQUIRED. Signs every access token; anyone holding it can forge admin tokens.
+      # Rotating it signs every user out.
+      - "JWTSetting__securityKey=${JWT_SECURITY_KEY:?set JWT_SECURITY_KEY in .env — generate a value with openssl rand -base64 48}"
+
+      # REQUIRED. Password for the admin account IdentitySeeder creates on an empty database.
+      - "SeedAdmin__Password=${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env — use a strong unique password}"
+
       # Analytics event-emission flags. Both default to false in appsettings.json.
       # Uncomment ONLY when the corresponding stage gate in
       # docs/dashboard-discovery/30-production-deployment-checklist.md has passed.
