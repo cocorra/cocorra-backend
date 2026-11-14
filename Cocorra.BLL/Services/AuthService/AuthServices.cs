@@ -319,6 +319,23 @@ namespace Cocorra.BLL.Services.AuthServices
         }
 
 
+        // Same rule as RoomService/AdminService/UserRepository: stored paths are full storage URLs
+        // (returned as-is) or legacy wwwroot-relative paths (prefixed with AppSettings:BaseUrl).
+        private string? BuildFullUrl(string? relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativePath))
+                return null;
+
+            if (relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return relativePath;
+            }
+
+            var baseUrl = _configuration["AppSettings:BaseUrl"]?.TrimEnd('/') ?? "";
+            return $"{baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
+        }
+
         private async Task<(JwtSecurityToken Token, IList<string> Roles)> GenerateJwtToken(ApplicationUser user)
         {
             var userRoles = await _userManager.GetRolesAsync(user);
@@ -330,7 +347,7 @@ namespace Cocorra.BLL.Services.AuthServices
                 new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
                 new Claim(ClaimTypes.Name, user.UserName!),
                 // profile Picture URL claim
-                new Claim("profilePicture", string.IsNullOrEmpty(user.ProfilePicturePath) ? "" : $"{_configuration["AppSettings:BaseUrl"]}/{user.ProfilePicturePath.Replace("\\", "/")}"),
+                new Claim("profilePicture", BuildFullUrl(user.ProfilePicturePath) ?? ""),
                 // SECURITY: Embed verification status for policy-based authorization.
                 // This claim determines whether the user can access full app features (Active)
                 // or only verification endpoints (Pending/ReRecord).
