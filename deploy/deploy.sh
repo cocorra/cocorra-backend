@@ -7,6 +7,15 @@ cd /opt/cocorra/api
 [ -f .env ] || { echo "ERROR: .env missing"; exit 1; }
 [ -f firebase-config.json ] || { echo "ERROR: firebase-config.json missing"; exit 1; }
 
+# The container runs as the aspnet image's non-root user (UID 1654), which does not own the
+# file, so it can only read it through the "other" read bit. Without it the API throws at
+# startup reading the Firebase credential and every deploy fails its health check.
+if (( (8#$(stat -c '%a' firebase-config.json) & 4) == 0 )); then
+  echo "ERROR: firebase-config.json is not world-readable, so the container (UID 1654) cannot read it."
+  echo "       Fix: chmod 644 /opt/cocorra/api/firebase-config.json"
+  exit 1
+fi
+
 # .env records the version that is RUNNING and healthy. It is only rewritten after the new
 # container passes its health check, so a failed deploy never becomes the next rollback target.
 set_image() {
