@@ -111,4 +111,18 @@ wait_healthy || rollback
 
 set_image "$IMAGE" "$TAG"
 echo "==> Deploy OK: $TAG"
-docker image prune -af --filter "until=168h" >/dev/null || true
+
+# Remove old images of THIS repository only, keeping the KEEP_IMAGES most recently created
+# tags (which include the one just deployed and, normally, the rollback target). Images of
+# other stacks on the host are never touched. Failures here never fail the deploy.
+KEEP_IMAGES=3
+docker image ls "$IMAGE" --format '{{.CreatedAt}}|{{.Tag}}' \
+  | grep -v '|<none>$' \
+  | sort -r \
+  | tail -n +$((KEEP_IMAGES + 1)) \
+  | cut -d'|' -f2 \
+  | while read -r old_tag; do
+      [ "$old_tag" = "$TAG" ] && continue
+      echo "    removing old image $IMAGE:$old_tag"
+      docker image rm "$IMAGE:$old_tag" >/dev/null || true
+    done || true
