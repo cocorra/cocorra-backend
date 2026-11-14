@@ -37,14 +37,26 @@ trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
 echo "==> Pulling new image"
 compose_with "$IMAGE" "$TAG" pull
 
+# Polls for up to 150s, but returns as soon as the outcome is known: "healthy", or
+# "unhealthy" (start_period over and retries exhausted), or a crash loop (the restart
+# policy restarting a container that exits at startup, e.g. a missing secret).
 wait_healthy() {
+  local state restarts health
   for i in $(seq 1 30); do
-    STATUS=$(docker inspect -f '{{.State.Health.Status}}' cocorra-api 2>/dev/null || echo unknown)
-    if [ "$STATUS" = "healthy" ]; then
-      return 0
+    read -r state restarts health < <(docker inspect \
+      -f '{{.State.Status}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+      cocorra-api 2>/dev/null || echo "missing 0 none")
+    case "$health" in
+      healthy)   return 0 ;;
+      unhealthy) echo "    container reported unhealthy"; return 1 ;;
+    esac
+    if [ "$restarts" -gt 0 ] || [ "$state" = "exited" ] || [ "$state" = "dead" ]; then
+      echo "    container is not staying up (state=$state, restarts=$restarts)"
+      return 1
     fi
     sleep 5
   done
+  echo "    timed out waiting for a healthy status"
   return 1
 }
 
@@ -60,7 +72,12 @@ rollback() {
 
   echo "==> Rolling back to $PREV_TAG"
   compose_with "$PREV_IMAGE" "$PREV_TAG" pull || true
-  compose_with "$PREV_IMAGE" "$PREV_TAG" up -d || true
+  if compose_with "$PREV_IMAGE" "$PREV_TAG" up -d && wait_healthy; then
+    echo "==> Rollback OK: $PREV_TAG is running and healthy."
+  else
+    echo "==> ROLLBACK FAILED: $PREV_TAG is not healthy either. Manual intervention required."
+    docker logs cocorra-api --tail 80 || true
+  fi
   exit 1
 }
 
