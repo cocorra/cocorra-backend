@@ -111,8 +111,10 @@ namespace Cocorra.Tests
                 options,
                 metrics);
 
+            // The writer is completed, so the flush loop exits on its own once the batch is
+            // dead-lettered. Await that instead of a fixed delay, which raced it on a slow machine.
             await service.StartAsync(CancellationToken.None);
-            await Task.Delay(600);
+            await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(30));
             await service.StopAsync(CancellationToken.None);
 
             using (var scope = _host.CreateScope())
