@@ -1,16 +1,18 @@
-version: '3.9'
-
 # ==============================================================================
 # LiveKit Server Docker Compose
-# Note: network_mode: "host" is required on Linux VPS for WebRTC UDP range (50000-60000)
-# and TURN/STUN (3478/5349) to work without Docker NAT overhead or port mapping limits.
+# Note: network_mode: "host" is required on Linux VPS for the WebRTC UDP range
+# (50000-60000), WebRTC TCP fallback (7881) and TURN/STUN over UDP (3478) to work
+# without Docker NAT overhead or port mapping limits. TURN/TLS is not used.
+#
+# ./livekit.yaml is created on the server from livekit.example.yaml (gitignored).
 # ==============================================================================
 
 services:
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.12.0
     container_name: livekit-server
     restart: unless-stopped
+    mem_limit: 1536m
     network_mode: "host"
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
