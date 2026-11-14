@@ -713,18 +713,22 @@ app.UseAuthorization();
 app.UseSessionTracking();
 app.UseDeviceBlocking();
 
-// Enable Swagger JSON & Swagger UI in all environments (including Production)
-app.UseSwagger(options =>
+// Swagger only in Development: in Production it publishes the full API surface, admin
+// endpoints included, to anyone who finds the URL.
+if (app.Environment.IsDevelopment())
 {
-    options.RouteTemplate = "swagger/{documentName}/swagger.json";
-});
+    app.UseSwagger(options =>
+    {
+        options.RouteTemplate = "swagger/{documentName}/swagger.json";
+    });
 
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Cocorra API v1");
-    c.RoutePrefix = "swagger";
-    c.DocumentTitle = "Cocorra API Documentation";
-});
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Cocorra API v1");
+        c.RoutePrefix = "swagger";
+        c.DocumentTitle = "Cocorra API Documentation";
+    });
+}
 
 app.MapHub<RoomHub>("/hubs/rooms");
 app.MapHub<ChatHub>("/hubs/chat");
@@ -738,8 +742,16 @@ app.MapGet("/delete-account", (IWebHostEnvironment env, HttpContext context) =>
     context.Response.Headers.CacheControl = "no-cache";
     return Results.File(Path.Combine(env.WebRootPath, "Html", "deleteAccount.html"), "text/html; charset=utf-8");
 });
+// The Docker healthcheck requests "/", so it must answer 200 in every environment; only
+// Development redirects to Swagger, which is not mapped anywhere else.
 app.MapGet("/", context =>
 {
+    if (!app.Environment.IsDevelopment())
+    {
+        context.Response.ContentType = "text/plain";
+        return context.Response.WriteAsync("Cocorra API is running.");
+    }
+
     context.Response.ContentType = "text/html";
     return context.Response.WriteAsync(@"<!DOCTYPE html>
 <html>
