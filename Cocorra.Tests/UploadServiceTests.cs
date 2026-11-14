@@ -9,6 +9,7 @@ using Cocorra.BLL.Services.Upload;
 using Cocorra.BLL.Services.UploadService;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -27,12 +28,12 @@ public class UploadServiceTests
 
     private UploadImage CreateImageService()
     {
-        return new UploadImage(_envMock.Object, _s3Mock.Object, Options.Create(_settings));
+        return new UploadImage(_envMock.Object, _s3Mock.Object, Options.Create(_settings), NullLogger<UploadImage>.Instance);
     }
 
     private UploadVoice CreateVoiceService()
     {
-        return new UploadVoice(_envMock.Object, _s3Mock.Object, Options.Create(_settings));
+        return new UploadVoice(_envMock.Object, _s3Mock.Object, Options.Create(_settings), NullLogger<UploadVoice>.Instance);
     }
 
     private static IFormFile CreateMockFormFile(string fileName, string contentType, byte[] content)
