@@ -1,8 +1,11 @@
 # 30 — Production Deployment Checklist
 
-> **Generated**: 2026-09-02 (Wave 8) | **Target commit**: the tip of `main` after Wave 8
+> **Generated**: 2026-09-02 (Wave 8) | **Deploy flow updated**: 2026-11-14 (GHCR image + `deploy/deploy.sh`)
 > **Audience**: the person running the deployment. Not a summary — a list to work through with a terminal open.
-> **Deployment model**: Docker Compose on a VPS, per `docker-compose.yml`.
+> **Deployment model**: a merge to `prod` runs `.github/workflows/deploy.yml`: tests → image pushed to
+> GHCR tagged with the commit SHA → `deploy/deploy.sh` on the VPS (backup, pull, start, health check,
+> automatic rollback). The server runs `deploy/docker-compose.prod.yml`, uploaded as
+> `/opt/cocorra/api/docker-compose.yml`. `docker-compose.dev.yml` is for local use only.
 
 ---
 
@@ -15,11 +18,11 @@
 
 ## Read these three things first
 
-1. **Migrations are NOT applied automatically.** There is no `Database.Migrate()` anywhere in the solution. Three analytics migrations are unapplied in production. If you deploy without applying them, **the app will start successfully and then fail on every event insert and every analytics query**, because the columns and tables will not exist. §B is not optional.
+1. **Migrations ARE applied automatically, at startup** (`Database.MigrateAsync()` in `Program.cs`), and **a rollback does not undo them.** If the new release fails its health check, `deploy.sh` restarts the previous image against the already-migrated schema. Every migration must therefore be backward-compatible with the previous release — see [`docs/MIGRATIONS.md`](../MIGRATIONS.md) and §B.
 
-2. **`ANALYTICS_IP_HASH_SALT` is now required.** Without it `docker compose up` aborts, and if it somehow got past that, `Program.cs` throws at startup. This is intentional — a default or empty salt would produce hashes that look pseudonymised and are not.
+2. **Required secrets are enforced twice.** `ANALYTICS_IP_HASH_SALT`, `OTP_HMAC_KEY`, `JWT_SECURITY_KEY`, `SEED_ADMIN_PASSWORD` and `DB_CONNECTION_STRING` use `${VAR:?}` in the compose file, so `docker compose up` aborts without them, and `Program.cs` throws at startup on a missing or placeholder value. This is intentional — never work around it.
 
-3. **The container health check does not check health.** It curls `/`, which returns a static HTML page. **A container can report `healthy` while the database is unreachable and every background service is failing.** Use §D, not `docker ps`.
+3. **The container health check is real.** It probes `GET /health`, which includes a database connectivity check; `deploy.sh` waits for it and rolls back if it fails. It does **not** cover the analytics background services — §D still applies.
 
 ---
 
@@ -27,60 +30,37 @@
 
 ## Source and build
 
-- [ ] `git status --short` is empty — working tree clean
-- [ ] `git log --oneline -1` matches the commit you intend to deploy; **write the SHA down**, §F needs it
-- [ ] `git diff --check` reports nothing (no conflict markers, no whitespace errors)
-- [ ] `dotnet build Cocorra.sln --no-incremental` → **0 errors**. 13 warnings is the expected baseline; investigate anything above that
-- [ ] `dotnet test Cocorra.Tests/Cocorra.Tests.csproj` → **271/271 pass, 0 skipped**
+- [ ] The commit to deploy is on `prod` (or is the head of the PR into `prod`); **write the SHA down**, §F needs it
+- [ ] `.github/workflows/ci.yml` is green for it: restore, Release build and the full test suite. The deploy workflow re-runs the same tests and will not build an image if they fail
+- [ ] Any migration in the release follows [`docs/MIGRATIONS.md`](../MIGRATIONS.md) (see §B)
 
-> The `Dockerfile` runs `dotnet test` during the build, so a failing test fails the image build. That is a backstop, not a substitute for running it yourself — you want the failure before you have started a deployment.
+## Server prerequisites (once per server, re-check before a first deploy)
 
-## Secret configuration
+- [ ] `/opt/cocorra/api/.env` exists, filled in from `.env.example` — every `CHANGE_ME` replaced. `API_IMAGE` / `IMAGE_TAG` are written by `deploy.sh`; do not add them by hand
+- [ ] `ANALYTICS_IP_HASH_SALT` is a freshly generated value (`openssl rand -base64 32`), **not** the value once committed to `appsettings.json` — that is in git history and compromised. Rotating it is safe: nothing reads `IpHash`. See `PRODUCTION-READINESS-REPORT.md` §2
+- [ ] `/opt/cocorra/api/firebase-config.json` exists with mode **644**: the container runs as UID 1654 and reads it through the world-read bit. `deploy.sh` refuses to deploy otherwise
+- [ ] `/opt/cocorra/infra/backup.sh` is the **current** `deploy/backup.sh` from the repository, mode 755. `deploy.sh` refuses to deploy if it is missing, not executable, or does not print a final `BACKUP_DB=<path>` line
+- [ ] The `cocorra-network` Docker network exists, and the `cocorra_db` (SQL Server) and MinIO containers are on it
+- [ ] GitHub: the `production` environment is restricted to the `prod` branch, and holds `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, `SSH_USER`, `SSH_HOST`
 
-- [ ] `.env` exists next to `docker-compose.yml` **on the server**
-- [ ] `.env` is **not** in git: `git check-ignore .env` prints a match
-- [ ] `ANALYTICS_IP_HASH_SALT` is set in `.env` to a freshly generated value:
+## Secret rotation — acknowledge before proceeding
 
-      openssl rand -base64 32
+Tracked configuration no longer holds secrets: the connection string, JWT key, seed admin
+password, LiveKit key/secret and TURN credentials were removed from `appsettings.json` and
+`livekit/livekit.yaml` (now `livekit.example.yaml`, placeholders only), and production reads
+them from `.env`. **The old values remain in git history**, so they are compromised until rotated.
 
-- [ ] **The salt is NOT the value that was previously in `appsettings.json`.** That value is in git history on a hosted remote and must be treated as compromised. Rotating it is safe: nothing in the codebase reads `IpHash`, so no metric changes. See `PRODUCTION-READINESS-REPORT.md` §2 for the full impact analysis.
-- [ ] `git grep -n "IpHashSalt" -- '*.json'` shows **only** the `_comment_IpHashSalt` pointer, never a value
-- [ ] `firebase-config.json` is present on the server next to `docker-compose.yml` (bind-mounted read-only; without it the Firebase SDK is skipped and push notifications silently do nothing)
-
-## Known-outstanding secret exposure — acknowledge before proceeding
-
-`Cocorra.API/appsettings.json` is still tracked and still contains **nine** live secrets, and
-`livekit/livekit.yaml` duplicates two of them. They were deliberately not moved in Wave 8:
-each rotation has operational consequences that need coordinating, and the brief's instruction
-was to document rather than silently change them.
-
-| Severity | Keys |
-|---|---|
-| **CRITICAL** | `ConnectionStrings:DefaultConnection` · `JWTSetting:securityKey` · `Minio:SecretKey`+`AccessKey` · `LiveKit:ApiSecret`+`ApiKey` · `livekit.yaml` keys + TURN password |
-| **HIGH** | `EmailSettings:SmtpPass` · `SeedAdmin:Password` |
-| **MEDIUM** | `LiveKit:IceServers:1:credential` |
-| **LOW** | `loadtest.js` hardcoded JWT — **verified expired** (2026-06-12) |
-
-**`JWTSetting:securityKey` is the highest-impact of these: it permits forging a token for any
+**`JWTSetting:securityKey` is the highest-impact: the old value permits forging a token for any
 user, including Admin, with no login attempt and no log entry.**
 
-- [ ] You have read `PRODUCTION-READINESS-REPORT.md` §2 and accepted this for **this** deployment
-- [ ] **Repository visibility confirmed.** A public repository makes every key above publicly readable. **If public, rotate before deploying** — §2.4 of the report has the ordered runbook
-- [ ] A rotation window is scheduled, or a decision to accept the risk is recorded
-
-### Reduced in Wave 8 — no action needed, listed for completeness
-
-- `cocorra.runasp.net-WebDeploy.publishSettings` (hosting deployment password) — **untracked**; `*.publishSettings` now ignored
-- `Cocorra.API/publish/**` — 170 files of build output holding **six duplicate copies of every secret above** — **untracked**; `publish/` now ignored
-- `Analytics:IpHashSalt` — **externalised** (rotate per Condition 1 above)
-
-All three remain on disk; none is used by this deployment path.
+- [ ] Every value in `.env` is a **new** value, not one that was ever committed: DB password, JWT key (signs every user out), seed admin password, LiveKit key/secret, MinIO keys, Resend key
+- [ ] Or: a decision to accept the risk for this deployment is recorded, with a rotation date
 
 ## Database
 
-- [ ] Connection string points at the intended database
-- [ ] **A restore-tested backup exists, taken immediately before this deployment**
-- [ ] `dotnet ef migrations list --project Cocorra.DAL --startup-project Cocorra.API` — note which are unapplied
+- [ ] `DB_CONNECTION_STRING` points at the intended database
+- [ ] **The backup is automatic:** `deploy.sh` runs `backup.sh` before every deploy and prints the file. Make sure a backup from this script has been **restore-tested** at least once (the restore steps `deploy.sh` prints on a failed deploy are the procedure)
+- [ ] `dotnet ef migrations list --project Cocorra.DAL --startup-project Cocorra.API` — note which are unapplied (locally this uses the connection string in `appsettings.Development.json`; set `ConnectionStrings__DefaultConnection` to target another database)
 - [ ] `dotnet ef migrations has-pending-model-changes --project Cocorra.DAL --startup-project Cocorra.API` → "No changes have been made to the model since the last migration"
 
 > **If an `ef` command fails with `Analytics:IpHashSalt is not configured` followed by
@@ -101,11 +81,14 @@ All three remain on disk; none is used by this deployment path.
 
 ### Running the API locally
 
-`dotnet run` and `dotnet watch run` need the salt too, and this file is not how they get it.
-`.env` is read by docker-compose only. Use user-secrets, which stores the value **outside the
-repository**:
+`dotnet run` and `dotnet watch run` need the salt too — and the OTP key, JWT key and seed admin
+password, which have the same startup guards — and `.env` is not how they get them: it is read
+by docker-compose only. Use user-secrets, which stores the values **outside the repository**:
 
-    dotnet user-secrets set "Analytics:IpHashSalt" "$(openssl rand -base64 32)" --project Cocorra.API
+    dotnet user-secrets set "Analytics:IpHashSalt"   "$(openssl rand -base64 32)" --project Cocorra.API
+    dotnet user-secrets set "Otp:HmacKey"            "$(openssl rand -base64 32)" --project Cocorra.API
+    dotnet user-secrets set "JWTSetting:securityKey" "$(openssl rand -base64 48)" --project Cocorra.API
+    dotnet user-secrets set "SeedAdmin:Password"     "<a strong password>"        --project Cocorra.API
 
 It loads automatically because `launchSettings.json` sets `ASPNETCORE_ENVIRONMENT=Development`.
 
@@ -124,33 +107,39 @@ Stage A requires the pipeline live and no new events emitting.
 
 - [ ] `.env` does **not** set `Analytics__EnableNewEventEmission`
 - [ ] `.env` does **not** set `Analytics__EnableHighFrequencyEvents`
-- [ ] Both flag lines in `docker-compose.yml` are still commented out
+- [ ] `deploy/docker-compose.prod.yml` sets neither flag (`ProductionReadinessTests` asserts this for both compose files)
 - [ ] `appsettings.json` still has both as `false`
 
 ---
 
-# B. Apply migrations
+# B. Migrations
 
-**Do this before starting the new container**, against the backup taken above.
+Pending migrations are applied **by the new container at startup**, before it reports healthy.
+There is no separate migration step in the normal flow — but you still review them first.
 
-- [ ] Three migrations are expected to apply:
-
-      20260901080448_AddDailyStateSnapshots
-      20260901082008_AddAnalyticsPipelineAndReadModels
-      20260901120157_AddParticipantLifecycleAndStatusCodes
-
-- [ ] Generate and **read** the SQL before running it:
+- [ ] Every migration in this release is **backward-compatible with the previous release**
+      (expand now, contract later — [`docs/MIGRATIONS.md`](../MIGRATIONS.md)). A failed deploy
+      rolls back the image, **not** the schema
+- [ ] **Long migrations must not run at startup.** The deploy gives the container about two
+      minutes (60s health-check start period, then three failed 15s probes, inside `deploy.sh`'s
+      150s wait) and Kestrel does not answer `/health` until migrations finish. A migration or
+      backfill that may take longer — e.g. a batched `UPDATE` over `UserEvents` — must be applied
+      by hand **before** merging to `prod`, using the idempotent script below; the container then
+      finds nothing pending
+- [ ] Generate and **read** the SQL:
 
       dotnet ef migrations script --idempotent \
         --project Cocorra.DAL --startup-project Cocorra.API \
         --output migrate.sql
 
-- [ ] **Review `AddAnalyticsPipelineAndReadModels` specifically.** It adds three columns to `UserEvents`, **backfills `EventId` on every existing row in batches**, and only then applies the `UX_UserEvents_EventId` unique constraint. On a large `UserEvents` table this is the longest-running statement in the deployment. Know the row count first:
+- [ ] Know the row counts of any table a migration rewrites. **Example from Wave 8 —
+      `AddAnalyticsPipelineAndReadModels`** — was exactly the kind of migration to apply by hand
+      on a large database: it adds three columns to `UserEvents`, **backfills `EventId` on every existing row in batches**, and only then applies the `UX_UserEvents_EventId` unique constraint. On a large `UserEvents` table this is the longest-running statement in the deployment. Know the row count first:
 
       SELECT COUNT(*) FROM UserEvents;
 
-- [ ] Apply during a low-traffic window
-- [ ] Verify afterwards:
+- [ ] If applying by hand: take a backup first (`/opt/cocorra/infra/backup.sh`), apply during a low-traffic window, then merge to `prod`
+- [ ] Verify afterwards (Wave 8 example):
 
       -- EventId is added NOT NULL with an all-zeros default and then backfilled with
       -- NEWID(). So test for the ZERO GUID, not for NULL: "WHERE EventId IS NULL"
@@ -169,29 +158,48 @@ Stage A requires the pipeline live and no new events emitting.
 
 # C. Deploy
 
-- [ ] `docker compose build` succeeds (tests run inside the build)
-- [ ] `docker compose up -d`
-- [ ] **If it aborts with `ANALYTICS_IP_HASH_SALT is not set`** — that is the guard working. Fix `.env`; do not work around it
-- [ ] `docker compose ps` shows the container running
-- [ ] `docker compose logs --tail=200 cocorra-api` contains no startup exception
+**Do not run `docker compose up` by hand on the server.** A deploy is a merge to `prod`.
 
-## Startup failure modes and what they mean
+- [ ] Merge the PR into `prod` (or re-run "Deploy API" with *Run workflow* on `prod`; any other
+      branch builds an image but the deploy job is skipped)
+- [ ] Watch the run in GitHub Actions. The jobs are:
+  1. **test** — restore, Release build, full test suite. A failure stops everything; nothing is built
+  2. **build** — builds the image and pushes `ghcr.io/<owner>/<repo>:<commit sha>`
+  3. **deploy** (environment `production`) — uploads `deploy/docker-compose.prod.yml` to
+     `/opt/cocorra/api/docker-compose.yml` and runs `deploy/deploy.sh` on the server over SSH
+- [ ] `deploy.sh` does, in order, and the run log shows each step:
+  1. Pre-flight: `.env`, `firebase-config.json` (world-readable) and `backup.sh` present — otherwise it stops with the fix, **before changing anything**
+  2. Database backup via `backup.sh`; the log line `database backup: /opt/cocorra/backups/db-<ts>.bak.gz` names it — **note it**
+  3. Pull the new image (a failed pull changes nothing)
+  4. Replace the container (**the API is down from here until the new container is healthy**, typically under a minute; longer if migrations run)
+  5. Wait up to 150s for `/health`; stop early on `unhealthy` or a crash loop
+  6. Healthy → record the tag in `.env`, prune old images of this repository (newest 3 kept). **Deploy OK**
+  7. Not healthy → roll back to the previous tag and wait for it to be healthy, then print the database restore steps (see §G). The run fails either way
+- [ ] The run ends with `==> Deploy OK: <sha>`
 
-| Log line | Cause | Fix |
-|---|---|---|
-| `Analytics:IpHashSalt is not configured` | Salt not reaching the container | Check `.env` and the `environment:` mapping in `docker-compose.yml` |
-| `Analytics:EventChannelCapacity must be greater than zero` | Capacity set to 0 or a non-numeric value | Fix the override |
-| `Invalid object name 'DailyStateSnapshots'` | §B skipped | Apply migrations |
-| `firebase-config.json not found` | Bind mount missing | **Warning, not fatal.** Push notifications will silently do nothing |
+## Failure modes and what they mean
+
+| Where | Message | Cause | Fix |
+|---|---|---|---|
+| deploy.sh pre-flight | `firebase-config.json is not world-readable` | Mode 600/640 | `chmod 644 /opt/cocorra/api/firebase-config.json` |
+| deploy.sh pre-flight | `/opt/cocorra/infra/backup.sh is missing` / `not executable` | Script not installed | Copy `deploy/backup.sh` there, `chmod 755` |
+| deploy.sh backup | `did not report an existing backup file` | Outdated `backup.sh` (no `BACKUP_DB=` line) | Install the current `deploy/backup.sh` |
+| `docker compose` | `required variable ... is missing a value` | A required `.env` value is unset | Fix `.env`; do not work around it |
+| container log | `Analytics:IpHashSalt is not configured` (or `Otp:HmacKey`, `JWTSetting:securityKey`, `SeedAdmin:Password`) | Value missing or still a placeholder | Fix `.env` |
+| container log | `Analytics:EventChannelCapacity must be greater than zero` | Capacity set to 0 or a non-numeric value | Fix the override |
+| container log | An exception during `Applying database migrations...` | A migration failed | The previous version is restored automatically; fix the migration (§B) |
+| container log | `UnauthorizedAccessException` reading `firebase-config.json` | File not readable by UID 1654 | `chmod 644` (pre-flight normally catches this) |
+| container log | `firebase-config.json not found` | Bind mount missing | **Warning, not fatal.** Push notifications silently do nothing |
 
 ---
 
 # D. Immediately after deployment
 
-**Do not rely on `docker ps` or the container health check.** Neither touches the database or the background services.
+**The container health check proves the API is up and can reach the database — nothing more.** It does not touch the analytics background services.
 
-- [ ] Application responds: `curl -f http://localhost:5000/` returns the welcome page
-- [ ] Swagger loads at `/swagger` — confirms controllers and DI resolved
+- [ ] On the server: `curl -fsS http://localhost:5000/health` returns `Healthy`
+- [ ] Through the proxy: `curl -fsS https://api.cocorraapp.com/health` returns `Healthy` (TLS and routing work)
+- [ ] (Swagger is not served in Production — that is intended)
 - [ ] **Authenticate as an Admin and call the one endpoint that proves the analytics stack is alive:**
 
       GET /Api/V1/Analytics/System/Health
@@ -363,7 +371,9 @@ STAGE A BASELINE  (the numbers every later stage is judged against)
 
 # G. Rollback
 
-Every analytics rollback is a configuration change. **No code change, no migration reversal, no data loss.**
+Every analytics rollback (R1–R6) is a configuration change. **No code change, no migration reversal, no data loss.** Analytics flags live in `/opt/cocorra/api/.env`; after editing it, restart with `cd /opt/cocorra/api && docker compose up -d` (`.env` already names the running image).
+
+A failed **deploy** rolls itself back (R7). The database is never rolled back automatically (R8).
 
 | # | Condition | Action | Expected result | Verification |
 |:--:|---|---|---|---|
@@ -373,8 +383,8 @@ Every analytics rollback is a configuration change. **No code change, no migrati
 | **R4** | Purge contends with ingestion | Lower `Analytics__CleanupBatchSize` | Smaller delete batches | Flush latency recovers |
 | **R5** | Dead-letter backlog growing | **No rollback needed.** Inspect `DeadLetterEvents` | Events are **parked, not lost** — that is the table's purpose | `deadLetterBacklog` stops rising once the cause is fixed |
 | **R6** | Structured log volume excessive | Unset `Analytics__StructuredLogPath` | Reverts to stdout only | Log volume drops |
-| **R7** | Application will not start | Redeploy the previous image tag | Previous version running | `/` responds; `GET /Analytics/System/Health` responds |
-| **R8** | Schema rollback needed | `dotnet ef database update <previous-migration>` | **Last resort.** Reverses the `UserEvents` columns and drops the read models | Restore from the §A backup instead if any data was written |
+| **R7** | New release will not start / fails `/health` | **Automatic:** `deploy.sh` restarts the previous tag. To roll back a release that passed its health check but misbehaves, revert the commit on `prod` (a normal deploy), or on the server: `cd /opt/cocorra/api && API_IMAGE=<image> IMAGE_TAG=<previous sha> docker compose up -d` (the newest 3 tags stay on the host; older ones are pulled from GHCR) | Previous version running | `/health` returns `Healthy`; `GET /Analytics/System/Health` responds |
+| **R8** | Schema change broke the previous release | Restore the pre-deploy backup with the exact steps `deploy.sh` printed in the failed run (stop `cocorra-api`, `gunzip`, `docker cp` into `cocorra_db`, `RESTORE DATABASE ... WITH REPLACE`, start the previous version) | **Last resort: discards every write since the backup.** Avoided entirely by following `docs/MIGRATIONS.md` | Previous version healthy; spot-check recent data |
 
 ## What does NOT roll back
 
@@ -412,7 +422,7 @@ There is **no APM, no metrics export and no alerting**. Monitoring is a person c
 | Gap | Consequence |
 |---|---|
 | **No alerting** | Nobody is told when `pipelineHealthy` goes false. Someone must look |
-| **Container health check does not test the database** | A container reports `healthy` with the DB down |
+| **Container health check covers the database only** | `/health` fails when the DB is unreachable, but not when an analytics background service is stuck |
 | **Purge outcome is log-only** | `EventCleanupService` logs rows deleted but exposes **no counter**. Retention health is not visible on the health endpoint |
 | **No per-service liveness signal** | `EventFlushService` health is inferred from `eventsPersisted` rising; there is no direct "is it running" field |
 | **No request latency or CPU metrics** | Analytics' performance impact is not measurable in-app |
@@ -425,8 +435,8 @@ There is **no APM, no metrics export and no alerting**. Monitoring is a person c
 
 # I. Sign-off
 
-- [ ] §A complete, including the acknowledgement of outstanding secret exposure
-- [ ] §B migrations applied and verified
+- [ ] §A complete, including server prerequisites and the secret-rotation acknowledgement
+- [ ] §B migrations reviewed: backward-compatible, and any long one applied by hand before the merge
 - [ ] §D health endpoint returning, product smoke test passed
 - [ ] Backfill run to `completed: true`
 - [ ] §F baseline record filled in and stored
