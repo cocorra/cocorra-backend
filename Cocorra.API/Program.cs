@@ -443,6 +443,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 });
 #endregion
 
+// Liveness + database reachability for the container healthcheck and deploy.sh:
+// GET /health returns 200 "Healthy" or 503 "Unhealthy". Mapped below.
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("database");
+
 
 
 
@@ -671,7 +676,10 @@ using (var scope = app.Services.CreateScope())
 }
 // Must run first: everything below (HTTPS redirection, rate limiting) reads the client IP/scheme.
 app.UseForwardedHeaders();
-app.UseHttpsRedirection();
+// /health is probed over plain HTTP from inside the container (curl http://localhost:8080/health)
+// and must answer directly rather than redirect.
+app.UseWhen(context => !context.Request.Path.StartsWithSegments("/health"),
+    branch => branch.UseHttpsRedirection());
 var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
 contentTypeProvider.Mappings[".m4a"] = "audio/mp4";
 contentTypeProvider.Mappings[".aac"] = "audio/aac";
@@ -739,6 +747,11 @@ app.MapHub<RoomHub>("/hubs/rooms");
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<Cocorra.API.Hubs.SupportHub>("/hubs/support");
 app.MapControllers();
+// Anonymous and exempt from the global per-IP rate limit: the healthcheck polls it every few
+// seconds from one address, and a 429 would read as "unhealthy" and trigger a rollback.
+app.MapHealthChecks("/health")
+    .AllowAnonymous()
+    .DisableRateLimiting();
 // Public account-deletion page required by Google Play (reachable without the app).
 // Served from a clean URL with no-cache so policy-text changes are picked up immediately,
 // unlike wwwroot static files which are cached for a week.
