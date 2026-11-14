@@ -35,7 +35,10 @@ jobs:
       - id: vars
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
       - name: Build and push
         run: |
           docker build -t "${{ steps.vars.outputs.image }}:${{ github.sha }}" .
@@ -51,17 +54,26 @@ jobs:
     steps:
       - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
 
+      # Secrets reach the scripts as environment variables, never as expressions
+      # inside `run:`: an expression is pasted into the script text before the shell parses
+      # it, so a quote or $ in the value would break (or inject into) the script.
       - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Upload compose file
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           scp -i ~/.ssh/deploy_key deploy/docker-compose.prod.yml \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/opt/cocorra/api/docker-compose.yml"
+            "$SSH_USER@$SSH_HOST:/opt/cocorra/api/docker-compose.yml"
 
       - name: Deploy
         env:
@@ -69,8 +81,10 @@ jobs:
           TAG: ${{ github.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           {
             printf 'export IMAGE=%q TAG=%q GH_TOKEN=%q GH_ACTOR=%q\n' "$IMAGE" "$TAG" "$GH_TOKEN" "$GH_ACTOR"
             cat deploy/deploy.sh
-          } | ssh -i ~/.ssh/deploy_key "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -s'
+          } | ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" 'bash -s'
