@@ -1,0 +1,28 @@
+name: CI
+
+# Build and test only: no image, no deploy, no secrets. Same steps and pinned actions as
+# the "test" job in deploy.yml, so a green PR means the deploy's test gate will pass too.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [prod]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release
+      - run: dotnet test --no-build -c Release
