@@ -414,7 +414,12 @@ builder.Services.AddSingleton<IAmazonS3>(sp =>
     {
         ServiceURL = endpoint,
         ForcePathStyle = true, // Required for MinIO S3 compatibility
-        UseHttp = !isHttps
+        UseHttp = !isHttps,
+        // SDK v4 adds CRC checksums (and aws-chunked trailers) to every request by default,
+        // which some S3-compatible servers, including the 2025 MinIO release we run, may reject.
+        // Only send/validate checksums where the operation requires them.
+        RequestChecksumCalculation = Amazon.Runtime.RequestChecksumCalculation.WHEN_REQUIRED,
+        ResponseChecksumValidation = Amazon.Runtime.ResponseChecksumValidation.WHEN_REQUIRED
     };
 
     var accessKeyMasked = string.IsNullOrEmpty(minioSettings.AccessKey) 
