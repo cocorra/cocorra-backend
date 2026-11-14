@@ -126,9 +126,11 @@ then returns `null`, and `PushNotificationService` logs an error for every send 
 delivering anything. If pushes are silently missing, check this first.
 
 - **Local:** drop `firebase-config.json` into `Cocorra.API/`.
-- **Docker/VPS:** `docker-compose.yml` bind-mounts `./firebase-config.json` next to the compose file
-  into `/app/firebase-config.json`. Because the file is gitignored, the deploy workflow's `scp` step
-  does **not** carry it — place it on the server manually once, at `/root/cocorra-app/firebase-config.json`.
+- **Docker/VPS:** `deploy/docker-compose.prod.yml` (and `docker-compose.dev.yml` locally) bind-mounts
+  `./firebase-config.json` next to the compose file into `/app/firebase-config.json`. The deploy never
+  carries it — place it on the server manually once, at `/opt/cocorra/api/firebase-config.json`, with
+  mode `644`: the container runs as UID 1654 and must be able to read it. `deploy.sh` refuses to deploy
+  if it is missing or not world-readable.
 
 `PushNotificationService` never throws: it logs and returns. Callers can `await` it directly without
 a `try/catch`. It also sets platform config per message — Android `Priority.High`, and APNs headers
@@ -243,22 +245,29 @@ and [`MOBILE_TRACKING_GUIDE.md`](MOBILE_TRACKING_GUIDE.md).
 
 ## Docker & deployment
 
-Local container run:
+Local container run (builds the image from your checkout; needs a filled-in `.env`, see
+`.env.example`):
 
 ```bash
-docker compose up --build
+docker network create cocorra-network   # once
+docker compose -f docker-compose.dev.yml up --build
 ```
 
-The API listens on `8080` in-container, published to `5000` on the host. Uploads persist in the
-`cocorra-uploads` volume mounted at `/app/wwwroot/Uploads`.
+The API listens on `8080` in-container, published to `127.0.0.1:5000` on the host.
+`GET /health` returns 200 when the API can reach its database.
 
-`Dockerfile` is a two-stage build that **runs `dotnet test` before publishing** — a failing test
-fails the image build.
+`Dockerfile` is a two-stage build that publishes the API and runs it as a non-root user. It does
+not run tests; CI does.
 
-**CI/CD.** `.github/workflows/deploy.yml` triggers on push to the `prod` branch: it writes
-`appsettings.Production.json` from the `APPSETTINGS_JSON` secret, `scp`s the tree to
-`/root/cocorra-app` on the VPS, then runs `docker compose up --build -d`. Note that `main` does not
-deploy — production ships from `prod`.
+**CI.** `.github/workflows/ci.yml` restores, builds and runs the tests on every push to `main` and
+on pull requests targeting `prod`.
+
+**Deploy.** `.github/workflows/deploy.yml` triggers on push to `prod` (production ships from
+`prod`, never from `main`): it runs the tests, builds the image and pushes it to GHCR tagged with
+the commit SHA, then uploads `deploy/docker-compose.prod.yml` to `/opt/cocorra/api/docker-compose.yml`
+on the VPS and runs `deploy/deploy.sh` there. The script backs up the database, pulls the image,
+starts it, waits for the health check and rolls back to the previous image if it fails. It never
+rolls back the database, so every migration must follow [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md).
 
 ---
 

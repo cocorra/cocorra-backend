@@ -1,3 +1,13 @@
+# LOCAL USE ONLY: builds the API image from this checkout and runs it like production
+# (ASPNETCORE_ENVIRONMENT=Production) against your own .env.
+#
+#   docker network create cocorra-network   # once
+#   cp .env.example .env                    # fill in local values
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Production does not use this file: it runs the prebuilt GHCR image with
+# deploy/docker-compose.prod.yml, via deploy/deploy.sh.
+
 services:
   cocorra-api:
     build:
@@ -54,14 +64,15 @@ services:
     volumes:
       # Persist user-uploaded files (images, voice recordings)
       - cocorra-uploads:/app/wwwroot/Uploads
-      # Mount Firebase config (place firebase-config.json next to docker-compose.yml)
+      # Mount Firebase config (place firebase-config.json next to this file; it must be
+      # world-readable, because the container runs as UID 1654)
       - ./firebase-config.json:/app/firebase-config.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 60s
     logging:
       driver: "json-file"
       options:
