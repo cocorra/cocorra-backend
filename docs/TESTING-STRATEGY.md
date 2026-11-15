@@ -357,7 +357,7 @@ suite and needing only verification or a rename; everything else is new.
 > **Given** a unique email, a valid voice file and a valid profile picture
 > **When** registering
 > **Then** the user is created with `Status = Pending`, `EmailConfirmed = false`, assigned the `User`
-> role; an OTP email is sent; a refresh token with 7-day expiry is stored; `user_registered` and
+> role; an OTP email is sent; a refresh token with 30-day expiry is stored; `user_registered` and
 > `voice_verification_submitted` are tracked; and a **restricted** JWT carrying
 > `VerificationStatus = Pending` is returned with 201.
 
@@ -404,7 +404,7 @@ suite and needing only verification or a rename; everything else is new.
 > message, `RegisterDeviceAsync` is **not** called, and no token is issued. `[Theory]`.
 
 **BE-AUTH-011** · `LoginAsync` · Active happy path · Unit · **P0** `[EXISTS]`
-> **Then** JWT with `VerificationStatus = Active`, roles, a fresh refresh token (7 days), device
+> **Then** JWT with `VerificationStatus = Active`, roles, a fresh refresh token (30 days), device
 > registered.
 
 **BE-AUTH-012** · `GenerateJwtToken` · Claim contract · Unit · **P0**
@@ -428,7 +428,7 @@ suite and needing only verification or a rename; everything else is new.
 
 **BE-AUTH-016** · `RefreshTokenAsync` · Rotation · Unit · **P1**
 > **Given** a valid refresh for an active user
-> **When** refreshing **Then** a **different** refresh token is stored, expiry is pushed to +7 days, the
+> **When** refreshing **Then** a **different** refresh token is stored, expiry is pushed to +30 days, the
 > device is re-registered (keeping `LastSeenAt` current), and a new access token is returned.
 
 **BE-AUTH-017** · `RevokeTokenAsync` · Clears both credentials · Unit · **P1**
@@ -2497,7 +2497,7 @@ H = hub (integration over SignalR), M = manual, L = load, S = static/config.
 | BE-ROOM-032 | Rooms | Leave closes the mic segment | U | P1 | Unmuted participant | Seconds accrued; `mic_deactivated` | — |
 | BE-AUTH-002 | Auth | Duplicate email | U | P1 | Existing email | 400; no upload | — |
 | BE-AUTH-008 | Auth | Unconfirmed email blocks login | U | P1 | `UNCONFIRMED_1` | 400; no token | — |
-| BE-AUTH-016 | Auth | Refresh rotation | U | P1 | Valid refresh | New value, +7 days, device touched | — |
+| BE-AUTH-016 | Auth | Refresh rotation | U | P1 | Valid refresh | New value, +30 days, device touched | — |
 | BE-AUTH-017 | Auth | Revoke clears refresh + FCM | U | P1 | Both set | Both nulled; second call idempotent | — |
 | BE-AUTH-020 | Auth | Clean error on remaining FK refs | U | P1 | `DbUpdateException` | Friendly 400, not 500 | — |
 | BE-AUTH-022 | Auth | Re-record only in `ReRecord` | U | P1 | 4 statuses | Refused except ReRecord | — |

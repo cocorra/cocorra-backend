@@ -31,6 +31,10 @@ namespace Cocorra.BLL.Services.AuthServices
 {
     public class AuthServices : ResponseHandler, IAuthServices
     {
+        // Every refresh pushes the expiry forward again, so this is how long a user can go without
+        // opening the app before having to log in again.
+        private const int RefreshTokenLifetimeDays = 30;
+
         public const string ForgotPasswordGenericMessage = "If your email is registered, you will receive a password reset code shortly.";
 
         private readonly UserManager<ApplicationUser> _userManager;
@@ -142,7 +146,7 @@ namespace Cocorra.BLL.Services.AuthServices
                     var (restrictedToken, restrictedRoles) = await GenerateJwtToken(user);
                     var restrictedRefreshToken = GenerateRefreshToken();
                     user.RefreshToken = restrictedRefreshToken;
-                    user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+                    user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(RefreshTokenLifetimeDays);
                     await _userManager.UpdateAsync(user);
 
                     _eventTracker.Track(EventTypes.UserRegistered, user.Id);
@@ -224,7 +228,7 @@ namespace Cocorra.BLL.Services.AuthServices
                     var (restrictedToken, restrictedRoles) = await GenerateJwtToken(user);
                     var restrictedRefreshToken = GenerateRefreshToken();
                     user.RefreshToken = restrictedRefreshToken;
-                    user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+                    user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(RefreshTokenLifetimeDays);
                     await _userManager.UpdateAsync(user);
 
                     // Register here too: verification-stage users hold a real (restricted)
@@ -257,7 +261,7 @@ namespace Cocorra.BLL.Services.AuthServices
             var (jwtToken, roles) = await GenerateJwtToken(user);
             var refreshToken = GenerateRefreshToken();
             user.RefreshToken = refreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(RefreshTokenLifetimeDays);
             await _userManager.UpdateAsync(user);
 
             await _blockedDevicesService.RegisterDeviceAsync(user.Id, device);
@@ -800,7 +804,7 @@ namespace Cocorra.BLL.Services.AuthServices
             var newRefreshToken = GenerateRefreshToken();
 
             user.RefreshToken = newRefreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(RefreshTokenLifetimeDays);
             await _userManager.UpdateAsync(user);
 
             // Refresh is the only auth traffic a long-lived session generates, so this is
