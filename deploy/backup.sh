@@ -10,7 +10,9 @@ set -eu
 DB_NAME="CocorraDb"
 DIR="/opt/cocorra/backups"
 KEEP_DAYS=7
-TS=$(date +%Y%m%d-%H%M)
+# Seconds included: two runs in the same minute (e.g. re-running a failed deploy) would
+# otherwise collide, and gzip refuses to overwrite an existing db-$TS.bak.gz.
+TS=$(date +%Y%m%d-%H%M%S)
 
 echo "[$(date)] Starting backup"
 
