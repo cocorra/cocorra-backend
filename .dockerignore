@@ -14,14 +14,15 @@
 **/Dockerfile
 **/.dockerignore
 
-# Documentation and non-essential files
+# Documentation and non-essential files (repo root only for *.png and index.html:
+# wwwroot ships its own images and HTML pages, e.g. wwwroot/System/*.png)
 **/*.md
 **/*.pdf
-**/*.png
+/*.png
 **/*.mp3
 **/voice_rooms_schema.pdf
 **/database-script.sql
-**/index.html
+/index.html
 **/login.html
 **/*.publishSettings
 
@@ -30,3 +31,8 @@
 
 # Uploaded user content (mounted as volume)
 **/wwwroot/Uploads/
+
+# Secrets: production configuration comes from .env / mounts at runtime,
+# never from the build context, so it cannot end up in an image layer.
+**/appsettings.Production.json
+**/.env

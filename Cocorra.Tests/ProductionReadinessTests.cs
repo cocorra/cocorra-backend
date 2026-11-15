@@ -178,10 +178,12 @@ public class ProductionReadinessTests
         Assert.DoesNotContain('\0', ignore);
     }
 
-    [Fact]
-    public void DockerCompose_SourcesTheSaltFromTheEnvironment_AndDoesNotEnableEventFlags()
+    [Theory]
+    [InlineData("deploy/docker-compose.prod.yml")] // production
+    [InlineData("docker-compose.dev.yml")]         // local
+    public void DockerCompose_SourcesTheSaltFromTheEnvironment_AndDoesNotEnableEventFlags(string composeFile)
     {
-        var compose = ReadRepoFile("docker-compose.yml");
+        var compose = ReadRepoFile(composeFile);
 
         Assert.Contains("Analytics__IpHashSalt=${ANALYTICS_IP_HASH_SALT", compose);
 

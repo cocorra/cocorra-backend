@@ -1,3 +1,13 @@
+# LOCAL USE ONLY: builds the API image from this checkout and runs it like production
+# (ASPNETCORE_ENVIRONMENT=Production) against your own .env.
+#
+#   docker network create cocorra-network   # once
+#   cp .env.example .env                    # fill in local values
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Production does not use this file: it runs the prebuilt GHCR image with
+# deploy/docker-compose.prod.yml, via deploy/deploy.sh.
+
 services:
   cocorra-api:
     build:
@@ -33,6 +43,13 @@ services:
       # only the codes currently outstanding (users request a new one).
       - "Otp__HmacKey=${OTP_HMAC_KEY:?set OTP_HMAC_KEY in .env — generate a value with openssl rand -base64 32}"
 
+      # REQUIRED. Signs every access token; anyone holding it can forge admin tokens.
+      # Rotating it signs every user out.
+      - "JWTSetting__securityKey=${JWT_SECURITY_KEY:?set JWT_SECURITY_KEY in .env — generate a value with openssl rand -base64 48}"
+
+      # REQUIRED. Password for the admin account IdentitySeeder creates on an empty database.
+      - "SeedAdmin__Password=${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env — use a strong unique password}"
+
       # Analytics event-emission flags. Both default to false in appsettings.json.
       # Uncomment ONLY when the corresponding stage gate in
       # docs/dashboard-discovery/30-production-deployment-checklist.md has passed.
@@ -41,19 +58,21 @@ services:
       # - Analytics__EnableHighFrequencyEvents=true   # Stage C (also raise the channel capacity first)
       # - Analytics__EventChannelCapacity=25000       # Stage C, in a SEPARATE earlier deploy
 
-      # Override connection string via environment variable if needed:
-      # - ConnectionStrings__DefaultConnection=Server=YOUR_DB_HOST;Database=CocorraDb;User Id=sa;Password=YOUR_PASSWORD;TrustServerCertificate=True;MultipleActiveResultSets=True;
+      # REQUIRED. appsettings.json has no connection string, so without this the API has
+      # no database and exits at startup when migrations run.
+      - "ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING:?set DB_CONNECTION_STRING in .env — see .env.example}"
     volumes:
       # Persist user-uploaded files (images, voice recordings)
       - cocorra-uploads:/app/wwwroot/Uploads
-      # Mount Firebase config (place firebase-config.json next to docker-compose.yml)
+      # Mount Firebase config (place firebase-config.json next to this file; it must be
+      # world-readable, because the container runs as UID 1654)
       - ./firebase-config.json:/app/firebase-config.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 60s
     logging:
       driver: "json-file"
       options:

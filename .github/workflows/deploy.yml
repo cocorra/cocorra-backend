@@ -1,51 +1,90 @@
-name: Deploy Cocorra API to Production
+name: Deploy API
 
 on:
   push:
-    branches:
-      - prod
+    branches: [prod]
+  workflow_dispatch:
+
+concurrency:
+  group: api-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. سحب الكود من الريبو إلى سيرفرات جيت هاب
-      - name: Checkout the code
-        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
-      - name: Generate appsettings.Production.json
-        run: |
-          cat << 'EOF' > Cocorra.API/appsettings.Production.json
-          ${{ secrets.APPSETTINGS_JSON }}
-          EOF
-      # 2. نسخ الملفات بأمان من جيت هاب إلى السيرفر الخاص بك
-      - name: Copy files to VPS
-        uses: appleboy/scp-action@a6e43c3aaf4e8e6b0b15bf34e19d71118f6b1ca7 # master
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: 22
-          source: "."
-          target: "/root/cocorra-app"
+          dotnet-version: "10.0.x"
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release
+      - run: dotnet test --no-build -c Release
 
-      # 3. الدخول للسيرفر وتشغيل الكونتينر
-      - name: Build and start Docker containers
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: 22
-          script: |
-            cd /root/cocorra-app
-            
-            # إيقاف الكونتينر القديم (إن وجد)
-            docker compose down
-            
-            # بناء وتشغيل الكونتينر الجديد
-            echo "Starting Docker build and deployment..."
-            docker compose up --build -d
-            
-            # تنظيف الصور القديمة لتوفير المساحة
-            docker image prune -f
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.vars.outputs.image }}
+    steps:
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
+      - id: vars
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+      - name: Build and push
+        run: |
+          docker build -t "${{ steps.vars.outputs.image }}:${{ github.sha }}" .
+          docker push "${{ steps.vars.outputs.image }}:${{ github.sha }}"
+
+  deploy:
+    needs: build
+    # workflow_dispatch can be started from any branch; only prod may reach production.
+    # (The "production" environment is also restricted to prod in the repository settings.)
+    if: github.ref == 'refs/heads/prod'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4
+
+      # Secrets reach the scripts as environment variables, never as expressions
+      # inside `run:`: an expression is pasted into the script text before the shell parses
+      # it, so a quote or $ in the value would break (or inject into) the script.
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload compose file
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          scp -i ~/.ssh/deploy_key deploy/docker-compose.prod.yml \
+            "$SSH_USER@$SSH_HOST:/opt/cocorra/api/docker-compose.yml"
+
+      - name: Deploy
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          TAG: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          {
+            printf 'export IMAGE=%q TAG=%q GH_TOKEN=%q GH_ACTOR=%q\n' "$IMAGE" "$TAG" "$GH_TOKEN" "$GH_ACTOR"
+            cat deploy/deploy.sh
+          } | ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" 'bash -s'

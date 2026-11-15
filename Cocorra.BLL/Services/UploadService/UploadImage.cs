@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -16,14 +17,16 @@ namespace Cocorra.BLL.Services.Upload
         private readonly IWebHostEnvironment _env;
         private readonly IAmazonS3 _s3Client;
         private readonly Cocorra.BLL.Services.UploadService.MinioSettings _settings;
+        private readonly ILogger<UploadImage> _logger;
         private readonly string[] _allowedExtensions = { ".jpg", ".jpeg", ".png" };
         private const long _maxFileSize = 5 * 1024 * 1024;
 
-        public UploadImage(IWebHostEnvironment env, IAmazonS3 s3Client, IOptions<Cocorra.BLL.Services.UploadService.MinioSettings> settings)
+        public UploadImage(IWebHostEnvironment env, IAmazonS3 s3Client, IOptions<Cocorra.BLL.Services.UploadService.MinioSettings> settings, ILogger<UploadImage> logger)
         {
             _env = env;
             _s3Client = s3Client;
             _settings = settings.Value;
+            _logger = logger;
         }
 
         public async Task<string> SaveImageAsync(IFormFile imageFile, string subFolder = "Profiles")
@@ -69,14 +72,8 @@ namespace Cocorra.BLL.Services.Upload
             }
             catch (Exception ex)
             {
-                try
-                {
-                    System.IO.File.WriteAllText("minio-error.txt", ex.ToString());
-                }
-                catch { }
-
-                Console.Error.WriteLine($"[MinIO Image Upload Error] Failed uploading to Endpoint: '{_settings?.Endpoint}', Bucket: '{_settings?.BucketName}'. Exception: {ex.Message}");
-                Console.WriteLine($"MinIO Upload Error: {ex}");
+                _logger.LogError(ex, "[MinIO Image Upload Error] Failed uploading to Endpoint '{Endpoint}', Bucket '{Bucket}'",
+                    _settings.Endpoint, _settings.BucketName);
                 return "Error:ServerException";
             }
         }

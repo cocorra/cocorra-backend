@@ -9,6 +9,7 @@ using Cocorra.BLL.Services.Upload;
 using Cocorra.BLL.Services.UploadService;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -27,12 +28,12 @@ public class UploadServiceTests
 
     private UploadImage CreateImageService()
     {
-        return new UploadImage(_envMock.Object, _s3Mock.Object, Options.Create(_settings));
+        return new UploadImage(_envMock.Object, _s3Mock.Object, Options.Create(_settings), NullLogger<UploadImage>.Instance);
     }
 
     private UploadVoice CreateVoiceService()
     {
-        return new UploadVoice(_envMock.Object, _s3Mock.Object, Options.Create(_settings));
+        return new UploadVoice(_envMock.Object, _s3Mock.Object, Options.Create(_settings), NullLogger<UploadVoice>.Instance);
     }
 
     private static IFormFile CreateMockFormFile(string fileName, string contentType, byte[] content)
@@ -256,5 +257,30 @@ public class UploadServiceTests
         var result = await service.SaveVoice(file);
 
         Assert.Equal("Error:ServerException", result);
+    }
+
+    // =========================================================================
+    // Payload signing
+    // =========================================================================
+
+    // REGRESSION GUARD. DisablePayloadSigning = true was once set on both uploads "for MinIO
+    // performance"; over http://minio:9000 the SDK then throws "When DisablePayloadSigning is
+    // true, the request must be sent over HTTPS" and every upload fails. Left unset, the SDK
+    // sends a signed aws-chunked payload (STREAMING-AWS4-HMAC-SHA256-PAYLOAD), which works
+    // over plain HTTP.
+    [Fact]
+    public async Task Uploads_DoNotDisablePayloadSigning()
+    {
+        _s3Mock.Setup(s => s.PutObjectAsync(It.IsAny<PutObjectRequest>(), default))
+            .ReturnsAsync(new PutObjectResponse());
+
+        var jpegBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46 };
+        await CreateImageService().SaveImageAsync(CreateMockFormFile("avatar.jpg", "image/jpeg", jpegBytes));
+
+        var mp3Bytes = new byte[] { 0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        await CreateVoiceService().SaveVoice(CreateMockFormFile("voice.mp3", "audio/mpeg", mp3Bytes));
+
+        _s3Mock.Verify(s => s.PutObjectAsync(It.IsAny<PutObjectRequest>(), default), Times.Exactly(2));
+        _s3Mock.Verify(s => s.PutObjectAsync(It.Is<PutObjectRequest>(r => r.DisablePayloadSigning == true), default), Times.Never);
     }
 }

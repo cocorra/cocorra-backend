@@ -68,6 +68,38 @@ else
 
 var jwtSettings = builder.Configuration.GetSection("JWTSetting");
 
+// Fail fast if the JWT signing key is missing or still the tracked development value: anyone
+// holding the key can forge tokens for any user, including admins. HS256 needs at least 32 bytes.
+var jwtSecurityKey = jwtSettings["securityKey"];
+if (string.IsNullOrWhiteSpace(jwtSecurityKey)
+    || jwtSecurityKey.Length < 32
+    || jwtSecurityKey.StartsWith("LocalDev", StringComparison.Ordinal)   // the appsettings.json value
+    || jwtSecurityKey.StartsWith("CHANGE_ME", StringComparison.Ordinal)) // the .env.example placeholder
+    throw new InvalidOperationException(
+        "JWTSetting:securityKey is not configured, shorter than 32 characters, or still the "
+        + "development placeholder from appsettings.json. Anyone who knows it can forge tokens.\n"
+        + "\n"
+        + "LOCAL DEVELOPMENT:\n"
+        + "    dotnet user-secrets set \"JWTSetting:securityKey\" \"$(openssl rand -base64 48)\" --project Cocorra.API\n"
+        + "\n"
+        + "PRODUCTION — set JWT_SECURITY_KEY in the .env file next to docker-compose.yml.\n"
+        + "  Generate a value with: openssl rand -base64 48");
+
+// Fail fast if the seeded admin password is missing or still the tracked development value:
+// IdentitySeeder creates the admin account with it on an empty database.
+var seedAdminPassword = builder.Configuration["SeedAdmin:Password"];
+if (string.IsNullOrWhiteSpace(seedAdminPassword)
+    || seedAdminPassword.StartsWith("LocalDev", StringComparison.Ordinal)   // the appsettings.json value
+    || seedAdminPassword.StartsWith("CHANGE_ME", StringComparison.Ordinal)) // the .env.example placeholder
+    throw new InvalidOperationException(
+        "SeedAdmin:Password is not configured or is still the development placeholder from "
+        + "appsettings.json, which is readable by anyone with repository access.\n"
+        + "\n"
+        + "LOCAL DEVELOPMENT:\n"
+        + "    dotnet user-secrets set \"SeedAdmin:Password\" \"<a strong password>\" --project Cocorra.API\n"
+        + "\n"
+        + "PRODUCTION — set SEED_ADMIN_PASSWORD in the .env file next to docker-compose.yml.");
+
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -382,7 +414,12 @@ builder.Services.AddSingleton<IAmazonS3>(sp =>
     {
         ServiceURL = endpoint,
         ForcePathStyle = true, // Required for MinIO S3 compatibility
-        UseHttp = !isHttps
+        UseHttp = !isHttps,
+        // SDK v4 adds CRC checksums (and aws-chunked trailers) to every request by default,
+        // which some S3-compatible servers, including the 2025 MinIO release we run, may reject.
+        // Only send/validate checksums where the operation requires them.
+        RequestChecksumCalculation = Amazon.Runtime.RequestChecksumCalculation.WHEN_REQUIRED,
+        ResponseChecksumValidation = Amazon.Runtime.ResponseChecksumValidation.WHEN_REQUIRED
     };
 
     var accessKeyMasked = string.IsNullOrEmpty(minioSettings.AccessKey) 
@@ -405,6 +442,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     });
 });
 #endregion
+
+// Liveness + database reachability for the container healthcheck and deploy.sh:
+// GET /health returns 200 "Healthy" or 503 "Unhealthy". Mapped below.
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("database");
 
 
 
@@ -634,7 +676,10 @@ using (var scope = app.Services.CreateScope())
 }
 // Must run first: everything below (HTTPS redirection, rate limiting) reads the client IP/scheme.
 app.UseForwardedHeaders();
-app.UseHttpsRedirection();
+// /health is probed over plain HTTP from inside the container (curl http://localhost:8080/health)
+// and must answer directly rather than redirect.
+app.UseWhen(context => !context.Request.Path.StartsWithSegments("/health"),
+    branch => branch.UseHttpsRedirection());
 var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
 contentTypeProvider.Mappings[".m4a"] = "audio/mp4";
 contentTypeProvider.Mappings[".aac"] = "audio/aac";
@@ -681,23 +726,32 @@ app.UseAuthorization();
 app.UseSessionTracking();
 app.UseDeviceBlocking();
 
-// Enable Swagger JSON & Swagger UI in all environments (including Production)
-app.UseSwagger(options =>
+// Swagger only in Development: in Production it publishes the full API surface, admin
+// endpoints included, to anyone who finds the URL.
+if (app.Environment.IsDevelopment())
 {
-    options.RouteTemplate = "swagger/{documentName}/swagger.json";
-});
+    app.UseSwagger(options =>
+    {
+        options.RouteTemplate = "swagger/{documentName}/swagger.json";
+    });
 
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Cocorra API v1");
-    c.RoutePrefix = "swagger";
-    c.DocumentTitle = "Cocorra API Documentation";
-});
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Cocorra API v1");
+        c.RoutePrefix = "swagger";
+        c.DocumentTitle = "Cocorra API Documentation";
+    });
+}
 
 app.MapHub<RoomHub>("/hubs/rooms");
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<Cocorra.API.Hubs.SupportHub>("/hubs/support");
 app.MapControllers();
+// Anonymous and exempt from the global per-IP rate limit: the healthcheck polls it every few
+// seconds from one address, and a 429 would read as "unhealthy" and trigger a rollback.
+app.MapHealthChecks("/health")
+    .AllowAnonymous()
+    .DisableRateLimiting();
 // Public account-deletion page required by Google Play (reachable without the app).
 // Served from a clean URL with no-cache so policy-text changes are picked up immediately,
 // unlike wwwroot static files which are cached for a week.
@@ -706,8 +760,16 @@ app.MapGet("/delete-account", (IWebHostEnvironment env, HttpContext context) =>
     context.Response.Headers.CacheControl = "no-cache";
     return Results.File(Path.Combine(env.WebRootPath, "Html", "deleteAccount.html"), "text/html; charset=utf-8");
 });
+// The Docker healthcheck requests "/", so it must answer 200 in every environment; only
+// Development redirects to Swagger, which is not mapped anywhere else.
 app.MapGet("/", context =>
 {
+    if (!app.Environment.IsDevelopment())
+    {
+        context.Response.ContentType = "text/plain";
+        return context.Response.WriteAsync("Cocorra API is running.");
+    }
+
     context.Response.ContentType = "text/html";
     return context.Response.WriteAsync(@"<!DOCTYPE html>
 <html>

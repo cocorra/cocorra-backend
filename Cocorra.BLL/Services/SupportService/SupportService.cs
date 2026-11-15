@@ -56,7 +56,9 @@ namespace Cocorra.BLL.Services.SupportService
             string? screenshotPath = null;
             if (dto.Screenshot != null && dto.Screenshot.Length > 0)
             {
-                screenshotPath = await _uploadImage.SaveImageAsync(dto.Screenshot);
+                screenshotPath = await _uploadImage.SaveImageAsync(dto.Screenshot, "Support");
+                if (screenshotPath.StartsWith("Error"))
+                    return BadRequest<string>(screenshotPath);
             }
 
             var ticket = new SupportTicket
@@ -82,7 +84,9 @@ namespace Cocorra.BLL.Services.SupportService
             string? screenshotPath = null;
             if (dto.Screenshot != null && dto.Screenshot.Length > 0)
             {
-                screenshotPath = await _uploadImage.SaveImageAsync(dto.Screenshot);
+                screenshotPath = await _uploadImage.SaveImageAsync(dto.Screenshot, "Support");
+                if (screenshotPath.StartsWith("Error"))
+                    return BadRequest<string>(screenshotPath);
             }
 
             var report = new Report

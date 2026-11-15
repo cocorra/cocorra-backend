@@ -1,15 +1,21 @@
 # ==============================================================================
 # LiveKit Server Configuration (with Built-in STUN/TURN & NAT Traversal)
-# Domain: live.cocorraapp.com | Server IP: 152.239.115.176
+# Domain: live.cocorraapp.com | Server IP: 179.67.199.194
+#
+# TEMPLATE — tracked in git, so it must never contain a real key or secret.
+# On the server:
+#   cp livekit.example.yaml livekit.yaml   # livekit.yaml is gitignored
+#   # replace every CHANGE_ME, then: docker compose -f docker-compose.livekit.yml up -d
 # ==============================================================================
 
 port: 7880
 bind_addresses:
   - "0.0.0.0"
 
-# API Keys matching Cocorra.API appsettings.json
+# API key/secret pair. Must match LiveKit__ApiKey / LiveKit__ApiSecret in the
+# API's .env. Generate: key = "API" + 12 random alphanumerics; secret = openssl rand -base64 36
 keys:
-  APIbnoqt7M8yCA4: yGI8cGT4Mlo0H1-vrDPH4huPimLBzmNIYl600kuFpu31Rjty
+  CHANGE_ME_livekit_api_key: CHANGE_ME_livekit_api_secret
 
 logging:
   json: false
@@ -28,7 +34,7 @@ logging:
 # matching secret and the backend verifies it via the SDK's WebhookReceiver.
 # ==============================================================================
 webhook:
-  api_key: APIbnoqt7M8yCA4
+  api_key: CHANGE_ME_livekit_api_key
   urls:
     - https://api.cocorraapp.com/Api/V1/Webhooks/LiveKit
 
@@ -76,26 +82,19 @@ rtc:
   use_external_ip: true
   
   # If behind 1:1 NAT, specify the public IP directly:
-  node_ip: "152.239.115.176"
-
-  # ICE Lite (server-driven peer connections)
-  ice_lite: true
+  node_ip: "179.67.199.194"
 
 # Built-in TURN / STUN Server Configuration for Symmetric NAT & Strict Firewalls
+#
+# TURN over UDP only: open 3478/udp. TURN/TLS is disabled — tls_port is omitted
+# (0 = no TLS listener) and external_tls is unset, so no certificate is needed.
+#
+# Credentials are NOT configured here. LiveKit's built-in TURN derives a
+# per-participant username/password from the API key/secret above and sends it
+# to each client in the join response; it has no static users.
 turn:
   enabled: true
   domain: live.cocorraapp.com
-  
-  # Standard STUN/TURN UDP & TCP port
-  udp_port: 3478
-  
-  # Secure TURNS (TLS) port
-  tls_port: 5349
-  
-  # Set to true if TLS is terminated upstream by reverse proxy (Nginx / Caddy)
-  external_tls: true
 
-  # Static credentials (synced with Cocorra.API appsettings.json -> LiveKit:IceServers)
-  users:
-    - username: APIbnoqt7M8yCA4
-      password: yGI8cGT4Mlo0H1-vrDPH4huPimLBzmNIYl600kuFpu31Rjty
+  # STUN/TURN UDP port
+  udp_port: 3478

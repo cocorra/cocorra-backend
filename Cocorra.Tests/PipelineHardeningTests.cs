@@ -106,8 +106,11 @@ namespace Cocorra.Tests
             var flushService = new EventFlushService(queue, scopeFactory, NullLogger<EventFlushService>.Instance, options);
 
             // Act
+            // The writer is completed, so the flush loop drains the channel and exits on its own.
+            // Await that instead of sleeping: a fixed delay raced the save on a slow machine, and
+            // StopAsync could cancel the batch mid-flight. The timeout only turns a hang into a failure.
             await flushService.StartAsync(CancellationToken.None);
-            await Task.Delay(500); // Allow flush loop to process and exit
+            await flushService.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(30));
             await flushService.StopAsync(CancellationToken.None);
 
             // Assert — exactly 100 events total in DB (1 original + 99 new ones)

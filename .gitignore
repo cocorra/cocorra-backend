@@ -49,3 +49,6 @@ Cocorra.API/firebase-config.json
 **/appsettings.json
 **/appsettings.Production.json
 **/appsettings.Development.json
+
+# Real LiveKit server config (holds the API secret). Track only livekit/livekit.example.yaml.
+livekit/livekit.yaml

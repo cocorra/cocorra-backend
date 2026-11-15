@@ -76,7 +76,7 @@ public class SupportServiceTests
     {
         var fileMock = new Mock<IFormFile>();
         fileMock.Setup(f => f.Length).Returns(100);
-        _uploadImageMock.Setup(u => u.SaveImageAsync(fileMock.Object, "Profiles"))
+        _uploadImageMock.Setup(u => u.SaveImageAsync(fileMock.Object, "Support"))
             .ReturnsAsync("https://cdn.cocorra.com/screenshot.jpg");
 
         var dto = new SubmitSupportTicketDto

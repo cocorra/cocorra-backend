@@ -58,7 +58,8 @@ namespace Cocorra.DAL.Data
 
         /// <summary>
         /// Environment variables win, so a deployer can point a migration at a specific database
-        /// without editing a file. Otherwise the API project's appsettings.json is located by
+        /// without editing a file. Otherwise the API project's appsettings.json (plus its
+        /// appsettings.Development.json, which holds the local connection string) is located by
         /// trying the directories `dotnet ef` is plausibly invoked from — the repository root,
         /// the API project itself, or a sibling project such as Cocorra.DAL.
         /// </summary>
@@ -87,8 +88,13 @@ namespace Cocorra.DAL.Data
                     continue;
                 }
 
+                // The development connection string lives in appsettings.Development.json; the base
+                // file deliberately has none, so production cannot fall back to it.
+                var developmentPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "appsettings.Development.json");
+
                 var value = new ConfigurationBuilder()
                     .AddJsonFile(Path.GetFullPath(path), optional: false)
+                    .AddJsonFile(developmentPath, optional: true)
                     .AddEnvironmentVariables()
                     .Build()
                     .GetConnectionString(ConnectionName);

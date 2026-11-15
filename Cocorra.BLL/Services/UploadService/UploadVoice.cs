@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -16,14 +17,16 @@ namespace Cocorra.BLL.Services.Upload
         private readonly IWebHostEnvironment _env;
         private readonly IAmazonS3 _s3Client;
         private readonly Cocorra.BLL.Services.UploadService.MinioSettings _settings;
+        private readonly ILogger<UploadVoice> _logger;
         private readonly string[] _allowedExtensions = { ".mp3", ".wav", ".m4a", ".ogg", ".aac" };
         private const long _maxFileSize = 3 * 1024 * 1024;
 
-        public UploadVoice(IWebHostEnvironment env, IAmazonS3 s3Client, IOptions<Cocorra.BLL.Services.UploadService.MinioSettings> settings)
+        public UploadVoice(IWebHostEnvironment env, IAmazonS3 s3Client, IOptions<Cocorra.BLL.Services.UploadService.MinioSettings> settings, ILogger<UploadVoice> logger)
         {
             _env = env;
             _s3Client = s3Client;
             _settings = settings.Value;
+            _logger = logger;
         }
 
         public async Task<string> SaveVoice(IFormFile voiceFile)
@@ -61,14 +64,8 @@ namespace Cocorra.BLL.Services.Upload
             }
             catch (Exception ex)
             {
-                try
-                {
-                    System.IO.File.WriteAllText("minio-error.txt", ex.ToString());
-                }
-                catch { }
-
-                Console.Error.WriteLine($"[MinIO Voice Upload Error] Failed uploading to Endpoint: '{_settings?.Endpoint}', Bucket: '{_settings?.BucketName}'. Exception: {ex.Message}");
-                Console.WriteLine($"MinIO Upload Error: {ex}");
+                _logger.LogError(ex, "[MinIO Voice Upload Error] Failed uploading to Endpoint '{Endpoint}', Bucket '{Bucket}'",
+                    _settings.Endpoint, _settings.BucketName);
                 return "Error:ServerException";
             }
         }
