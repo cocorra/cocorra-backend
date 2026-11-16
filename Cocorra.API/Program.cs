@@ -231,6 +231,9 @@ builder.Services.AddScoped<Cocorra.DAL.Repository.SystemLogRepository.ISystemLog
 builder.Services.AddScoped<ISystemLogService, SystemLogService>();
 builder.Services.AddScoped<Cocorra.DAL.Repository.AuditLogRepository.IAuditLogRepository, Cocorra.DAL.Repository.AuditLogRepository.AuditLogRepository>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+// Presigned URLs for private files (voices, support/report screenshots); see StorageUrlSigner.
+builder.Services.AddSingleton<Cocorra.BLL.Services.Storage.IStorageUrlSigner, Cocorra.BLL.Services.Storage.StorageUrlSigner>();
+builder.Services.AddScoped<Cocorra.BLL.Services.Storage.IPrivateFileUrlIssuer, Cocorra.BLL.Services.Storage.PrivateFileUrlIssuer>();
 builder.Services.Configure<Cocorra.BLL.Services.RoomInviteService.InviteSettings>(
     builder.Configuration.GetSection(Cocorra.BLL.Services.RoomInviteService.InviteSettings.SectionName));
 builder.Services.AddScoped<Cocorra.DAL.Repository.RoomInviteRepository.IRoomInviteRepository, Cocorra.DAL.Repository.RoomInviteRepository.RoomInviteRepository>();

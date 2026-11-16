@@ -17,7 +17,7 @@ namespace Cocorra.DAL.Repository.UserRepository
             _dbContext = dbContext;
         }
 
-        public async Task<(int TotalCount, IEnumerable<UserDto> Users)> GetPaginatedUsersWithRolesAsync(string? search, int pageNumber, int pageSize, string baseUrl)
+        public async Task<(int TotalCount, IEnumerable<UserDto> Users)> GetPaginatedUsersWithRolesAsync(string? search, int pageNumber, int pageSize)
         {
             var query = _dbContext.Users.AsNoTracking().AsQueryable();
 
@@ -52,17 +52,6 @@ namespace Cocorra.DAL.Repository.UserRepository
                 })
                 .ToListAsync();
 
-            string? BuildFullUrl(string? relativePath)
-            {
-                if (string.IsNullOrWhiteSpace(relativePath)) return null;
-                if (relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || 
-                    relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    return relativePath;
-                }
-                return $"{baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
-            }
-
             var users = rawUsers.Select(u => new UserDto
             {
                 Id = u.Id.ToString(),
@@ -72,7 +61,9 @@ namespace Cocorra.DAL.Repository.UserRepository
                 MBTI = u.MBTI ?? "N/A",
                 Status = u.Status.ToString(),
                 CreatedAt = u.CreatedAt,
-                VoicePath = BuildFullUrl(u.VoiceVerificationPath),
+                // The stored value (key or legacy URL). AdminService replaces it with a
+                // presigned URL; it must never reach a client as-is.
+                VoicePath = u.VoiceVerificationPath,
                 Roles = u.Roles!
             }).ToList();
 

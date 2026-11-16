@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.NotificationService;
 using Cocorra.BLL.Services.RealTimeNotifier;
+using Cocorra.BLL.Services.Storage;
 using Cocorra.BLL.Services.SupportService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.DTOS.ReportDto;
@@ -26,6 +27,7 @@ namespace Cocorra.Tests;
 public class SupportServiceTests
 {
     private readonly Mock<ISupportRepository> _supportRepoMock = new();
+    private readonly FakePrivateFileUrlIssuer FileUrls = new();
     private readonly Mock<IUploadImage> _uploadImageMock = new();
     private readonly Mock<UserManager<ApplicationUser>> _userManagerMock = TestIdentityHelper.CreateMockUserManager();
     private readonly Mock<INotificationRepository> _notificationRepoMock = new();
@@ -45,8 +47,28 @@ public class SupportServiceTests
             _realTimeNotifierMock.Object,
             _pushServiceMock.Object,
             _eventTrackerMock.Object,
-            NullLogger<SupportService>.Instance
+            NullLogger<SupportService>.Instance,
+            FileUrls
         );
+    }
+
+    [Fact]
+    public async Task GetFilteredReportsAsync_ReturnsIssuedScreenshotUrls_NotStoredValues()
+    {
+        var reporterId = Guid.NewGuid();
+        var withShot = new Report { Id = Guid.NewGuid(), ReporterId = reporterId, ScreenshotPath = "Uploads/img/Support/s.png", Status = "Open" };
+        var withoutShot = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid(), Status = "Open" };
+        _supportRepoMock.Setup(r => r.GetFilteredReportsAsync(null, null))
+            .ReturnsAsync(new List<Report> { withShot, withoutShot });
+
+        var result = await _service.GetFilteredReportsAsync(null, null);
+
+        Assert.Equal("signed:Uploads/img/Support/s.png", result.Data![0].ScreenshotPath);
+        Assert.Null(result.Data[1].ScreenshotPath);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.ReportScreenshot, call.Kind);
+        Assert.Equal(withShot.Id, call.Files[0].SubjectId);
+        Assert.Equal(reporterId, call.Files[0].TargetUserId);
     }
 
     [Fact]

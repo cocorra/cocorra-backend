@@ -1,3 +1,4 @@
+using Cocorra.Tests.Helpers;
 using Cocorra.BLL.Services.AdminService;
 using Cocorra.BLL.Services.AuthServices;
 using Cocorra.BLL.Services.BlockedDevicesService;
@@ -198,7 +199,8 @@ public class FcmTokenLifecycleTests
             blockedDevicesRepoMock.Object,
             new Mock<IEventTracker>().Object,
             null!,
-            notificationRepoMock.Object
+            notificationRepoMock.Object,
+            new FakePrivateFileUrlIssuer()
         );
 
         // Act
@@ -250,7 +252,8 @@ public class FcmTokenLifecycleTests
             blockedDevicesRepoMock.Object,
             new Mock<IEventTracker>().Object,
             null!,
-            new Mock<INotificationRepository>().Object
+            new Mock<INotificationRepository>().Object,
+            new FakePrivateFileUrlIssuer()
         );
 
         var dto = new BlockDeviceAndEmailDto { Email = email };

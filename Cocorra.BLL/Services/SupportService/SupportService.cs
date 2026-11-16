@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.RealTimeNotifier;
 using Cocorra.BLL.Services.Upload;
+using Cocorra.BLL.Services.Storage;
 using Cocorra.DAL.DTOS.ReportDto;
 using Cocorra.DAL.DTOS.SupportDto;
 using Cocorra.DAL.DTOS.SupportChatDto;
@@ -30,6 +31,7 @@ namespace Cocorra.BLL.Services.SupportService
         private readonly IPushNotificationService _pushService;
         private readonly IEventTracker _eventTracker;
         private readonly ILogger<SupportService> _logger;
+        private readonly IPrivateFileUrlIssuer _fileUrls;
 
         public SupportService(
             ISupportRepository supportRepo,
@@ -39,7 +41,8 @@ namespace Cocorra.BLL.Services.SupportService
             IRealTimeNotifier realTimeNotifier,
             IPushNotificationService pushService,
             IEventTracker eventTracker,
-            ILogger<SupportService> logger)
+            ILogger<SupportService> logger,
+            IPrivateFileUrlIssuer fileUrls)
         {
             _supportRepo = supportRepo;
             _uploadImage = uploadImage;
@@ -49,6 +52,7 @@ namespace Cocorra.BLL.Services.SupportService
             _pushService = pushService;
             _eventTracker = eventTracker;
             _logger = logger;
+            _fileUrls = fileUrls;
         }
 
         public async Task<Response<string>> SubmitTicketAsync(Guid? userId, SubmitSupportTicketDto dto)
@@ -111,7 +115,12 @@ namespace Cocorra.BLL.Services.SupportService
         {
             var reports = await _supportRepo.GetFilteredReportsAsync(category, status);
 
-            var result = reports.Select(r => new ReportDetailsDto
+            var urls = await _fileUrls.IssueAsync(
+                PrivateFileKind.ReportScreenshot,
+                reports.Select(r => new PrivateFileRef(r.Id, r.ScreenshotPath, r.ReporterId)).ToList(),
+                "Support.GetReports");
+
+            var result = reports.Select((r, i) => new ReportDetailsDto
             {
                 Id = r.Id,
                 ReporterId = r.ReporterId,
@@ -131,7 +140,7 @@ namespace Cocorra.BLL.Services.SupportService
                 Category = (int)r.Category,
                 CategoryName = r.Category.ToString(),
                 Description = r.Description,
-                ScreenshotPath = r.ScreenshotPath,
+                ScreenshotPath = urls[i]?.Url,
                 Status = r.Status,
                 CreatedAt = r.CreatedAt
             }).ToList();

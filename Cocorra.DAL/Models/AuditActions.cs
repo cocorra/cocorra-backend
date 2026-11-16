@@ -14,6 +14,9 @@ namespace Cocorra.DAL.Models
         public const string UserCreatedWithRole = "User.CreatedWithRole";
         public const string NotificationBroadcastSent = "Notification.BroadcastSent";
         public const string RoleDisplayNameChanged = "Role.DisplayNameChanged";
+        // A presigned URL to a private file was handed to a staff member. Details list each file.
+        public const string VoiceUrlIssued = "Storage.VoiceUrlIssued";
+        public const string ScreenshotUrlIssued = "Storage.ScreenshotUrlIssued";
 
         public static readonly IReadOnlySet<string> All = new HashSet<string>
         {
@@ -22,7 +25,9 @@ namespace Cocorra.DAL.Models
             UserRolesChanged,
             UserCreatedWithRole,
             NotificationBroadcastSent,
-            RoleDisplayNameChanged
+            RoleDisplayNameChanged,
+            VoiceUrlIssued,
+            ScreenshotUrlIssued
         };
     }
 }

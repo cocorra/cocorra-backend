@@ -16,6 +16,7 @@ using Cocorra.DAL.Repository.BlockedDevicesRepository;
 using Cocorra.DAL.Repository.NotificationRepository;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.AuditLogs;
+using Cocorra.BLL.Services.Storage;
 using Cocorra.DAL.Data;
 
 namespace Cocorra.BLL.Services.AdminService
@@ -34,6 +35,7 @@ namespace Cocorra.BLL.Services.AdminService
         private readonly AppDbContext _context;
         private readonly INotificationRepository _notificationRepo;
         private readonly IAuditLogService? _auditLog;
+        private readonly IPrivateFileUrlIssuer _fileUrls;
 
         public AdminService(
             UserManager<ApplicationUser> userManager,
@@ -46,6 +48,7 @@ namespace Cocorra.BLL.Services.AdminService
             IEventTracker eventTracker,
             AppDbContext context,
             INotificationRepository notificationRepo,
+            IPrivateFileUrlIssuer fileUrls,
             // Optional so existing callers that construct AdminService directly keep compiling.
             IAuditLogService? auditLog = null)
         {
@@ -61,23 +64,16 @@ namespace Cocorra.BLL.Services.AdminService
             _context = context;
             _notificationRepo = notificationRepo;
             _auditLog = auditLog;
+            _fileUrls = fileUrls;
         }
 
         private Task RecordAuditAsync(AuditEntry entry) =>
             _auditLog is null ? Task.CompletedTask : _auditLog.RecordAsync(entry);
 
-        private string? BuildFullUrl(string? relativePath)
+        private static PrivateFileRef VoiceRef(string userId, string? stored)
         {
-            if (string.IsNullOrWhiteSpace(relativePath))
-                return null;
-                
-            if (relativePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || 
-                relativePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                return relativePath;
-            }
-            
-            return $"{_baseUrl}/{relativePath.Replace("\\", "/").TrimStart('/')}";
+            var id = Guid.TryParse(userId, out var parsed) ? parsed : Guid.Empty;
+            return new PrivateFileRef(id, stored, id);
         }
 
         // Shared by the persisted Notification and the push so the two can't drift apart.
@@ -382,9 +378,17 @@ namespace Cocorra.BLL.Services.AdminService
 
         public async Task<PagedResponse<UserDto>> GetAllUsersAsync(string? search, int page = 1, int pageSize = 10)
         {
-            var (totalCount, users) = await _userRepository.GetPaginatedUsersWithRolesAsync(search, page, pageSize, _baseUrl);
+            var (totalCount, users) = await _userRepository.GetPaginatedUsersWithRolesAsync(search, page, pageSize);
+            var list = users.ToList();
 
-            return Paginated(users, totalCount, page, pageSize);
+            var urls = await _fileUrls.IssueAsync(
+                PrivateFileKind.Voice,
+                list.Select(u => VoiceRef(u.Id, u.VoicePath)).ToList(),
+                "Admin.GetUsers");
+            for (var i = 0; i < list.Count; i++)
+                list[i].VoicePath = urls[i]?.Url;
+
+            return Paginated(list, totalCount, page, pageSize);
         }
 
         public async Task<Response<UserDto>> GetUserByIdAsync(Guid userId)
@@ -396,6 +400,11 @@ namespace Cocorra.BLL.Services.AdminService
 
             var roles = await _userManager.GetRolesAsync(user);
 
+            var voiceUrl = (await _fileUrls.IssueAsync(
+                PrivateFileKind.Voice,
+                new[] { new PrivateFileRef(user.Id, user.VoiceVerificationPath, user.Id) },
+                "Admin.GetUserById"))[0];
+
             var userDto = new UserDto
             {
                 Id = user.Id.ToString(),
@@ -405,7 +414,7 @@ namespace Cocorra.BLL.Services.AdminService
                 MBTI = user.MBTI ?? "N/A",
                 Status = user.Status.ToString(),
                 CreatedAt = user.CreatedAt,
-                VoicePath = BuildFullUrl(user.VoiceVerificationPath),
+                VoicePath = voiceUrl?.Url,
                 Roles = roles
             };
 

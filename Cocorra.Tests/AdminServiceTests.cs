@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using Cocorra.BLL.Services.AdminService;
 using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.NotificationService;
+using Cocorra.BLL.Services.Storage;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.AdminDto;
@@ -33,6 +35,7 @@ public class AdminServiceTests : IDisposable
     private readonly Mock<IPushNotificationService> _pushServiceMock = new();
     private readonly Mock<IBlockedDevicesRepository> _blockedDevicesRepoMock = new();
     private readonly Mock<IEventTracker> _eventTrackerMock = new();
+    private readonly FakePrivateFileUrlIssuer FileUrls = new();
     private readonly Mock<INotificationRepository> _notificationRepoMock = new();
 
     public void Dispose() => _host.Dispose();
@@ -55,7 +58,8 @@ public class AdminServiceTests : IDisposable
             _blockedDevicesRepoMock.Object,
             _eventTrackerMock.Object,
             db,
-            _notificationRepoMock.Object
+            _notificationRepoMock.Object,
+            FileUrls
         );
     }
 
@@ -252,8 +256,33 @@ public class AdminServiceTests : IDisposable
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
         Assert.Equal("David Miller", result.Data.FullName);
-        Assert.Equal("https://api.cocorra.com/voices/david.mp3", result.Data.VoicePath);
+        Assert.Equal("signed:voices/david.mp3", result.Data.VoicePath);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.Voice, call.Kind);
+        Assert.Equal(userId, Assert.Single(call.Files).TargetUserId);
         Assert.Contains("Member", result.Data.Roles);
+    }
+
+    [Fact]
+    public async Task GetAllUsersAsync_ReplacesStoredVoicePathsWithIssuedUrls()
+    {
+        var withVoice = Guid.NewGuid();
+        var withoutVoice = Guid.NewGuid();
+        _userRepoMock.Setup(r => r.GetPaginatedUsersWithRolesAsync(null, 1, 10))
+            .ReturnsAsync((2, new List<UserDto>
+            {
+                new() { Id = withVoice.ToString(), VoicePath = "Uploads/Voices/a.m4a", Roles = new List<string>() },
+                new() { Id = withoutVoice.ToString(), VoicePath = null, Roles = new List<string>() }
+            }));
+
+        var result = await CreateService().GetAllUsersAsync(null);
+
+        var users = Assert.IsType<List<UserDto>>(result.Data);
+        Assert.Equal("signed:Uploads/Voices/a.m4a", users[0].VoicePath);
+        Assert.Null(users[1].VoicePath);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.Voice, call.Kind);
+        Assert.Equal(new Guid?[] { withVoice, withoutVoice }, call.Files.Select(f => f.TargetUserId));
     }
 
     [Fact]
