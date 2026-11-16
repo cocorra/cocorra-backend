@@ -173,12 +173,7 @@ namespace Cocorra.BLL.Services.RolesService
 
             var users = await _userManager.GetUsersInRoleAsync(roleName);
 
-            var urls = await _fileUrls.IssueAsync(
-                PrivateFileKind.Voice,
-                users.Select(u => new PrivateFileRef(u.Id, u.VoiceVerificationPath, u.Id)).ToList(),
-                "Roles.GetUsersInRole");
-
-            var usersDto = users.Select((u, i) => new UserDto
+            var usersDto = users.Select(u => new UserDto
             {
                 Id = u.Id.ToString(),
                 FullName = $"{u.FirstName} {u.LastName}",
@@ -186,7 +181,9 @@ namespace Cocorra.BLL.Services.RolesService
                 Age = u.Age,
                 MBTI = u.MBTI ?? "N/A",
                 Status = u.Status.ToString(),
-                VoicePath = urls[i]?.Url ?? ""
+                // Never a URL in a list; GET Admin/User/{id}/VoiceUrl issues one on demand.
+                VoicePath = null,
+                HasVoice = _fileUrls.HasFile(u.VoiceVerificationPath)
             }).ToList();
 
             return Success(usersDto);

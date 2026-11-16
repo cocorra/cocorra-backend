@@ -53,7 +53,7 @@ public class SupportServiceTests
     }
 
     [Fact]
-    public async Task GetFilteredReportsAsync_ReturnsIssuedScreenshotUrls_NotStoredValues()
+    public async Task GetFilteredReportsAsync_ReturnsHasScreenshotFlags_AndNeverAPathOrUrl()
     {
         var reporterId = Guid.NewGuid();
         var withShot = new Report { Id = Guid.NewGuid(), ReporterId = reporterId, ScreenshotPath = "Uploads/img/Support/s.png", Status = "Open" };
@@ -63,12 +63,11 @@ public class SupportServiceTests
 
         var result = await _service.GetFilteredReportsAsync(null, null);
 
-        Assert.Equal("signed:Uploads/img/Support/s.png", result.Data![0].ScreenshotPath);
-        Assert.Null(result.Data[1].ScreenshotPath);
-        var call = Assert.Single(FileUrls.Calls);
-        Assert.Equal(PrivateFileKind.ReportScreenshot, call.Kind);
-        Assert.Equal(withShot.Id, call.Files[0].SubjectId);
-        Assert.Equal(reporterId, call.Files[0].TargetUserId);
+        Assert.True(result.Data![0].HasScreenshot);
+        Assert.False(result.Data[1].HasScreenshot);
+        Assert.All(result.Data, r => Assert.Null(r.ScreenshotPath));
+        // Listing reports issues no URL and therefore writes no audit row.
+        Assert.Empty(FileUrls.Calls);
     }
 
     [Fact]

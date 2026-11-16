@@ -13,7 +13,11 @@ namespace Cocorra.DAL.DTOS.AdminDto
         public string MBTI { get; set; } = default!;
         public string Status { get; set; } = default!; // Active, Pending, Banned
         public DateTime CreatedAt { get; set; } // لو عندك في الداتابيز، لو مفيش شيلها
-        public string? VoicePath { get; set; } // عشان لو عايز تسمع صوته
+        // Always null in user responses: a voice recording is private, and a link to it is only
+        // issued (and audit-logged) by GET Admin/User/{id}/VoiceUrl. Kept for response shape.
+        public string? VoicePath { get; set; }
+        /// <summary>True when the user has a voice recording to fetch through VoiceUrl.</summary>
+        public bool HasVoice { get; set; }
         public IList<string> Roles { get; set; } = new List<string>();
     }
 }

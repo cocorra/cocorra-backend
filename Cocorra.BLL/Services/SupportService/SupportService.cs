@@ -116,12 +116,7 @@ namespace Cocorra.BLL.Services.SupportService
         {
             var reports = await _supportRepo.GetFilteredReportsAsync(category, status);
 
-            var urls = await _fileUrls.IssueAsync(
-                PrivateFileKind.ReportScreenshot,
-                reports.Select(r => new PrivateFileRef(r.Id, r.ScreenshotPath, r.ReporterId)).ToList(),
-                "Support.GetReports");
-
-            var result = reports.Select((r, i) => new ReportDetailsDto
+            var result = reports.Select(r => new ReportDetailsDto
             {
                 Id = r.Id,
                 ReporterId = r.ReporterId,
@@ -141,7 +136,9 @@ namespace Cocorra.BLL.Services.SupportService
                 Category = (int)r.Category,
                 CategoryName = r.Category.ToString(),
                 Description = r.Description,
-                ScreenshotPath = urls[i]?.Url,
+                // Never a URL in a list; GetReportScreenshotUrlAsync issues one on demand.
+                ScreenshotPath = null,
+                HasScreenshot = _fileUrls.HasFile(r.ScreenshotPath),
                 Status = r.Status,
                 CreatedAt = r.CreatedAt
             }).ToList();

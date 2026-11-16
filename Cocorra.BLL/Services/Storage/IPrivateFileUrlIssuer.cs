@@ -25,6 +25,12 @@ namespace Cocorra.BLL.Services.Storage
     public interface IPrivateFileUrlIssuer
     {
         /// <summary>
+        /// Whether a stored value names a file that could be issued. Signs nothing and writes no
+        /// audit entry: list responses use it for HasVoice / HasScreenshot.
+        /// </summary>
+        bool HasFile(string? stored);
+
+        /// <summary>
         /// One result per input, in order (null where the row has no file). Writes a single audit
         /// entry covering every URL issued, or none when nothing was issued.
         /// </summary>
