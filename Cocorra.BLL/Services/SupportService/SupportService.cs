@@ -5,9 +5,11 @@ using System.Threading.Tasks;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.RealTimeNotifier;
 using Cocorra.BLL.Services.Upload;
+using Cocorra.BLL.Services.Storage;
 using Cocorra.DAL.DTOS.ReportDto;
 using Cocorra.DAL.DTOS.SupportDto;
 using Cocorra.DAL.DTOS.SupportChatDto;
+using Cocorra.DAL.DTOS.StorageDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Repository.NotificationRepository;
@@ -30,6 +32,7 @@ namespace Cocorra.BLL.Services.SupportService
         private readonly IPushNotificationService _pushService;
         private readonly IEventTracker _eventTracker;
         private readonly ILogger<SupportService> _logger;
+        private readonly IPrivateFileUrlIssuer _fileUrls;
 
         public SupportService(
             ISupportRepository supportRepo,
@@ -39,7 +42,8 @@ namespace Cocorra.BLL.Services.SupportService
             IRealTimeNotifier realTimeNotifier,
             IPushNotificationService pushService,
             IEventTracker eventTracker,
-            ILogger<SupportService> logger)
+            ILogger<SupportService> logger,
+            IPrivateFileUrlIssuer fileUrls)
         {
             _supportRepo = supportRepo;
             _uploadImage = uploadImage;
@@ -49,6 +53,7 @@ namespace Cocorra.BLL.Services.SupportService
             _pushService = pushService;
             _eventTracker = eventTracker;
             _logger = logger;
+            _fileUrls = fileUrls;
         }
 
         public async Task<Response<string>> SubmitTicketAsync(Guid? userId, SubmitSupportTicketDto dto)
@@ -56,7 +61,7 @@ namespace Cocorra.BLL.Services.SupportService
             string? screenshotPath = null;
             if (dto.Screenshot != null && dto.Screenshot.Length > 0)
             {
-                screenshotPath = await _uploadImage.SaveImageAsync(dto.Screenshot, "Support");
+                screenshotPath = await _uploadImage.SavePrivateImageAsync(dto.Screenshot, "Support");
                 if (screenshotPath.StartsWith("Error"))
                     return BadRequest<string>(screenshotPath);
             }
@@ -84,7 +89,7 @@ namespace Cocorra.BLL.Services.SupportService
             string? screenshotPath = null;
             if (dto.Screenshot != null && dto.Screenshot.Length > 0)
             {
-                screenshotPath = await _uploadImage.SaveImageAsync(dto.Screenshot, "Support");
+                screenshotPath = await _uploadImage.SavePrivateImageAsync(dto.Screenshot, "Support");
                 if (screenshotPath.StartsWith("Error"))
                     return BadRequest<string>(screenshotPath);
             }
@@ -111,7 +116,12 @@ namespace Cocorra.BLL.Services.SupportService
         {
             var reports = await _supportRepo.GetFilteredReportsAsync(category, status);
 
-            var result = reports.Select(r => new ReportDetailsDto
+            var urls = await _fileUrls.IssueAsync(
+                PrivateFileKind.ReportScreenshot,
+                reports.Select(r => new PrivateFileRef(r.Id, r.ScreenshotPath, r.ReporterId)).ToList(),
+                "Support.GetReports");
+
+            var result = reports.Select((r, i) => new ReportDetailsDto
             {
                 Id = r.Id,
                 ReporterId = r.ReporterId,
@@ -131,12 +141,45 @@ namespace Cocorra.BLL.Services.SupportService
                 Category = (int)r.Category,
                 CategoryName = r.Category.ToString(),
                 Description = r.Description,
-                ScreenshotPath = r.ScreenshotPath,
+                ScreenshotPath = urls[i]?.Url,
                 Status = r.Status,
                 CreatedAt = r.CreatedAt
             }).ToList();
 
             return Success(result);
+        }
+
+        public async Task<Response<PrivateFileUrlDto>> GetReportScreenshotUrlAsync(Guid reportId)
+        {
+            var report = await _supportRepo.GetReportByIdAsync(reportId);
+            if (report == null) return NotFound<PrivateFileUrlDto>("Report not found.");
+
+            return await IssueScreenshotUrlAsync(
+                PrivateFileKind.ReportScreenshot,
+                new PrivateFileRef(report.Id, report.ScreenshotPath, report.ReporterId),
+                "Support.ReportScreenshotUrl",
+                "This report has no screenshot.");
+        }
+
+        public async Task<Response<PrivateFileUrlDto>> GetTicketScreenshotUrlAsync(Guid ticketId)
+        {
+            var ticket = await _supportRepo.GetTicketByIdAsync(ticketId);
+            if (ticket == null) return NotFound<PrivateFileUrlDto>("Ticket not found.");
+
+            return await IssueScreenshotUrlAsync(
+                PrivateFileKind.TicketScreenshot,
+                new PrivateFileRef(ticket.Id, ticket.ScreenshotPath, ticket.UserId),
+                "Support.TicketScreenshotUrl",
+                "This ticket has no screenshot.");
+        }
+
+        private async Task<Response<PrivateFileUrlDto>> IssueScreenshotUrlAsync(
+            PrivateFileKind kind, PrivateFileRef file, string source, string noFileMessage)
+        {
+            var issued = (await _fileUrls.IssueAsync(kind, new[] { file }, source))[0];
+            if (issued == null) return NotFound<PrivateFileUrlDto>(noFileMessage);
+
+            return Success(new PrivateFileUrlDto { Url = issued.Url, ExpiresAtUtc = issued.ExpiresAtUtc });
         }
 
         public async Task<Response<string>> UpdateReportStatusAsync(Guid reportId, string newStatus)

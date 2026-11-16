@@ -6,6 +6,6 @@ namespace Cocorra.DAL.Repository.UserRepository
 {
     public interface IUserRepository
     {
-        Task<(int TotalCount, IEnumerable<UserDto> Users)> GetPaginatedUsersWithRolesAsync(string? search, int pageNumber, int pageSize, string baseUrl);
+        Task<(int TotalCount, IEnumerable<UserDto> Users)> GetPaginatedUsersWithRolesAsync(string? search, int pageNumber, int pageSize);
     }
 }

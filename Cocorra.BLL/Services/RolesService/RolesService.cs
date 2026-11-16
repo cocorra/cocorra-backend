@@ -6,6 +6,7 @@ using Cocorra.DAL.Models;
 using Cocorra.DAL.Enums;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.AuditLogs;
+using Cocorra.BLL.Services.Storage;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -21,17 +22,20 @@ namespace Cocorra.BLL.Services.RolesService
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IAuditLogService _auditLog;
         private readonly AppDbContext _context;
+        private readonly IPrivateFileUrlIssuer _fileUrls;
 
         public RolesService(
             RoleManager<IdentityRole<Guid>> roleManager,
             UserManager<ApplicationUser> userManager,
             IAuditLogService auditLog,
-            AppDbContext context)
+            AppDbContext context,
+            IPrivateFileUrlIssuer fileUrls)
         {
             _roleManager = roleManager;
             _userManager = userManager;
             _auditLog = auditLog;
             _context = context;
+            _fileUrls = fileUrls;
         }
 
         public async Task<Response<List<RoleDto>>> GetRolesAsync()
@@ -169,7 +173,12 @@ namespace Cocorra.BLL.Services.RolesService
 
             var users = await _userManager.GetUsersInRoleAsync(roleName);
 
-            var usersDto = users.Select(u => new UserDto
+            var urls = await _fileUrls.IssueAsync(
+                PrivateFileKind.Voice,
+                users.Select(u => new PrivateFileRef(u.Id, u.VoiceVerificationPath, u.Id)).ToList(),
+                "Roles.GetUsersInRole");
+
+            var usersDto = users.Select((u, i) => new UserDto
             {
                 Id = u.Id.ToString(),
                 FullName = $"{u.FirstName} {u.LastName}",
@@ -177,7 +186,7 @@ namespace Cocorra.BLL.Services.RolesService
                 Age = u.Age,
                 MBTI = u.MBTI ?? "N/A",
                 Status = u.Status.ToString(),
-                VoicePath = u.VoiceVerificationPath ?? ""
+                VoicePath = urls[i]?.Url ?? ""
             }).ToList();
 
             return Success(usersDto);

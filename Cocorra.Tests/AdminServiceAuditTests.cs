@@ -57,6 +57,7 @@ public class AdminServiceAuditTests : IDisposable
             _eventTrackerMock.Object,
             db,
             _notificationRepoMock.Object,
+            new FakePrivateFileUrlIssuer(),
             _auditLogMock.Object
         );
     }

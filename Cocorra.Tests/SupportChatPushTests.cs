@@ -57,7 +57,8 @@ public class SupportChatPushTests
             new Mock<IRealTimeNotifier>().Object,
             Push.Object,
             new Mock<IEventTracker>().Object,
-            new Mock<ILogger<SupportService>>().Object);
+            new Mock<ILogger<SupportService>>().Object,
+            new Cocorra.Tests.Helpers.FakePrivateFileUrlIssuer());
     }
 
     // ── Admin reply → the user, which is the case the mobile app cares about ─────

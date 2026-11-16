@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Cocorra.BLL.Services.Storage;
 using System;
 using System.IO;
 using System.Linq;
@@ -30,6 +31,16 @@ namespace Cocorra.BLL.Services.Upload
         }
 
         public async Task<string> SaveImageAsync(IFormFile imageFile, string subFolder = "Profiles")
+        {
+            var result = await UploadAsync(imageFile, subFolder);
+            return result.StartsWith("Error") ? result : $"{_settings.PublicUrl}/{_settings.BucketName}/{result}";
+        }
+
+        public Task<string> SavePrivateImageAsync(IFormFile imageFile, string subFolder) =>
+            UploadAsync(imageFile, subFolder);
+
+        // Returns the object key, or an "Error:..." marker.
+        private async Task<string> UploadAsync(IFormFile imageFile, string subFolder)
         {
             try
             {
@@ -67,8 +78,7 @@ namespace Cocorra.BLL.Services.Upload
 
                 await _s3Client.PutObjectAsync(putRequest);
 
-                // Return full URL
-                return $"{_settings.PublicUrl}/{_settings.BucketName}/{objectKey}";
+                return objectKey;
             }
             catch (Exception ex)
             {
@@ -84,12 +94,10 @@ namespace Cocorra.BLL.Services.Upload
 
             try
             {
-                if (imagePath.StartsWith("http"))
+                // Full URL (public images, legacy screenshots) or bare key (private images).
+                var objectKey = StorageObjectKey.From(imagePath, _settings.BucketName);
+                if (objectKey != null)
                 {
-                    // Parse object key from full URL
-                    var uri = new Uri(imagePath);
-                    var objectKey = uri.AbsolutePath.Replace($"/{_settings.BucketName}/", "").TrimStart('/');
-                    
                     var deleteRequest = new DeleteObjectRequest
                     {
                         BucketName = _settings.BucketName,
@@ -99,9 +107,10 @@ namespace Cocorra.BLL.Services.Upload
                     // Synchronously wait for it since interface returns void
                     _s3Client.DeleteObjectAsync(deleteRequest).GetAwaiter().GetResult();
                 }
-                else
+
+                if (!StorageObjectKey.IsAbsoluteUrl(imagePath))
                 {
-                    // Handle local fallback deletion
+                    // Files saved under wwwroot before MinIO: a relative path is also tried locally.
                     string contentPath = string.IsNullOrWhiteSpace(_env.WebRootPath)
                         ? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")
                         : _env.WebRootPath;

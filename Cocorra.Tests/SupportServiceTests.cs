@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.NotificationService;
 using Cocorra.BLL.Services.RealTimeNotifier;
+using Cocorra.BLL.Services.Storage;
 using Cocorra.BLL.Services.SupportService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.DTOS.ReportDto;
@@ -26,6 +27,7 @@ namespace Cocorra.Tests;
 public class SupportServiceTests
 {
     private readonly Mock<ISupportRepository> _supportRepoMock = new();
+    private readonly FakePrivateFileUrlIssuer FileUrls = new();
     private readonly Mock<IUploadImage> _uploadImageMock = new();
     private readonly Mock<UserManager<ApplicationUser>> _userManagerMock = TestIdentityHelper.CreateMockUserManager();
     private readonly Mock<INotificationRepository> _notificationRepoMock = new();
@@ -45,8 +47,91 @@ public class SupportServiceTests
             _realTimeNotifierMock.Object,
             _pushServiceMock.Object,
             _eventTrackerMock.Object,
-            NullLogger<SupportService>.Instance
+            NullLogger<SupportService>.Instance,
+            FileUrls
         );
+    }
+
+    [Fact]
+    public async Task GetFilteredReportsAsync_ReturnsIssuedScreenshotUrls_NotStoredValues()
+    {
+        var reporterId = Guid.NewGuid();
+        var withShot = new Report { Id = Guid.NewGuid(), ReporterId = reporterId, ScreenshotPath = "Uploads/img/Support/s.png", Status = "Open" };
+        var withoutShot = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid(), Status = "Open" };
+        _supportRepoMock.Setup(r => r.GetFilteredReportsAsync(null, null))
+            .ReturnsAsync(new List<Report> { withShot, withoutShot });
+
+        var result = await _service.GetFilteredReportsAsync(null, null);
+
+        Assert.Equal("signed:Uploads/img/Support/s.png", result.Data![0].ScreenshotPath);
+        Assert.Null(result.Data[1].ScreenshotPath);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.ReportScreenshot, call.Kind);
+        Assert.Equal(withShot.Id, call.Files[0].SubjectId);
+        Assert.Equal(reporterId, call.Files[0].TargetUserId);
+    }
+
+    [Fact]
+    public async Task GetReportScreenshotUrlAsync_ReportWithScreenshot_ReturnsAnIssuedUrl()
+    {
+        var report = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid(), ScreenshotPath = "Uploads/img/Support/r.png" };
+        _supportRepoMock.Setup(r => r.GetReportByIdAsync(report.Id)).ReturnsAsync(report);
+
+        var result = await _service.GetReportScreenshotUrlAsync(report.Id);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal("signed:Uploads/img/Support/r.png", result.Data!.Url);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.ReportScreenshot, call.Kind);
+        Assert.Equal(report.Id, call.Files[0].SubjectId);
+        Assert.Equal(report.ReporterId, call.Files[0].TargetUserId);
+    }
+
+    [Fact]
+    public async Task GetReportScreenshotUrlAsync_NoScreenshot_ReturnsNotFound()
+    {
+        var report = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid() };
+        _supportRepoMock.Setup(r => r.GetReportByIdAsync(report.Id)).ReturnsAsync(report);
+
+        var result = await _service.GetReportScreenshotUrlAsync(report.Id);
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetReportScreenshotUrlAsync_UnknownReport_ReturnsNotFoundWithoutIssuing()
+    {
+        _supportRepoMock.Setup(r => r.GetReportByIdAsync(It.IsAny<Guid>())).ReturnsAsync((Report?)null);
+
+        var result = await _service.GetReportScreenshotUrlAsync(Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+        Assert.Empty(FileUrls.Calls);
+    }
+
+    [Fact]
+    public async Task GetTicketScreenshotUrlAsync_AnonymousTicket_ReturnsAnIssuedUrl()
+    {
+        var ticket = new SupportTicket { Id = Guid.NewGuid(), UserId = null, ScreenshotPath = "Uploads/img/Support/t.png" };
+        _supportRepoMock.Setup(r => r.GetTicketByIdAsync(ticket.Id)).ReturnsAsync(ticket);
+
+        var result = await _service.GetTicketScreenshotUrlAsync(ticket.Id);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal("signed:Uploads/img/Support/t.png", result.Data!.Url);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.TicketScreenshot, call.Kind);
+        Assert.Null(call.Files[0].TargetUserId);
+    }
+
+    [Fact]
+    public async Task GetTicketScreenshotUrlAsync_UnknownTicket_ReturnsNotFound()
+    {
+        _supportRepoMock.Setup(r => r.GetTicketByIdAsync(It.IsAny<Guid>())).ReturnsAsync((SupportTicket?)null);
+
+        var result = await _service.GetTicketScreenshotUrlAsync(Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
     }
 
     [Fact]
@@ -76,8 +161,8 @@ public class SupportServiceTests
     {
         var fileMock = new Mock<IFormFile>();
         fileMock.Setup(f => f.Length).Returns(100);
-        _uploadImageMock.Setup(u => u.SaveImageAsync(fileMock.Object, "Support"))
-            .ReturnsAsync("https://cdn.cocorra.com/screenshot.jpg");
+        _uploadImageMock.Setup(u => u.SavePrivateImageAsync(fileMock.Object, "Support"))
+            .ReturnsAsync("Uploads/img/Support/screenshot.jpg");
 
         var dto = new SubmitSupportTicketDto
         {
@@ -90,7 +175,29 @@ public class SupportServiceTests
 
         Assert.True(result.Succeeded);
         _supportRepoMock.Verify(r => r.AddTicketAsync(It.Is<SupportTicket>(t =>
-            t.ScreenshotPath == "https://cdn.cocorra.com/screenshot.jpg")), Times.Once);
+            t.ScreenshotPath == "Uploads/img/Support/screenshot.jpg")), Times.Once);
+        // Screenshots are private: never stored through the public-URL save path.
+        _uploadImageMock.Verify(u => u.SaveImageAsync(It.IsAny<IFormFile>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitReportAsync_WithScreenshot_StoresTheObjectKey()
+    {
+        var fileMock = new Mock<IFormFile>();
+        fileMock.Setup(f => f.Length).Returns(100);
+        _uploadImageMock.Setup(u => u.SavePrivateImageAsync(fileMock.Object, "Support"))
+            .ReturnsAsync("Uploads/img/Support/report.png");
+
+        var result = await _service.SubmitReportAsync(Guid.NewGuid(), new SubmitReportDto
+        {
+            ReportedUserId = Guid.NewGuid(),
+            Category = ReportCategory.Other,
+            Screenshot = fileMock.Object
+        });
+
+        Assert.True(result.Succeeded);
+        _supportRepoMock.Verify(r => r.AddReportAsync(It.Is<Report>(rep =>
+            rep.ScreenshotPath == "Uploads/img/Support/report.png")), Times.Once);
     }
 
     [Fact]

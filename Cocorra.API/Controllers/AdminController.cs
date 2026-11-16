@@ -47,6 +47,14 @@ namespace Cocorra.API.Controllers
             return Ok(result);
         }
 
+        // Admin and Moderator (class-level). Every URL issued is recorded in the audit log.
+        [HttpGet(Router.AdminRouting.VoiceUrl)]
+        public async Task<IActionResult> GetUserVoiceUrl([FromRoute] Guid id)
+        {
+            var result = await _adminService.GetUserVoiceUrlAsync(id);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         [HttpPut(Router.AdminRouting.ChangeStatus)]
         public async Task<IActionResult> ChangeStatus([FromRoute] Guid id,[FromBody] ChangeStatusDto model)
         {

@@ -31,6 +31,7 @@ namespace Cocorra.DAL.AppMetaData
 
             public const string GetAll = Prefix + "/Users";               // GET
             public const string GetById = Prefix + "/User/{id}";          // GET
+            public const string VoiceUrl = Prefix + "/User/{id:guid}/VoiceUrl"; // GET: 15-min presigned URL to the voice recording
             public const string Update = Prefix + "/User/{id}";           // PUT
             public const string Delete = Prefix + "/User/{id}";           // DELETE           
             public const string ChangeStatus = Prefix + "/User/ChangeStatus/{id}"; // PUT
@@ -98,6 +99,8 @@ namespace Cocorra.DAL.AppMetaData
             public const string AdminReports = Prefix + "/admin/reports"; // GET
             public const string AdminUpdateReportStatus = Prefix + "/admin/reports/{id:guid}/status"; // PUT
             public const string AdminTakeReportAction = Prefix + "/admin/reports/{id:guid}/action"; // POST
+            public const string AdminReportScreenshotUrl = Prefix + "/admin/reports/{id:guid}/screenshot-url"; // GET: 15-min presigned URL
+            public const string AdminTicketScreenshotUrl = Prefix + "/admin/tickets/{id:guid}/screenshot-url"; // GET: 15-min presigned URL
             public const string MyChat = Prefix + "/chat/my-chat"; // GET
         }
 

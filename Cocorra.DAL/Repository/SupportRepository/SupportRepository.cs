@@ -60,6 +60,11 @@ namespace Cocorra.DAL.Repository.SupportRepository
             return await _dbContext.Reports.FindAsync(reportId);
         }
 
+        public async Task<SupportTicket?> GetTicketByIdAsync(Guid ticketId)
+        {
+            return await _dbContext.SupportTickets.FindAsync(ticketId);
+        }
+
         public async Task UpdateReportAsync(Report report)
         {
             _dbContext.Reports.Update(report);

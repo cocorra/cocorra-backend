@@ -1,3 +1,4 @@
+using Cocorra.Tests.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -56,7 +57,7 @@ public class RolesServiceTests : IDisposable
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = new RolesService(roleMgr, userMgr, new Mock<IAuditLogService>().Object, db);
+        var service = new RolesService(roleMgr, userMgr, new Mock<IAuditLogService>().Object, db, new FakePrivateFileUrlIssuer());
         return (service, roleMgr, userMgr);
     }
 

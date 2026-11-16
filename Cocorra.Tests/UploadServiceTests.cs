@@ -194,7 +194,7 @@ public class UploadServiceTests
     }
 
     [Fact]
-    public async Task UploadVoice_ValidMp3_UploadsToS3AndReturnsUrl()
+    public async Task UploadVoice_ValidMp3_UploadsToS3AndReturnsTheObjectKey()
     {
         var service = CreateVoiceService();
         // ID3 header for MP3: 0x49, 0x44, 0x33
@@ -206,11 +206,74 @@ public class UploadServiceTests
 
         var result = await service.SaveVoice(file);
 
-        Assert.StartsWith("https://s3.cocorra.com/cocorra-bucket/Uploads/Voices/", result);
+        // A bare key, not a URL: voices are private and read through presigned URLs.
+        Assert.Matches(@"^Uploads/Voices/[0-9a-f-]{36}\.mp3$", result);
         _s3Mock.Verify(s => s.PutObjectAsync(It.Is<PutObjectRequest>(r =>
             r.BucketName == "cocorra-bucket" &&
             r.ContentType == "audio/mpeg" &&
             r.Key.StartsWith("Uploads/Voices/")), default), Times.Once);
+    }
+
+    [Fact]
+    public async Task SavePrivateImage_ReturnsTheObjectKey_NotAUrl()
+    {
+        var service = CreateImageService();
+        var pngBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        var file = CreateMockFormFile("shot.png", "image/png", pngBytes);
+        _s3Mock.Setup(s => s.PutObjectAsync(It.IsAny<PutObjectRequest>(), default))
+            .ReturnsAsync(new PutObjectResponse());
+
+        var result = await service.SavePrivateImageAsync(file, "Support");
+
+        Assert.Matches(@"^Uploads/img/Support/[0-9a-f-]{36}\.png$", result);
+        _s3Mock.Verify(s => s.PutObjectAsync(It.Is<PutObjectRequest>(r => r.Key == result), default), Times.Once);
+    }
+
+    [Fact]
+    public async Task SavePrivateImage_InvalidFile_ReturnsTheErrorMarker()
+    {
+        var result = await CreateImageService().SavePrivateImageAsync(null!, "Support");
+        Assert.Equal("Error:NoFile", result);
+    }
+
+    [Theory]
+    [InlineData("Uploads/img/Support/s.png")]
+    [InlineData("/Uploads/img/Support/s.png")]
+    [InlineData("https://s3.cocorra.com/cocorra-bucket/Uploads/img/Support/s.png")]
+    public void DeleteImage_AcceptsKeyOrFullUrl(string stored)
+    {
+        _s3Mock.Setup(s => s.DeleteObjectAsync(It.IsAny<DeleteObjectRequest>(), default))
+            .ReturnsAsync(new DeleteObjectResponse());
+
+        CreateImageService().DeleteImage(stored);
+
+        _s3Mock.Verify(s => s.DeleteObjectAsync(It.Is<DeleteObjectRequest>(r =>
+            r.BucketName == "cocorra-bucket" &&
+            r.Key == "Uploads/img/Support/s.png"), default), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Uploads/Voices/v.m4a")]
+    [InlineData("https://s3.cocorra.com/cocorra-bucket/Uploads/Voices/v.m4a")]
+    public void DeleteVoice_AcceptsKeyOrFullUrl(string stored)
+    {
+        _s3Mock.Setup(s => s.DeleteObjectAsync(It.IsAny<DeleteObjectRequest>(), default))
+            .ReturnsAsync(new DeleteObjectResponse());
+
+        CreateVoiceService().DeleteVoice(stored);
+
+        _s3Mock.Verify(s => s.DeleteObjectAsync(It.Is<DeleteObjectRequest>(r =>
+            r.Key == "Uploads/Voices/v.m4a"), default), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Error:ServerException")]
+    [InlineData("https://s3.cocorra.com/another-bucket/Uploads/Voices/v.m4a")]
+    public void DeleteVoice_NothingInOurBucket_DeletesNothing(string stored)
+    {
+        CreateVoiceService().DeleteVoice(stored);
+
+        _s3Mock.Verify(s => s.DeleteObjectAsync(It.IsAny<DeleteObjectRequest>(), default), Times.Never);
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Cocorra.BLL.Services.Storage;
 using System;
 using System.IO;
 using System.Linq;
@@ -59,8 +60,8 @@ namespace Cocorra.BLL.Services.Upload
 
                 await _s3Client.PutObjectAsync(putRequest);
 
-                // Return full URL
-                return $"{_settings.PublicUrl}/{_settings.BucketName}/{objectKey}";
+                // The key, not a URL: voices are private and only read through presigned URLs.
+                return objectKey;
             }
             catch (Exception ex)
             {
@@ -76,12 +77,10 @@ namespace Cocorra.BLL.Services.Upload
 
             try
             {
-                if (voicePath.StartsWith("http"))
+                // Bare key (current) or full URL (legacy rows).
+                var objectKey = StorageObjectKey.From(voicePath, _settings.BucketName);
+                if (objectKey != null)
                 {
-                    // Parse object key from full URL
-                    var uri = new Uri(voicePath);
-                    var objectKey = uri.AbsolutePath.Replace($"/{_settings.BucketName}/", "").TrimStart('/');
-                    
                     var deleteRequest = new DeleteObjectRequest
                     {
                         BucketName = _settings.BucketName,
@@ -90,8 +89,10 @@ namespace Cocorra.BLL.Services.Upload
 
                     _s3Client.DeleteObjectAsync(deleteRequest).GetAwaiter().GetResult();
                 }
-                else
+
+                if (!StorageObjectKey.IsAbsoluteUrl(voicePath))
                 {
+                    // Files saved under wwwroot before MinIO: a relative path is also tried locally.
                     string contentPath = string.IsNullOrWhiteSpace(_env.WebRootPath)
                         ? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")
                         : _env.WebRootPath;

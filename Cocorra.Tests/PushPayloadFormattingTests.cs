@@ -1,3 +1,4 @@
+using Cocorra.Tests.Helpers;
 using Cocorra.BLL.Services.ChatService;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.NotificationService;
@@ -210,7 +211,8 @@ public class PushPayloadFormattingTests
             new Mock<IRealTimeNotifier>().Object,
             pushServiceMock.Object,
             new Mock<IEventTracker>().Object,
-            new Mock<ILogger<SupportService>>().Object);
+            new Mock<ILogger<SupportService>>().Object,
+            new FakePrivateFileUrlIssuer());
 
         var result = await supportService.TakeActionOnReportAsync(
             report.Id, new TakeReportActionDto { Action = AdminReportAction.Mute24h });

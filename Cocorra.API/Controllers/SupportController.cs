@@ -60,6 +60,24 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
+        // Every URL issued is recorded in the audit log.
+        [Authorize(Roles = "Admin,Moderator")]
+        [HttpGet(Router.SupportRouting.AdminReportScreenshotUrl)]
+        public async Task<IActionResult> GetReportScreenshotUrl(Guid id)
+        {
+            var result = await _supportService.GetReportScreenshotUrlAsync(id);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        // Every URL issued is recorded in the audit log.
+        [Authorize(Roles = "Admin,Moderator")]
+        [HttpGet(Router.SupportRouting.AdminTicketScreenshotUrl)]
+        public async Task<IActionResult> GetTicketScreenshotUrl(Guid id)
+        {
+            var result = await _supportService.GetTicketScreenshotUrlAsync(id);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         [Authorize(Roles = "Admin,Moderator")]
         [HttpPut(Router.SupportRouting.AdminUpdateReportStatus)]
         public async Task<IActionResult> UpdateReportStatus(Guid id, [FromBody] UpdateReportStatusDto dto)
