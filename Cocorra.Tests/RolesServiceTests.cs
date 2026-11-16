@@ -207,7 +207,8 @@ public class RolesServiceTests : IDisposable
             UserName = "support_agent",
             Email = "agent@cocorra.com",
             FirstName = "Agent",
-            LastName = "Smith"
+            LastName = "Smith",
+            VoiceVerificationPath = "Uploads/Voices/agent.m4a"
         };
         await userMgr.CreateAsync(user);
         await userMgr.AddToRoleAsync(user, "Support");
@@ -218,6 +219,8 @@ public class RolesServiceTests : IDisposable
         Assert.NotNull(result.Data);
         Assert.Single(result.Data);
         Assert.Equal("Agent Smith", result.Data[0].FullName);
+        Assert.True(result.Data[0].HasVoice);
+        Assert.Null(result.Data[0].VoicePath);
     }
 
     [Fact]

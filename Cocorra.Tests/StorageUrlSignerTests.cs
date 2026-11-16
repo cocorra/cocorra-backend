@@ -215,6 +215,19 @@ public class PrivateFileUrlIssuerTests
         Assert.Empty(_entries);
     }
 
+    [Theory]
+    [InlineData("Uploads/Voices/a.m4a", true)]
+    [InlineData("https://storage.cocorraapp.com/cocorra-assets/Uploads/Voices/a.m4a", true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("Error:FakeVoice", false)]
+    [InlineData("https://storage.cocorraapp.com/other-bucket/Uploads/Voices/a.m4a", false)]
+    public void HasFile_ReportsPresence_WithoutIssuingOrAuditing(string? stored, bool expected)
+    {
+        Assert.Equal(expected, CreateIssuer().HasFile(stored));
+        Assert.Empty(_entries);
+    }
+
     [Fact]
     public void NewActions_AreAcceptedByTheAuditLogFilter()
     {

@@ -25,6 +25,8 @@ namespace Cocorra.BLL.Services.Storage
             _httpContextAccessor = httpContextAccessor;
         }
 
+        public bool HasFile(string? stored) => _signer.GetObjectKey(stored) != null;
+
         public async Task<IReadOnlyList<IssuedFileUrl?>> IssueAsync(
             PrivateFileKind kind, IReadOnlyList<PrivateFileRef> files, string source)
         {

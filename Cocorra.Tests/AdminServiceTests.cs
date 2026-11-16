@@ -256,33 +256,31 @@ public class AdminServiceTests : IDisposable
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
         Assert.Equal("David Miller", result.Data.FullName);
-        Assert.Equal("signed:voices/david.mp3", result.Data.VoicePath);
-        var call = Assert.Single(FileUrls.Calls);
-        Assert.Equal(PrivateFileKind.Voice, call.Kind);
-        Assert.Equal(userId, Assert.Single(call.Files).TargetUserId);
+        // No URL in the response and nothing issued: only GET .../VoiceUrl does that.
+        Assert.Null(result.Data.VoicePath);
+        Assert.True(result.Data.HasVoice);
+        Assert.Empty(FileUrls.Calls);
         Assert.Contains("Member", result.Data.Roles);
     }
 
     [Fact]
-    public async Task GetAllUsersAsync_ReplacesStoredVoicePathsWithIssuedUrls()
+    public async Task GetAllUsersAsync_ReturnsHasVoiceFlags_AndNeverAPathOrUrl()
     {
-        var withVoice = Guid.NewGuid();
-        var withoutVoice = Guid.NewGuid();
         _userRepoMock.Setup(r => r.GetPaginatedUsersWithRolesAsync(null, 1, 10))
-            .ReturnsAsync((2, new List<UserDto>
+            .ReturnsAsync((3, new List<UserDto>
             {
-                new() { Id = withVoice.ToString(), VoicePath = "Uploads/Voices/a.m4a", Roles = new List<string>() },
-                new() { Id = withoutVoice.ToString(), VoicePath = null, Roles = new List<string>() }
+                new() { Id = Guid.NewGuid().ToString(), VoicePath = "Uploads/Voices/a.m4a", Roles = new List<string>() },
+                new() { Id = Guid.NewGuid().ToString(), VoicePath = null, Roles = new List<string>() },
+                new() { Id = Guid.NewGuid().ToString(), VoicePath = "Error:ServerException", Roles = new List<string>() }
             }));
 
         var result = await CreateService().GetAllUsersAsync(null);
 
         var users = Assert.IsType<List<UserDto>>(result.Data);
-        Assert.Equal("signed:Uploads/Voices/a.m4a", users[0].VoicePath);
-        Assert.Null(users[1].VoicePath);
-        var call = Assert.Single(FileUrls.Calls);
-        Assert.Equal(PrivateFileKind.Voice, call.Kind);
-        Assert.Equal(new Guid?[] { withVoice, withoutVoice }, call.Files.Select(f => f.TargetUserId));
+        Assert.Equal(new[] { true, false, false }, users.Select(u => u.HasVoice));
+        Assert.All(users, u => Assert.Null(u.VoicePath));
+        // Listing users issues no URL and therefore writes no audit row.
+        Assert.Empty(FileUrls.Calls);
     }
 
     [Fact]

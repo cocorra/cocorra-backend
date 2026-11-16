@@ -17,6 +17,10 @@ public sealed class FakePrivateFileUrlIssuer : IPrivateFileUrlIssuer
 
     public List<(PrivateFileKind Kind, IReadOnlyList<PrivateFileRef> Files, string Source)> Calls { get; } = new();
 
+    // Mirrors the real issuer closely enough for service tests: empty and "Error:..." are no file.
+    public bool HasFile(string? stored) =>
+        !string.IsNullOrWhiteSpace(stored) && !stored.StartsWith("Error", StringComparison.OrdinalIgnoreCase);
+
     public Task<IReadOnlyList<IssuedFileUrl?>> IssueAsync(
         PrivateFileKind kind, IReadOnlyList<PrivateFileRef> files, string source)
     {

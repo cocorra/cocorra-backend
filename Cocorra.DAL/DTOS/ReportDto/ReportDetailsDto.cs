@@ -17,7 +17,11 @@ namespace Cocorra.DAL.DTOS.ReportDto
         public int Category { get; set; }
         public string CategoryName { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
+        // Always null in report lists: a link is only issued (and audit-logged) by
+        // GET Support/admin/reports/{id}/screenshot-url. Kept for response shape.
         public string? ScreenshotPath { get; set; }
+        /// <summary>True when the report has a screenshot to fetch through screenshot-url.</summary>
+        public bool HasScreenshot { get; set; }
         public string Status { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
     }
