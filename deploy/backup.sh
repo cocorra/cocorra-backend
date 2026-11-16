@@ -6,7 +6,15 @@
 #   BACKUP_DB=<full path of the .bak.gz>
 # to print exact restore steps if the deploy rolls back. Keep that line last.
 set -eu
-
+# --- healthchecks.io (optional; URL lives on the server only) ---
+HC_URL=""
+if [ -f /opt/cocorra/infra/healthchecks.env ]; then
+  . /opt/cocorra/infra/healthchecks.env
+  HC_URL="${HC_BACKUP_URL:-}"
+fi
+ping_hc() { [ -n "$HC_URL" ] && curl -fsS -m 10 --retry 3 -o /dev/null "$HC_URL$1" || true; }
+trap 'rc=$?; [ "$rc" -ne 0 ] && ping_hc /fail' EXIT
+ping_hc /start
 DB_NAME="CocorraDb"
 DIR="/opt/cocorra/backups"
 KEEP_DAYS=7
@@ -27,6 +35,6 @@ find "$DIR" -name 'db-*.bak.gz' -mtime +$KEEP_DAYS -delete
 find "$DIR" -name 'minio-*.tar.gz' -mtime +$KEEP_DAYS -delete
 
 echo "[$(date)] Done: db-$TS.bak.gz, minio-$TS.tar.gz"
-
+ping_hc ""
 # Machine-readable, for deploy.sh. Must stay the last line of output.
 echo "BACKUP_DB=$DIR/db-$TS.bak.gz"
