@@ -2,6 +2,7 @@ using Cocorra.BLL.Services.Email;
 using Cocorra.BLL.Services.NotificationService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.DTOS.AdminDto;
+using Cocorra.DAL.DTOS.StorageDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.BLL.Base;
@@ -419,6 +420,22 @@ namespace Cocorra.BLL.Services.AdminService
             };
 
             return Success(userDto);
+        }
+
+        public async Task<Response<PrivateFileUrlDto>> GetUserVoiceUrlAsync(Guid userId)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null)
+                return NotFound<PrivateFileUrlDto>("User not found");
+
+            var issued = (await _fileUrls.IssueAsync(
+                PrivateFileKind.Voice,
+                new[] { new PrivateFileRef(user.Id, user.VoiceVerificationPath, user.Id) },
+                "Admin.VoiceUrl"))[0];
+            if (issued == null)
+                return NotFound<PrivateFileUrlDto>("This user has no voice recording.");
+
+            return Success(new PrivateFileUrlDto { Url = issued.Url, ExpiresAtUtc = issued.ExpiresAtUtc });
         }
 
         public async Task<Response<DashboardStatsDto>> GetDashboardStatsAsync()

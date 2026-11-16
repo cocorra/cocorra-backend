@@ -286,6 +286,48 @@ public class AdminServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetUserVoiceUrlAsync_UserWithVoice_ReturnsAnIssuedUrlAndExpiry()
+    {
+        var userId = Guid.NewGuid();
+        var user = new ApplicationUser { Id = userId, VoiceVerificationPath = "Uploads/Voices/v.m4a" };
+        _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+
+        var result = await CreateService().GetUserVoiceUrlAsync(userId);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal("signed:Uploads/Voices/v.m4a", result.Data!.Url);
+        Assert.Equal(FakePrivateFileUrlIssuer.ExpiresAtUtc, result.Data.ExpiresAtUtc);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.Voice, call.Kind);
+        Assert.Equal("Admin.VoiceUrl", call.Source);
+        Assert.Equal(userId, Assert.Single(call.Files).TargetUserId);
+    }
+
+    [Fact]
+    public async Task GetUserVoiceUrlAsync_UserWithoutVoice_ReturnsNotFound()
+    {
+        var userId = Guid.NewGuid();
+        _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString()))
+            .ReturnsAsync(new ApplicationUser { Id = userId, VoiceVerificationPath = null });
+
+        var result = await CreateService().GetUserVoiceUrlAsync(userId);
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+        Assert.Null(result.Data);
+    }
+
+    [Fact]
+    public async Task GetUserVoiceUrlAsync_UnknownUser_ReturnsNotFoundWithoutIssuing()
+    {
+        _userManagerMock.Setup(m => m.FindByIdAsync(It.IsAny<string>())).ReturnsAsync((ApplicationUser?)null);
+
+        var result = await CreateService().GetUserVoiceUrlAsync(Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+        Assert.Empty(FileUrls.Calls);
+    }
+
+    [Fact]
     public async Task BlockDeviceAndEmailAsync_UserNotFound_ReturnsNotFound()
     {
         _userManagerMock.Setup(m => m.FindByEmailAsync("missing@cocorra.com")).ReturnsAsync((ApplicationUser?)null);

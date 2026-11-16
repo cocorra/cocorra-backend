@@ -9,6 +9,7 @@ using Cocorra.BLL.Services.Storage;
 using Cocorra.DAL.DTOS.ReportDto;
 using Cocorra.DAL.DTOS.SupportDto;
 using Cocorra.DAL.DTOS.SupportChatDto;
+using Cocorra.DAL.DTOS.StorageDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Repository.NotificationRepository;
@@ -146,6 +147,39 @@ namespace Cocorra.BLL.Services.SupportService
             }).ToList();
 
             return Success(result);
+        }
+
+        public async Task<Response<PrivateFileUrlDto>> GetReportScreenshotUrlAsync(Guid reportId)
+        {
+            var report = await _supportRepo.GetReportByIdAsync(reportId);
+            if (report == null) return NotFound<PrivateFileUrlDto>("Report not found.");
+
+            return await IssueScreenshotUrlAsync(
+                PrivateFileKind.ReportScreenshot,
+                new PrivateFileRef(report.Id, report.ScreenshotPath, report.ReporterId),
+                "Support.ReportScreenshotUrl",
+                "This report has no screenshot.");
+        }
+
+        public async Task<Response<PrivateFileUrlDto>> GetTicketScreenshotUrlAsync(Guid ticketId)
+        {
+            var ticket = await _supportRepo.GetTicketByIdAsync(ticketId);
+            if (ticket == null) return NotFound<PrivateFileUrlDto>("Ticket not found.");
+
+            return await IssueScreenshotUrlAsync(
+                PrivateFileKind.TicketScreenshot,
+                new PrivateFileRef(ticket.Id, ticket.ScreenshotPath, ticket.UserId),
+                "Support.TicketScreenshotUrl",
+                "This ticket has no screenshot.");
+        }
+
+        private async Task<Response<PrivateFileUrlDto>> IssueScreenshotUrlAsync(
+            PrivateFileKind kind, PrivateFileRef file, string source, string noFileMessage)
+        {
+            var issued = (await _fileUrls.IssueAsync(kind, new[] { file }, source))[0];
+            if (issued == null) return NotFound<PrivateFileUrlDto>(noFileMessage);
+
+            return Success(new PrivateFileUrlDto { Url = issued.Url, ExpiresAtUtc = issued.ExpiresAtUtc });
         }
 
         public async Task<Response<string>> UpdateReportStatusAsync(Guid reportId, string newStatus)

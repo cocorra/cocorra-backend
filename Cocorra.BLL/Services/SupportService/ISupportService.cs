@@ -15,6 +15,10 @@ namespace Cocorra.BLL.Services.SupportService
         Task<Response<string>> SubmitReportAsync(Guid reporterId, SubmitReportDto dto);
         Task<Response<List<ReportDetailsDto>>> GetFilteredReportsAsync(ReportCategory? category, string? status);
         Task<Response<string>> UpdateReportStatusAsync(Guid reportId, string newStatus);
+        /// <summary>A fresh presigned URL to a report's screenshot; NotFound when there is none.</summary>
+        Task<Response<Cocorra.DAL.DTOS.StorageDto.PrivateFileUrlDto>> GetReportScreenshotUrlAsync(Guid reportId);
+        /// <summary>A fresh presigned URL to a support ticket's screenshot; NotFound when there is none.</summary>
+        Task<Response<Cocorra.DAL.DTOS.StorageDto.PrivateFileUrlDto>> GetTicketScreenshotUrlAsync(Guid ticketId);
         Task<Response<string>> TakeActionOnReportAsync(Guid reportId, TakeReportActionDto dto);
 
         // Chat Support

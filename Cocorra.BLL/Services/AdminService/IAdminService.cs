@@ -9,6 +9,8 @@ namespace Cocorra.BLL.Services.AdminService
     {
         Task<PagedResponse<UserDto>> GetAllUsersAsync(string? search, int page = 1, int pageSize = 10);
         Task<Response<UserDto>> GetUserByIdAsync(Guid userId);
+        /// <summary>A fresh presigned URL to the user's voice recording; NotFound when there is none.</summary>
+        Task<Response<Cocorra.DAL.DTOS.StorageDto.PrivateFileUrlDto>> GetUserVoiceUrlAsync(Guid userId);
         Task<Response<DashboardStatsDto>> GetDashboardStatsAsync();
         /// <summary>
         /// AN-011: adminId and isBulk are required so user_status_changed can record WHO made

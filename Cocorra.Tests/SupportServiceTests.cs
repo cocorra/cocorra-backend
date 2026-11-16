@@ -72,6 +72,69 @@ public class SupportServiceTests
     }
 
     [Fact]
+    public async Task GetReportScreenshotUrlAsync_ReportWithScreenshot_ReturnsAnIssuedUrl()
+    {
+        var report = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid(), ScreenshotPath = "Uploads/img/Support/r.png" };
+        _supportRepoMock.Setup(r => r.GetReportByIdAsync(report.Id)).ReturnsAsync(report);
+
+        var result = await _service.GetReportScreenshotUrlAsync(report.Id);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal("signed:Uploads/img/Support/r.png", result.Data!.Url);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.ReportScreenshot, call.Kind);
+        Assert.Equal(report.Id, call.Files[0].SubjectId);
+        Assert.Equal(report.ReporterId, call.Files[0].TargetUserId);
+    }
+
+    [Fact]
+    public async Task GetReportScreenshotUrlAsync_NoScreenshot_ReturnsNotFound()
+    {
+        var report = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid() };
+        _supportRepoMock.Setup(r => r.GetReportByIdAsync(report.Id)).ReturnsAsync(report);
+
+        var result = await _service.GetReportScreenshotUrlAsync(report.Id);
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetReportScreenshotUrlAsync_UnknownReport_ReturnsNotFoundWithoutIssuing()
+    {
+        _supportRepoMock.Setup(r => r.GetReportByIdAsync(It.IsAny<Guid>())).ReturnsAsync((Report?)null);
+
+        var result = await _service.GetReportScreenshotUrlAsync(Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+        Assert.Empty(FileUrls.Calls);
+    }
+
+    [Fact]
+    public async Task GetTicketScreenshotUrlAsync_AnonymousTicket_ReturnsAnIssuedUrl()
+    {
+        var ticket = new SupportTicket { Id = Guid.NewGuid(), UserId = null, ScreenshotPath = "Uploads/img/Support/t.png" };
+        _supportRepoMock.Setup(r => r.GetTicketByIdAsync(ticket.Id)).ReturnsAsync(ticket);
+
+        var result = await _service.GetTicketScreenshotUrlAsync(ticket.Id);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal("signed:Uploads/img/Support/t.png", result.Data!.Url);
+        var call = Assert.Single(FileUrls.Calls);
+        Assert.Equal(PrivateFileKind.TicketScreenshot, call.Kind);
+        Assert.Null(call.Files[0].TargetUserId);
+    }
+
+    [Fact]
+    public async Task GetTicketScreenshotUrlAsync_UnknownTicket_ReturnsNotFound()
+    {
+        _supportRepoMock.Setup(r => r.GetTicketByIdAsync(It.IsAny<Guid>())).ReturnsAsync((SupportTicket?)null);
+
+        var result = await _service.GetTicketScreenshotUrlAsync(Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+    }
+
+    [Fact]
     public async Task SubmitTicketAsync_WithoutScreenshot_SavesTicketAndReturnsSuccess()
     {
         var userId = Guid.NewGuid();
