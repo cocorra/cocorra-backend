@@ -161,8 +161,8 @@ public class SupportServiceTests
     {
         var fileMock = new Mock<IFormFile>();
         fileMock.Setup(f => f.Length).Returns(100);
-        _uploadImageMock.Setup(u => u.SaveImageAsync(fileMock.Object, "Support"))
-            .ReturnsAsync("https://cdn.cocorra.com/screenshot.jpg");
+        _uploadImageMock.Setup(u => u.SavePrivateImageAsync(fileMock.Object, "Support"))
+            .ReturnsAsync("Uploads/img/Support/screenshot.jpg");
 
         var dto = new SubmitSupportTicketDto
         {
@@ -175,7 +175,29 @@ public class SupportServiceTests
 
         Assert.True(result.Succeeded);
         _supportRepoMock.Verify(r => r.AddTicketAsync(It.Is<SupportTicket>(t =>
-            t.ScreenshotPath == "https://cdn.cocorra.com/screenshot.jpg")), Times.Once);
+            t.ScreenshotPath == "Uploads/img/Support/screenshot.jpg")), Times.Once);
+        // Screenshots are private: never stored through the public-URL save path.
+        _uploadImageMock.Verify(u => u.SaveImageAsync(It.IsAny<IFormFile>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitReportAsync_WithScreenshot_StoresTheObjectKey()
+    {
+        var fileMock = new Mock<IFormFile>();
+        fileMock.Setup(f => f.Length).Returns(100);
+        _uploadImageMock.Setup(u => u.SavePrivateImageAsync(fileMock.Object, "Support"))
+            .ReturnsAsync("Uploads/img/Support/report.png");
+
+        var result = await _service.SubmitReportAsync(Guid.NewGuid(), new SubmitReportDto
+        {
+            ReportedUserId = Guid.NewGuid(),
+            Category = ReportCategory.Other,
+            Screenshot = fileMock.Object
+        });
+
+        Assert.True(result.Succeeded);
+        _supportRepoMock.Verify(r => r.AddReportAsync(It.Is<Report>(rep =>
+            rep.ScreenshotPath == "Uploads/img/Support/report.png")), Times.Once);
     }
 
     [Fact]
