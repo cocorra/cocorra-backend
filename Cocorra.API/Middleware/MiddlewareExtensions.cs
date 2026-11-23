@@ -16,5 +16,10 @@ namespace Cocorra.API.Middleware
         {
             return builder.UseMiddleware<SessionTrackingMiddleware>();
         }
+
+        public static IApplicationBuilder UseSwaggerBasicAuth(this IApplicationBuilder builder, string username, string password)
+        {
+            return builder.UseMiddleware<SwaggerBasicAuthMiddleware>(username, password);
+        }
     }
 }

@@ -729,10 +729,28 @@ app.UseAuthorization();
 app.UseSessionTracking();
 app.UseDeviceBlocking();
 
-// Swagger only in Development: in Production it publishes the full API surface, admin
-// endpoints included, to anyone who finds the URL.
-if (app.Environment.IsDevelopment())
+// Swagger is always on in Development. Elsewhere it is off unless Swagger:Enabled is true, and then
+// it sits behind Basic auth: unguarded it publishes the full API surface, admin endpoints included,
+// to anyone who finds the URL.
+var swaggerEnabled = app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger:Enabled");
+if (swaggerEnabled)
 {
+    var swaggerUser = app.Configuration["Swagger:Username"];
+    var swaggerPassword = app.Configuration["Swagger:Password"];
+    var hasSwaggerCredentials = !string.IsNullOrWhiteSpace(swaggerUser) && !string.IsNullOrWhiteSpace(swaggerPassword);
+
+    if (!app.Environment.IsDevelopment() && (!hasSwaggerCredentials || swaggerPassword!.Length < 12))
+    {
+        throw new InvalidOperationException(
+            "Swagger:Enabled is true but Swagger:Username / Swagger:Password are missing or the password is shorter than 12 characters. " +
+            "Set Swagger__Username and Swagger__Password in .env, or set Swagger__Enabled=false.");
+    }
+
+    if (hasSwaggerCredentials)
+    {
+        app.UseSwaggerBasicAuth(swaggerUser!, swaggerPassword!);
+    }
+
     app.UseSwagger(options =>
     {
         options.RouteTemplate = "swagger/{documentName}/swagger.json";
