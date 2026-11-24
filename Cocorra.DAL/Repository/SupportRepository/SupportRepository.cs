@@ -65,6 +65,37 @@ namespace Cocorra.DAL.Repository.SupportRepository
             return await _dbContext.SupportTickets.FindAsync(ticketId);
         }
 
+        public async Task<(int TotalCount, List<SupportTicket> Items)> GetPagedTicketsAsync(
+            SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize)
+        {
+            var query = _dbContext.SupportTickets.AsNoTracking().AsQueryable();
+
+            if (type.HasValue)
+                query = query.Where(t => t.Type == type.Value);
+
+            // Filters on the typed StatusCode: the string Status column is free-form.
+            if (status.HasValue)
+                query = query.Where(t => t.StatusCode == status.Value);
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .Include(t => t.User)
+                .OrderByDescending(t => t.CreatedAt)
+                .ThenByDescending(t => t.Id)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return (totalCount, items);
+        }
+
+        public async Task UpdateTicketAsync(SupportTicket ticket)
+        {
+            _dbContext.SupportTickets.Update(ticket);
+            await _dbContext.SaveChangesAsync();
+        }
+
         public async Task UpdateReportAsync(Report report)
         {
             _dbContext.Reports.Update(report);

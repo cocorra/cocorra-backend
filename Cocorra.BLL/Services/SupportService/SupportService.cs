@@ -192,6 +192,50 @@ namespace Cocorra.BLL.Services.SupportService
             return Success($"Report status updated to '{newStatus}'.");
         }
 
+        public async Task<PagedResponse<SupportTicketDetailsDto>> GetAdminTicketsAsync(
+            SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize)
+        {
+            var (totalCount, tickets) = await _supportRepo.GetPagedTicketsAsync(type, status, pageNumber, pageSize);
+
+            var items = tickets.Select(t => new SupportTicketDetailsDto
+            {
+                Id = t.Id,
+                UserId = t.UserId,
+                UserName = t.User != null
+                    ? $"{t.User.FirstName} {t.User.LastName}"
+                    : t.UserId == null ? "Anonymous" : "Deleted user",
+                UserEmail = t.User?.Email,
+                ContactEmail = t.ContactEmail,
+                Type = t.Type,
+                Message = t.Message,
+                // Never a URL in a list; GetTicketScreenshotUrlAsync issues one on demand.
+                HasScreenshot = _fileUrls.HasFile(t.ScreenshotPath),
+                Status = t.StatusCode,
+                CreatedAt = t.CreatedAt,
+                UpdatedAt = t.UpdatedAt,
+                ResolvedAt = t.ResolvedAt
+            }).ToList();
+
+            return Paginated(items, totalCount, pageNumber, pageSize);
+        }
+
+        public async Task<Response<string>> UpdateTicketStatusAsync(Guid ticketId, SupportTicketStatus newStatus)
+        {
+            var ticket = await _supportRepo.GetTicketByIdAsync(ticketId);
+            if (ticket == null) return NotFound<string>("Ticket not found.");
+
+            // AN-033: the string and typed columns move together, and ResolvedAt marks when the
+            // ticket reached a terminal state (cleared again if it is reopened).
+            ticket.Status = newStatus.ToString();
+            ticket.StatusCode = newStatus;
+            ticket.ResolvedAt = newStatus == SupportTicketStatus.Open ? null : ticket.ResolvedAt ?? DateTime.UtcNow;
+            ticket.UpdatedAt = DateTime.UtcNow;
+
+            await _supportRepo.UpdateTicketAsync(ticket);
+
+            return Success($"Ticket status updated to '{newStatus}'.");
+        }
+
         public async Task<Response<string>> TakeActionOnReportAsync(Guid reportId, TakeReportActionDto dto)
         {
             var report = await _supportRepo.GetReportByIdAsync(reportId);

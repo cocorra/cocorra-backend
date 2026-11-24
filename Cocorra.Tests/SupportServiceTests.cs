@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using Cocorra.BLL.Services.EventTracking;
@@ -434,5 +435,72 @@ public class SupportServiceTests
         Assert.True(result.Succeeded);
         Assert.Equal(SupportChatStatus.Closed, chat.Status);
         _supportRepoMock.Verify(r => r.UpdateChatAsync(chat), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetAdminTicketsAsync_MapsUserAnonymousAndDeleted_AndNeverAPathOrUrl()
+    {
+        var user = new ApplicationUser { Id = Guid.NewGuid(), FirstName = "Sara", LastName = "Ali", Email = "sara@test.local" };
+        var owned = new SupportTicket { Id = Guid.NewGuid(), UserId = user.Id, User = user, Type = SupportTicketType.TechnicalProblem, Message = "Crash", ScreenshotPath = "Uploads/img/Support/t.png" };
+        var anonymous = new SupportTicket { Id = Guid.NewGuid(), UserId = null, Type = SupportTicketType.GeneralQuestion, Message = "Hi", ContactEmail = "a@b.c" };
+        var deleted = new SupportTicket { Id = Guid.NewGuid(), UserId = Guid.NewGuid(), User = null, Message = "Old", StatusCode = SupportTicketStatus.Resolved };
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+            .ReturnsAsync((3, new List<SupportTicket> { owned, anonymous, deleted }));
+
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+
+        var items = result.Data!.ToList();
+        Assert.True(result.Succeeded);
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal("Sara Ali", items[0].UserName);
+        Assert.Equal("sara@test.local", items[0].UserEmail);
+        Assert.True(items[0].HasScreenshot);
+        Assert.Equal("Anonymous", items[1].UserName);
+        Assert.Equal("a@b.c", items[1].ContactEmail);
+        Assert.False(items[1].HasScreenshot);
+        Assert.Equal("Deleted user", items[2].UserName);
+        Assert.Equal(SupportTicketStatus.Resolved, items[2].Status);
+        // Listing tickets issues no URL and therefore writes no audit row.
+        Assert.Empty(FileUrls.Calls);
+    }
+
+    [Fact]
+    public async Task UpdateTicketStatusAsync_Resolve_SyncsStringTypedAndResolvedAt()
+    {
+        var ticket = new SupportTicket { Id = Guid.NewGuid(), Status = "Open" };
+        _supportRepoMock.Setup(r => r.GetTicketByIdAsync(ticket.Id)).ReturnsAsync(ticket);
+
+        var result = await _service.UpdateTicketStatusAsync(ticket.Id, SupportTicketStatus.Resolved);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Resolved", ticket.Status);
+        Assert.Equal(SupportTicketStatus.Resolved, ticket.StatusCode);
+        Assert.NotNull(ticket.ResolvedAt);
+        Assert.NotNull(ticket.UpdatedAt);
+        _supportRepoMock.Verify(r => r.UpdateTicketAsync(ticket), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateTicketStatusAsync_Reopen_ClearsResolvedAt()
+    {
+        var ticket = new SupportTicket { Id = Guid.NewGuid(), Status = "Resolved", StatusCode = SupportTicketStatus.Resolved, ResolvedAt = DateTime.UtcNow };
+        _supportRepoMock.Setup(r => r.GetTicketByIdAsync(ticket.Id)).ReturnsAsync(ticket);
+
+        await _service.UpdateTicketStatusAsync(ticket.Id, SupportTicketStatus.Open);
+
+        Assert.Equal("Open", ticket.Status);
+        Assert.Equal(SupportTicketStatus.Open, ticket.StatusCode);
+        Assert.Null(ticket.ResolvedAt);
+    }
+
+    [Fact]
+    public async Task UpdateTicketStatusAsync_UnknownTicket_ReturnsNotFound()
+    {
+        _supportRepoMock.Setup(r => r.GetTicketByIdAsync(It.IsAny<Guid>())).ReturnsAsync((SupportTicket?)null);
+
+        var result = await _service.UpdateTicketStatusAsync(Guid.NewGuid(), SupportTicketStatus.Resolved);
+
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+        _supportRepoMock.Verify(r => r.UpdateTicketAsync(It.IsAny<SupportTicket>()), Times.Never);
     }
 }

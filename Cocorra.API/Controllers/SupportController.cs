@@ -69,6 +69,32 @@ namespace Cocorra.API.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
+        // General tickets (POST Support/Ticket) live in their own table, so admin/reports never lists them.
+        [Authorize(Roles = "Admin,Moderator")]
+        [HttpGet(Router.SupportRouting.AdminTickets)]
+        public async Task<IActionResult> GetTickets(
+            [FromQuery] SupportTicketType? type,
+            [FromQuery] SupportTicketStatus? status,
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10)
+        {
+            pageNumber = Math.Max(1, pageNumber);
+            pageSize = Math.Clamp(pageSize, 1, 50);
+
+            var result = await _supportService.GetAdminTicketsAsync(type, status, pageNumber, pageSize);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [Authorize(Roles = "Admin,Moderator")]
+        [HttpPut(Router.SupportRouting.AdminUpdateTicketStatus)]
+        public async Task<IActionResult> UpdateTicketStatus(Guid id, [FromBody] UpdateTicketStatusDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var result = await _supportService.UpdateTicketStatusAsync(id, dto.Status!.Value);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         // Every URL issued is recorded in the audit log.
         [Authorize(Roles = "Admin,Moderator")]
         [HttpGet(Router.SupportRouting.AdminTicketScreenshotUrl)]

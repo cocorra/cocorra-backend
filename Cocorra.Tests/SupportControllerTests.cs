@@ -220,4 +220,46 @@ public class SupportControllerTests
         var obj = Assert.IsType<ObjectResult>(result);
         Assert.Equal(200, obj.StatusCode);
     }
+
+    [Fact]
+    public async Task GetTickets_ClampsPagingAndPassesFilters()
+    {
+        var controller = CreateController(Guid.NewGuid(), "Admin");
+        _supportServiceMock
+            .Setup(s => s.GetAdminTicketsAsync(SupportTicketType.TechnicalProblem, SupportTicketStatus.Open, 1, 50))
+            .ReturnsAsync(new PagedResponse<SupportTicketDetailsDto>(new List<SupportTicketDetailsDto>(), 0, 1, 50));
+
+        var result = await controller.GetTickets(SupportTicketType.TechnicalProblem, SupportTicketStatus.Open, pageNumber: 0, pageSize: 500);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(200, obj.StatusCode);
+        _supportServiceMock.Verify(s => s.GetAdminTicketsAsync(SupportTicketType.TechnicalProblem, SupportTicketStatus.Open, 1, 50), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateTicketStatus_PassesStatusToService()
+    {
+        var id = Guid.NewGuid();
+        var controller = CreateController(Guid.NewGuid(), "Admin");
+        _supportServiceMock.Setup(s => s.UpdateTicketStatusAsync(id, SupportTicketStatus.Resolved))
+            .ReturnsAsync(new Response<string> { Succeeded = true, StatusCode = System.Net.HttpStatusCode.OK });
+
+        var result = await controller.UpdateTicketStatus(id, new UpdateTicketStatusDto { Status = SupportTicketStatus.Resolved });
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(200, obj.StatusCode);
+    }
+
+    [Fact]
+    public void AdminTicketEndpoints_AreAdminOrModeratorOnly()
+    {
+        foreach (var name in new[] { nameof(SupportController.GetTickets), nameof(SupportController.UpdateTicketStatus) })
+        {
+            var attr = typeof(SupportController).GetMethod(name)!
+                .GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false)
+                .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>()
+                .Single();
+            Assert.Equal("Admin,Moderator", attr.Roles);
+        }
+    }
 }

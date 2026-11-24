@@ -100,6 +100,8 @@ namespace Cocorra.DAL.AppMetaData
             public const string AdminUpdateReportStatus = Prefix + "/admin/reports/{id:guid}/status"; // PUT
             public const string AdminTakeReportAction = Prefix + "/admin/reports/{id:guid}/action"; // POST
             public const string AdminReportScreenshotUrl = Prefix + "/admin/reports/{id:guid}/screenshot-url"; // GET: 15-min presigned URL
+            public const string AdminTickets = Prefix + "/admin/tickets"; // GET: paged
+            public const string AdminUpdateTicketStatus = Prefix + "/admin/tickets/{id:guid}/status"; // PUT
             public const string AdminTicketScreenshotUrl = Prefix + "/admin/tickets/{id:guid}/screenshot-url"; // GET: 15-min presigned URL
             public const string MyChat = Prefix + "/chat/my-chat"; // GET
         }
