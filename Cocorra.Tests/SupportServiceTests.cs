@@ -19,6 +19,7 @@ using Cocorra.DAL.Repository.SupportRepository;
 using Cocorra.Tests.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -40,6 +41,12 @@ public class SupportServiceTests
     public SupportServiceTests()
     {
         _eventTrackerMock.Setup(e => e.NewEventEmissionEnabled).Returns(true);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AppSettings:BaseUrl"] = "https://api.example.com/"
+            })
+            .Build();
         _service = new SupportService(
             _supportRepoMock.Object,
             _uploadImageMock.Object,
@@ -49,7 +56,8 @@ public class SupportServiceTests
             _pushServiceMock.Object,
             _eventTrackerMock.Object,
             NullLogger<SupportService>.Instance,
-            FileUrls
+            FileUrls,
+            configuration
         );
     }
 
@@ -461,6 +469,135 @@ public class SupportServiceTests
         Assert.Equal("Deleted user", items[2].UserName);
         Assert.Equal(SupportTicketStatus.Resolved, items[2].Status);
         // Listing tickets issues no URL and therefore writes no audit row.
+        Assert.Empty(FileUrls.Calls);
+    }
+
+    [Theory]
+    [InlineData(SupportTicketType.GeneralQuestion, "General question")]
+    [InlineData(SupportTicketType.TechnicalProblem, "Technical problem")]
+    [InlineData(SupportTicketType.Other, "Other")]
+    [InlineData((SupportTicketType)99, "99")]
+    public async Task GetAdminTicketsAsync_KnownAndUndefinedTypes_MapsExpectedTypeName(
+        SupportTicketType type, string expectedTypeName)
+    {
+        var ticket = new SupportTicket
+        {
+            Id = Guid.NewGuid(),
+            Type = type,
+            Message = "Need help"
+        };
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+            .ReturnsAsync((1, new List<SupportTicket> { ticket }));
+
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+
+        Assert.True(result.Succeeded);
+        var item = Assert.Single(result.Data!);
+        Assert.Equal(type, item.Type);
+        Assert.Equal(expectedTypeName, item.TypeName);
+    }
+
+    [Theory]
+    [InlineData("Uploads/img/p.png", "https://api.example.com/Uploads/img/p.png")]
+    [InlineData("/Uploads/p.png", "https://api.example.com/Uploads/p.png")]
+    [InlineData(@"Uploads\img\p.png", "https://api.example.com/Uploads/img/p.png")]
+    [InlineData("https://cdn.example.com/p.png", "https://cdn.example.com/p.png")]
+    [InlineData("HTTP://cdn.example.com/p.png", "HTTP://cdn.example.com/p.png")]
+    [InlineData(null, null)]
+    [InlineData("   ", null)]
+    public async Task GetAdminTicketsAsync_UserWithProfilePicturePath_ResolvesExpectedUrl(
+        string? profilePicturePath, string? expectedUrl)
+    {
+        var user = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            FirstName = "Sara",
+            LastName = "Ali",
+            ProfilePicturePath = profilePicturePath
+        };
+        var ticket = new SupportTicket
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            User = user,
+            Message = "Need help"
+        };
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+            .ReturnsAsync((1, new List<SupportTicket> { ticket }));
+
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+
+        Assert.True(result.Succeeded);
+        var item = Assert.Single(result.Data!);
+        Assert.Equal(expectedUrl, item.UserProfilePicture);
+    }
+
+    [Fact]
+    public async Task GetAdminTicketsAsync_AnonymousAndDeletedUserTickets_LeaveProfilePictureNullAndHideScreenshotPath()
+    {
+        const string anonymousScreenshotPath = "Uploads/img/Support/anon-secret.png";
+        const string deletedUserScreenshotPath = "Uploads/img/Support/deleted-secret.png";
+
+        var anonymousWithScreenshot = new SupportTicket
+        {
+            Id = Guid.NewGuid(),
+            UserId = null,
+            User = null,
+            ContactEmail = "anon@test.local",
+            Message = "Anonymous report",
+            ScreenshotPath = anonymousScreenshotPath
+        };
+        var deletedWithScreenshot = new SupportTicket
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            User = null,
+            Message = "Deleted user report",
+            ScreenshotPath = deletedUserScreenshotPath
+        };
+        var deletedWithoutScreenshot = new SupportTicket
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            User = null,
+            Message = "Deleted user without shot",
+            ScreenshotPath = null
+        };
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+            .ReturnsAsync((3, new List<SupportTicket> { anonymousWithScreenshot, deletedWithScreenshot, deletedWithoutScreenshot }));
+
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+
+        Assert.True(result.Succeeded);
+        var items = result.Data!.ToList();
+        Assert.Equal(3, items.Count);
+
+        Assert.Null(items[0].UserProfilePicture);
+        Assert.True(items[0].HasScreenshot);
+
+        Assert.Null(items[1].UserProfilePicture);
+        Assert.True(items[1].HasScreenshot);
+
+        Assert.Null(items[2].UserProfilePicture);
+        Assert.False(items[2].HasScreenshot);
+
+        var stringProperties = typeof(SupportTicketDetailsDto)
+            .GetProperties()
+            .Where(p => p.PropertyType == typeof(string))
+            .ToList();
+
+        Assert.All(items, dto =>
+        {
+            foreach (var property in stringProperties)
+            {
+                var value = (string?)property.GetValue(dto);
+                if (value is not null)
+                {
+                    Assert.DoesNotContain(anonymousScreenshotPath, value, StringComparison.OrdinalIgnoreCase);
+                    Assert.DoesNotContain(deletedUserScreenshotPath, value, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        });
         Assert.Empty(FileUrls.Calls);
     }
 

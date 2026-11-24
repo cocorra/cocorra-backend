@@ -10,8 +10,10 @@ namespace Cocorra.DAL.DTOS.SupportDto
         public Guid? UserId { get; set; }
         public string UserName { get; set; } = string.Empty;
         public string? UserEmail { get; set; }
+        public string? UserProfilePicture { get; set; }
         public string? ContactEmail { get; set; }
         public SupportTicketType Type { get; set; }
+        public string TypeName { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
         /// <summary>True when the ticket has a screenshot to fetch through
         /// GET Support/admin/tickets/{id}/screenshot-url. A path or URL is never listed.</summary>

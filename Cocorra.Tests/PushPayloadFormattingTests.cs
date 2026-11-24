@@ -14,6 +14,7 @@ using Cocorra.DAL.Repository.SupportRepository;
 using Cocorra.DAL.Repository.UserBlockRepository;
 using MediatR;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -212,7 +213,8 @@ public class PushPayloadFormattingTests
             pushServiceMock.Object,
             new Mock<IEventTracker>().Object,
             new Mock<ILogger<SupportService>>().Object,
-            new FakePrivateFileUrlIssuer());
+            new FakePrivateFileUrlIssuer(),
+            new ConfigurationBuilder().Build());
 
         var result = await supportService.TakeActionOnReportAsync(
             report.Id, new TakeReportActionDto { Action = AdminReportAction.Mute24h });

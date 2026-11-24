@@ -18,6 +18,7 @@ using Cocorra.DAL.Repository.SupportRepository;
 using Microsoft.AspNetCore.Identity;
 using Cocorra.BLL.Services.NotificationService;
 using Cocorra.BLL.Services.EventTracking;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Cocorra.BLL.Services.SupportService
@@ -33,6 +34,7 @@ namespace Cocorra.BLL.Services.SupportService
         private readonly IEventTracker _eventTracker;
         private readonly ILogger<SupportService> _logger;
         private readonly IPrivateFileUrlIssuer _fileUrls;
+        private readonly string _baseUrl;
 
         public SupportService(
             ISupportRepository supportRepo,
@@ -43,7 +45,8 @@ namespace Cocorra.BLL.Services.SupportService
             IPushNotificationService pushService,
             IEventTracker eventTracker,
             ILogger<SupportService> logger,
-            IPrivateFileUrlIssuer fileUrls)
+            IPrivateFileUrlIssuer fileUrls,
+            IConfiguration configuration)
         {
             _supportRepo = supportRepo;
             _uploadImage = uploadImage;
@@ -54,6 +57,7 @@ namespace Cocorra.BLL.Services.SupportService
             _eventTracker = eventTracker;
             _logger = logger;
             _fileUrls = fileUrls;
+            _baseUrl = configuration["AppSettings:BaseUrl"]?.TrimEnd('/') ?? "";
         }
 
         public async Task<Response<string>> SubmitTicketAsync(Guid? userId, SubmitSupportTicketDto dto)
@@ -205,8 +209,10 @@ namespace Cocorra.BLL.Services.SupportService
                     ? $"{t.User.FirstName} {t.User.LastName}"
                     : t.UserId == null ? "Anonymous" : "Deleted user",
                 UserEmail = t.User?.Email,
+                UserProfilePicture = BuildFullUrl(t.User?.ProfilePicturePath),
                 ContactEmail = t.ContactEmail,
                 Type = t.Type,
+                TypeName = TicketTypeName(t.Type),
                 Message = t.Message,
                 // Never a URL in a list; GetTicketScreenshotUrlAsync issues one on demand.
                 HasScreenshot = _fileUrls.HasFile(t.ScreenshotPath),
@@ -218,6 +224,28 @@ namespace Cocorra.BLL.Services.SupportService
 
             return Paginated(items, totalCount, pageNumber, pageSize);
         }
+
+        private string? BuildFullUrl(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return null;
+
+            if (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return path;
+            }
+
+            return $"{_baseUrl}/{path.Replace("\\", "/").TrimStart('/')}";
+        }
+
+        private static string TicketTypeName(SupportTicketType type) => type switch
+        {
+            SupportTicketType.GeneralQuestion => "General question",
+            SupportTicketType.TechnicalProblem => "Technical problem",
+            SupportTicketType.Other => "Other",
+            _ => type.ToString()
+        };
 
         public async Task<Response<string>> UpdateTicketStatusAsync(Guid ticketId, SupportTicketStatus newStatus)
         {

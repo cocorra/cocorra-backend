@@ -9,6 +9,7 @@ using Cocorra.DAL.Models;
 using Cocorra.DAL.Repository.NotificationRepository;
 using Cocorra.DAL.Repository.SupportRepository;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -58,7 +59,8 @@ public class SupportChatPushTests
             Push.Object,
             new Mock<IEventTracker>().Object,
             new Mock<ILogger<SupportService>>().Object,
-            new Cocorra.Tests.Helpers.FakePrivateFileUrlIssuer());
+            new Cocorra.Tests.Helpers.FakePrivateFileUrlIssuer(),
+            new ConfigurationBuilder().Build());
     }
 
     // ── Admin reply → the user, which is the case the mobile app cares about ─────
