@@ -13,6 +13,8 @@ namespace Cocorra.DAL.Repository.SupportRepository
         Task<List<Report>> GetFilteredReportsAsync(ReportCategory? category, string? status);
         Task<Report?> GetReportByIdAsync(Guid reportId);
         Task<SupportTicket?> GetTicketByIdAsync(Guid ticketId);
+        Task<(int TotalCount, List<SupportTicket> Items)> GetPagedTicketsAsync(SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize);
+        Task UpdateTicketAsync(SupportTicket ticket);
         Task UpdateReportAsync(Report report);
 
         // Chat Support
