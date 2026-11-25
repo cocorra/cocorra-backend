@@ -181,18 +181,16 @@ public class SupportChatScopingTests : IDisposable
     [Fact]
     public async Task ClaimChatAsync_ConcurrentRaceAfterBothReadPending_ExactlyOneSucceedsAndOneAuditRow()
     {
-        var tempFile = Path.GetTempFileName();
-        var connectionString = $"Data Source={tempFile};Default Timeout=30;";
+        var tempFile = Path.Combine(Path.GetTempPath(), $"cocorra_support_claim_race_{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source={tempFile};Default Timeout=30;Pooling=False;";
 
         try
         {
             using var conn1 = new SqliteConnection(connectionString);
-            using var conn2 = new SqliteConnection(connectionString);
             await conn1.OpenAsync();
-            await conn2.OpenAsync();
+            await ConfigureConcurrentSqliteConnectionAsync(conn1);
 
             var opts1 = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(conn1).Options;
-            var opts2 = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(conn2).Options;
 
             var userId = Guid.NewGuid();
             var mod1 = Guid.NewGuid();
@@ -202,9 +200,16 @@ public class SupportChatScopingTests : IDisposable
             using (var setupDb = new AppDbContext(opts1))
             {
                 await setupDb.Database.EnsureCreatedAsync();
+                await setupDb.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
                 InstallSqliteRowVersionTrigger(setupDb);
                 chatId = await SeedChatAsync(setupDb, userId.ToString(), SupportChatStatus.Pending, adminId: null);
             }
+
+            using var conn2 = new SqliteConnection(connectionString);
+            await conn2.OpenAsync();
+            await ConfigureConcurrentSqliteConnectionAsync(conn2);
+
+            var opts2 = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(conn2).Options;
 
             var barrier = new AsyncTwoPartyBarrier();
 
@@ -239,12 +244,19 @@ public class SupportChatScopingTests : IDisposable
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
-            if (File.Exists(tempFile))
-            {
-                File.Delete(tempFile);
-            }
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            if (File.Exists(tempFile + "-wal")) File.Delete(tempFile + "-wal");
+            if (File.Exists(tempFile + "-shm")) File.Delete(tempFile + "-shm");
         }
+    }
+
+    // Microsoft.Data.Sqlite's Default Timeout does not configure SQLite's native busy_timeout
+    // for sqlite3_reset inside SqliteDataRecord.Dispose(), so set busy_timeout explicitly.
+    private static async Task ConfigureConcurrentSqliteConnectionAsync(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "PRAGMA busy_timeout=30000;";
+        await cmd.ExecuteNonQueryAsync();
     }
 
     [Fact]
