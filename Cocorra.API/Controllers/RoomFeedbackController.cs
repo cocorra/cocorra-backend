@@ -1,6 +1,8 @@
+using Cocorra.API.Authorization;
 using Cocorra.BLL.Services.RoomFeedbackService;
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS.RoomFeedbackDto;
+using Cocorra.DAL.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System;
@@ -49,11 +51,11 @@ namespace Cocorra.API.Controllers
             if (!Guid.TryParse(userIdString, out Guid userId)) return Unauthorized();
 
             // Admin-or-host is decided in the service, which knows the room's host.
-            var result = await _feedbackService.GetSummaryAsync(roomId, userId, User.IsInRole("Admin"));
+            var result = await _feedbackService.GetSummaryAsync(roomId, userId, User.IsInRole(AppRoles.Admin));
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Policy = AuthPolicies.AdminOnly)]
         [HttpGet(Router.AdminRouting.Feedback)]
         public async Task<IActionResult> GetAll(
             [FromQuery] Guid? roomId,

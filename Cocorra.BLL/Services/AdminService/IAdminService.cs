@@ -1,33 +1,53 @@
-using Cocorra.DAL.DTOS.AdminDto;
-using Cocorra.DAL.Enums;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using Cocorra.BLL.Base;
-
+using Cocorra.DAL.DTOS.AdminDto;
+using Cocorra.DAL.DTOS.StorageDto;
+using Cocorra.DAL.Enums;
+using Cocorra.DAL.Models;
 
 namespace Cocorra.BLL.Services.AdminService
 {
     public interface IAdminService
     {
-        Task<PagedResponse<UserDto>> GetAllUsersAsync(string? search, int page = 1, int pageSize = 10);
-        Task<Response<UserDto>> GetUserByIdAsync(Guid userId);
+        Task<PagedResponse<UserDto>> GetAllUsersAsync(
+            string? search,
+            int page = 1,
+            int pageSize = 10,
+            bool callerIsAdmin = false);
+
+        Task<Response<UserDto>> GetUserByIdAsync(Guid userId, bool callerIsAdmin = false);
+
         /// <summary>A fresh presigned URL to the user's voice recording; NotFound when there is none.</summary>
-        Task<Response<Cocorra.DAL.DTOS.StorageDto.PrivateFileUrlDto>> GetUserVoiceUrlAsync(Guid userId);
+        Task<Response<PrivateFileUrlDto>> GetUserVoiceUrlAsync(Guid userId);
+
         Task<Response<DashboardStatsDto>> GetDashboardStatsAsync();
+
+        Task<StatusChangeResponse> ChangeUserStatusAsync(
+            Guid userId,
+            UserStatus newStatus,
+            string? reason,
+            Guid actorUserId,
+            bool callerIsAdmin,
+            bool isBulk = false);
+
         /// <summary>
-        /// AN-011: adminId and isBulk are required so user_status_changed can record WHO made
-        /// the change. The acting admin's identity already exists in the controller; before this
-        /// it was dropped at exactly this boundary and recorded nowhere.
+        /// Performs the status transition and all non-audit side effects (lockout, voice cleanup,
+        /// security stamp rotation, events, notifications, email, push) so callers such as
+        /// VoiceReviewService can write their own domain-specific audit entry.
         /// </summary>
-        Task<Response<string>> ChangeUserStatusAsync(Guid userId, UserStatus newStatus, Guid adminId, bool isBulk = false);
+        Task<StatusTransitionOutcome> ApplyStatusTransitionAsync(
+            ApplicationUser user,
+            UserStatus newStatus,
+            IEnumerable<string> targetRoles,
+            Guid actorUserId,
+            bool isBulk = false);
+
         Task<Response<BulkChangeStatusResultDto>> BulkChangeUserStatusAsync(BulkChangeStatusDto model, Guid adminId);
-        /// <summary>
-        /// Hard ban: bans the account behind the email and blocks every device the registry
-        /// has seen that account authenticate from. Takes no device input by design — see
-        /// <see cref="BlockDeviceAndEmailDto"/>. adminId is required for attribution (AN-011).
-        /// </summary>
+
         Task<Response<BlockDeviceAndEmailResultDto>> BlockDeviceAndEmailAsync(BlockDeviceAndEmailDto model, Guid adminId);
-        /// <summary>
-        /// Broadcast push notification to all users registered with FCM tokens, and optionally save in-app notification records.
-        /// </summary>
+
         Task<Response<BroadcastNotificationResultDto>> BroadcastNotificationAsync(SendBroadcastNotificationDto model, Guid adminId);
     }
 }

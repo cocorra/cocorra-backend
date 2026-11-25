@@ -1,12 +1,12 @@
-using Cocorra.DAL.Data;
-using Cocorra.DAL.DTOS;
-using Cocorra.DAL.DTOS.AdminDto;
-using Cocorra.DAL.DTOS.Role;
-using Cocorra.DAL.Models;
-using Cocorra.DAL.Enums;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.Storage;
+using Cocorra.DAL.Data;
+using Cocorra.DAL.DTOS.AdminDto;
+using Cocorra.DAL.DTOS.Role;
+using Cocorra.DAL.Enums;
+using Cocorra.DAL.Models;
+using Cocorra.DAL.Repository.SupportRepository;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -57,7 +57,6 @@ namespace Cocorra.BLL.Services.RolesService
             var role = await _roleManager.FindByIdAsync(roleId);
             if (role == null) return BadRequest<RoleDto>("Role not found");
 
-            // Empty, or the role's own Name, means "no label": the row is removed.
             var requested = model.DisplayName?.Trim() ?? string.Empty;
             if (requested == role.Name) requested = string.Empty;
 
@@ -104,7 +103,14 @@ namespace Cocorra.BLL.Services.RolesService
                 actorUserId,
                 null,
                 role.Name,
-                new { roleName = role.Name, from, to }));
+                new { roleName = role.Name, from, to })
+            {
+                Category = AuditCategories.Roles,
+                EntityType = AuditEntityTypes.Role,
+                EntityId = role.Id.ToString(),
+                FromState = from,
+                ToState = to
+            });
 
             return Success(new RoleDto { Id = role.Id.ToString(), Name = role.Name!, DisplayName = to });
         }
@@ -112,7 +118,7 @@ namespace Cocorra.BLL.Services.RolesService
         private Task<Dictionary<Guid, string>> LoadDisplayNamesAsync() =>
             _context.RoleDisplayNames.AsNoTracking().ToDictionaryAsync(x => x.RoleId, x => x.DisplayName);
 
-        private static RoleDto ToDto(IdentityRole<Guid> role, IReadOnlyDictionary<Guid, string> displayNames) => new RoleDto
+        private static RoleDto ToDto(IdentityRole<Guid> role, IReadOnlyDictionary<Guid, string> displayNames) => new()
         {
             Id = role.Id.ToString(),
             Name = role.Name!,
@@ -124,22 +130,18 @@ namespace Cocorra.BLL.Services.RolesService
             var user = await _userManager.FindByIdAsync(model.UserId.ToString());
             if (user == null) return BadRequest<string>("User not found");
 
-            if (await _userManager.IsInRoleAsync(user, "Admin"))
+            if (await _userManager.IsInRoleAsync(user, AppRoles.Admin))
                 return BadRequest<string>("Cannot modify roles of an Admin account.");
 
-            foreach (var role in model.Roles)
-            {
-                if (role.Equals("Admin", StringComparison.OrdinalIgnoreCase))
-                    return BadRequest<string>("Cannot assign the Admin role through this endpoint.");
-
-                if (!await _roleManager.RoleExistsAsync(role))
-                    return BadRequest<string>($"Role '{role}' does not exist in the system.");
-            }
+            var (resolvedRoles, roleError) = await ValidateAndResolveAssignableRolesAsync(
+                model.Roles ?? new List<string>(),
+                "Cannot assign the Admin role through this endpoint.");
+            if (roleError != null)
+                return BadRequest<string>(roleError);
 
             var currentRoles = await _userManager.GetRolesAsync(user);
-
-            var rolesToAdd = model.Roles.Except(currentRoles).ToList();
-            var rolesToRemove = currentRoles.Except(model.Roles).ToList();
+            var rolesToAdd = resolvedRoles.Except(currentRoles, StringComparer.OrdinalIgnoreCase).ToList();
+            var rolesToRemove = currentRoles.Except(resolvedRoles, StringComparer.OrdinalIgnoreCase).ToList();
 
             if (!rolesToAdd.Any() && !rolesToRemove.Any())
                 return BadRequest<string>("No changes detected.");
@@ -147,13 +149,24 @@ namespace Cocorra.BLL.Services.RolesService
             if (rolesToAdd.Any())
             {
                 var addResult = await _userManager.AddToRolesAsync(user, rolesToAdd);
-                if (!addResult.Succeeded) return BadRequest<string>("Failed to add roles: " + string.Join(", ", addResult.Errors.Select(e => e.Description)));
+                if (!addResult.Succeeded)
+                    return BadRequest<string>("Failed to add roles: " + string.Join(", ", addResult.Errors.Select(e => e.Description)));
             }
 
             if (rolesToRemove.Any())
             {
                 var removeResult = await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
-                if (!removeResult.Succeeded) return BadRequest<string>("Failed to remove roles: " + string.Join(", ", removeResult.Errors.Select(e => e.Description)));
+                if (!removeResult.Succeeded)
+                    return BadRequest<string>("Failed to remove roles: " + string.Join(", ", removeResult.Errors.Select(e => e.Description)));
+            }
+
+            await _userManager.UpdateSecurityStampAsync(user);
+
+            var removedModerator = rolesToRemove.Contains(AppRoles.Moderator, StringComparer.OrdinalIgnoreCase);
+            var holdsAdmin = resolvedRoles.Contains(AppRoles.Admin, StringComparer.OrdinalIgnoreCase);
+            if (removedModerator && !holdsAdmin)
+            {
+                await SupportRepository.ReleaseActiveChatsForStaffAsync(_context, user.Id.ToString());
             }
 
             await _auditLog.RecordAsync(new AuditEntry(
@@ -161,7 +174,12 @@ namespace Cocorra.BLL.Services.RolesService
                 actorUserId,
                 user.Id,
                 user.Email,
-                new { added = rolesToAdd, removed = rolesToRemove }));
+                new { added = rolesToAdd, removed = rolesToRemove })
+            {
+                Category = AuditCategories.Roles,
+                EntityType = AuditEntityTypes.User,
+                EntityId = user.Id.ToString()
+            });
 
             return Success("User roles updated successfully");
         }
@@ -172,6 +190,18 @@ namespace Cocorra.BLL.Services.RolesService
                 return BadRequest<List<UserDto>>("Role not found");
 
             var users = await _userManager.GetUsersInRoleAsync(roleName);
+            var userIds = users.Select(u => u.Id).ToList();
+
+            var rolesByUser = userIds.Count == 0
+                ? new Dictionary<Guid, List<string>>()
+                : (await _context.UserRoles
+                    .AsNoTracking()
+                    .Where(ur => userIds.Contains(ur.UserId))
+                    .Join(_context.Roles.AsNoTracking(), ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, RoleName = r.Name })
+                    .ToListAsync())
+                    .Where(x => !string.IsNullOrEmpty(x.RoleName))
+                    .GroupBy(x => x.UserId)
+                    .ToDictionary(g => g.Key, g => g.Select(x => x.RoleName!).ToList());
 
             var usersDto = users.Select(u => new UserDto
             {
@@ -181,9 +211,10 @@ namespace Cocorra.BLL.Services.RolesService
                 Age = u.Age,
                 MBTI = u.MBTI ?? "N/A",
                 Status = u.Status.ToString(),
-                // Never a URL in a list; GET Admin/User/{id}/VoiceUrl issues one on demand.
+                CreatedAt = u.CreatedAt,
                 VoicePath = null,
-                HasVoice = _fileUrls.HasFile(u.VoiceVerificationPath)
+                HasVoice = _fileUrls.HasFile(u.VoiceVerificationPath),
+                Roles = rolesByUser.TryGetValue(u.Id, out var userRoles) ? userRoles : new List<string>()
             }).ToList();
 
             return Success(usersDto);
@@ -194,33 +225,17 @@ namespace Cocorra.BLL.Services.RolesService
             if (string.IsNullOrWhiteSpace(model.Email))
                 return BadRequest<UserDto>("Email is required.");
 
+            var requestedRoles = ExtractRequestedRoles(model);
+            var (rolesToAssign, roleError) = await ValidateAndResolveAssignableRolesAsync(
+                requestedRoles,
+                "Cannot assign the Admin role through this endpoint.");
+            if (roleError != null)
+                return BadRequest<UserDto>(roleError);
+
             var normalizedEmail = model.Email.Trim();
             var existingUser = await _userManager.FindByEmailAsync(normalizedEmail);
             if (existingUser != null)
                 return BadRequest<UserDto>("A user with this email already exists.");
-
-            var rolesToAssign = new List<string>();
-            if (model.Roles != null && model.Roles.Any())
-            {
-                rolesToAssign.AddRange(model.Roles.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()));
-            }
-            else if (!string.IsNullOrWhiteSpace(model.Role))
-            {
-                rolesToAssign.Add(model.Role.Trim());
-            }
-
-            if (!rolesToAssign.Any())
-            {
-                rolesToAssign.Add("User");
-            }
-
-            foreach (var role in rolesToAssign)
-            {
-                if (!await _roleManager.RoleExistsAsync(role))
-                {
-                    return BadRequest<UserDto>($"Role '{role}' does not exist in the system.");
-                }
-            }
 
             var user = new ApplicationUser
             {
@@ -254,7 +269,12 @@ namespace Cocorra.BLL.Services.RolesService
                 actorUserId,
                 user.Id,
                 user.Email,
-                new { roles = rolesToAssign }));
+                new { roles = rolesToAssign })
+            {
+                Category = AuditCategories.Roles,
+                EntityType = AuditEntityTypes.User,
+                EntityId = user.Id.ToString()
+            });
 
             var userDto = new UserDto
             {
@@ -269,6 +289,52 @@ namespace Cocorra.BLL.Services.RolesService
             };
 
             return Success(userDto);
+        }
+
+        private static List<string> ExtractRequestedRoles(CreateUserDto model)
+        {
+            var requested = new List<string>();
+            if (model.Roles != null && model.Roles.Any())
+            {
+                requested.AddRange(model.Roles.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()));
+            }
+            else if (!string.IsNullOrWhiteSpace(model.Role))
+            {
+                requested.Add(model.Role.Trim());
+            }
+
+            if (requested.Count == 0)
+            {
+                requested.Add(AppRoles.User);
+            }
+
+            return requested;
+        }
+
+        private async Task<(List<string> ResolvedRoles, string? ErrorMessage)> ValidateAndResolveAssignableRolesAsync(
+            IEnumerable<string> requestedRoles,
+            string adminRefusalMessage)
+        {
+            var resolved = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var rawRole in requestedRoles)
+            {
+                var role = rawRole?.Trim();
+                if (string.IsNullOrEmpty(role)) continue;
+
+                if (role.Equals(AppRoles.Admin, StringComparison.OrdinalIgnoreCase))
+                    return (resolved, adminRefusalMessage);
+
+                var roleEntity = await _roleManager.FindByNameAsync(role);
+                if (roleEntity == null || string.IsNullOrEmpty(roleEntity.Name))
+                    return (resolved, $"Role '{role}' does not exist in the system.");
+
+                if (seen.Add(roleEntity.Name))
+                    resolved.Add(roleEntity.Name);
+            }
+
+            return (resolved, null);
         }
     }
 }

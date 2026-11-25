@@ -67,32 +67,41 @@ public class SupportServiceTests
         var reporterId = Guid.NewGuid();
         var withShot = new Report { Id = Guid.NewGuid(), ReporterId = reporterId, ScreenshotPath = "Uploads/img/Support/s.png", Status = "Open" };
         var withoutShot = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid(), Status = "Open" };
-        _supportRepoMock.Setup(r => r.GetFilteredReportsAsync(null, null))
-            .ReturnsAsync(new List<Report> { withShot, withoutShot });
+        _supportRepoMock.Setup(r => r.GetPagedReportsAsync(null, null, 1, 20, false))
+            .ReturnsAsync((2, new List<Report> { withShot, withoutShot }));
 
-        var result = await _service.GetFilteredReportsAsync(null, null);
+        var result = await _service.GetFilteredReportsAsync(null, null, callerIsAdmin: true);
 
-        Assert.True(result.Data![0].HasScreenshot);
-        Assert.False(result.Data[1].HasScreenshot);
-        Assert.All(result.Data, r => Assert.Null(r.ScreenshotPath));
-        // Listing reports issues no URL and therefore writes no audit row.
+        var items = result.Data!.ToList();
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(1, result.CurrentPage);
+        Assert.Equal(20, result.PageSize);
+        Assert.True(items[0].HasScreenshot);
+        Assert.False(items[1].HasScreenshot);
+        Assert.All(items, r => Assert.Null(r.ScreenshotPath));
         Assert.Empty(FileUrls.Calls);
     }
 
     [Fact]
     public async Task GetReportScreenshotUrlAsync_ReportWithScreenshot_ReturnsAnIssuedUrl()
     {
-        var report = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid(), ScreenshotPath = "Uploads/img/Support/r.png" };
+        var report = new Report
+        {
+            Id = Guid.NewGuid(),
+            ReporterId = Guid.NewGuid(),
+            ReportedUserId = Guid.NewGuid(),
+            ScreenshotPath = "Uploads/img/Support/r.png"
+        };
         _supportRepoMock.Setup(r => r.GetReportByIdAsync(report.Id)).ReturnsAsync(report);
 
-        var result = await _service.GetReportScreenshotUrlAsync(report.Id);
+        var result = await _service.GetReportScreenshotUrlAsync(report.Id, callerIsAdmin: true);
 
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
         Assert.Equal("signed:Uploads/img/Support/r.png", result.Data!.Url);
         var call = Assert.Single(FileUrls.Calls);
         Assert.Equal(PrivateFileKind.ReportScreenshot, call.Kind);
         Assert.Equal(report.Id, call.Files[0].SubjectId);
-        Assert.Equal(report.ReporterId, call.Files[0].TargetUserId);
+        Assert.Equal(report.ReportedUserId, call.Files[0].TargetUserId);
     }
 
     [Fact]
@@ -101,7 +110,7 @@ public class SupportServiceTests
         var report = new Report { Id = Guid.NewGuid(), ReporterId = Guid.NewGuid() };
         _supportRepoMock.Setup(r => r.GetReportByIdAsync(report.Id)).ReturnsAsync(report);
 
-        var result = await _service.GetReportScreenshotUrlAsync(report.Id);
+        var result = await _service.GetReportScreenshotUrlAsync(report.Id, callerIsAdmin: true);
 
         Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
     }
@@ -111,7 +120,7 @@ public class SupportServiceTests
     {
         _supportRepoMock.Setup(r => r.GetReportByIdAsync(It.IsAny<Guid>())).ReturnsAsync((Report?)null);
 
-        var result = await _service.GetReportScreenshotUrlAsync(Guid.NewGuid());
+        var result = await _service.GetReportScreenshotUrlAsync(Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
         Assert.Empty(FileUrls.Calls);
@@ -123,7 +132,7 @@ public class SupportServiceTests
         var ticket = new SupportTicket { Id = Guid.NewGuid(), UserId = null, ScreenshotPath = "Uploads/img/Support/t.png" };
         _supportRepoMock.Setup(r => r.GetTicketByIdAsync(ticket.Id)).ReturnsAsync(ticket);
 
-        var result = await _service.GetTicketScreenshotUrlAsync(ticket.Id);
+        var result = await _service.GetTicketScreenshotUrlAsync(ticket.Id, callerIsAdmin: true);
 
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
         Assert.Equal("signed:Uploads/img/Support/t.png", result.Data!.Url);
@@ -137,7 +146,7 @@ public class SupportServiceTests
     {
         _supportRepoMock.Setup(r => r.GetTicketByIdAsync(It.IsAny<Guid>())).ReturnsAsync((SupportTicket?)null);
 
-        var result = await _service.GetTicketScreenshotUrlAsync(Guid.NewGuid());
+        var result = await _service.GetTicketScreenshotUrlAsync(Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
     }
@@ -261,7 +270,7 @@ public class SupportServiceTests
         var reportId = Guid.NewGuid();
         _supportRepoMock.Setup(r => r.GetReportByIdAsync(reportId)).ReturnsAsync((Report?)null);
 
-        var result = await _service.UpdateReportStatusAsync(reportId, "UnderReview");
+        var result = await _service.UpdateReportStatusAsync(reportId, "Resolved", "Investigating report", Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
@@ -274,7 +283,7 @@ public class SupportServiceTests
         var report = new Report { Id = reportId, Status = "Open" };
         _supportRepoMock.Setup(r => r.GetReportByIdAsync(reportId)).ReturnsAsync(report);
 
-        var result = await _service.UpdateReportStatusAsync(reportId, "Resolved");
+        var result = await _service.UpdateReportStatusAsync(reportId, "Resolved", "Verified evidence", Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         Assert.Equal("Resolved", report.Status);
@@ -291,14 +300,16 @@ public class SupportServiceTests
 
         _supportRepoMock.Setup(r => r.GetReportByIdAsync(reportId)).ReturnsAsync(report);
         _userManagerMock.Setup(m => m.FindByIdAsync(reportedUserId.ToString())).ReturnsAsync(reportedUser);
+        _userManagerMock.Setup(m => m.GetRolesAsync(reportedUser)).ReturnsAsync(new List<string> { AppRoles.User });
 
         var dto = new TakeReportActionDto
         {
             Action = AdminReportAction.WarnUser,
-            AdminNote = "Stop spamming rooms"
+            AdminNote = "Stop spamming rooms",
+            Reason = "First spam offense"
         };
 
-        var result = await _service.TakeActionOnReportAsync(reportId, dto);
+        var result = await _service.TakeActionOnReportAsync(reportId, dto, Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         Assert.Equal("Resolved", report.Status);
@@ -331,17 +342,24 @@ public class SupportServiceTests
 
         _supportRepoMock.Setup(r => r.GetReportByIdAsync(reportId)).ReturnsAsync(report);
         _userManagerMock.Setup(m => m.FindByIdAsync(reportedUserId.ToString())).ReturnsAsync(reportedUser);
+        _userManagerMock.Setup(m => m.GetRolesAsync(reportedUser)).ReturnsAsync(new List<string> { AppRoles.User });
         _userManagerMock.Setup(m => m.UpdateAsync(reportedUser)).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(m => m.UpdateSecurityStampAsync(reportedUser)).ReturnsAsync(IdentityResult.Success);
 
-        var dto = new TakeReportActionDto { Action = AdminReportAction.BanUser };
+        var dto = new TakeReportActionDto
+        {
+            Action = AdminReportAction.BanUser,
+            Reason = "Severe harassment violation"
+        };
 
-        var result = await _service.TakeActionOnReportAsync(reportId, dto);
+        var result = await _service.TakeActionOnReportAsync(reportId, dto, Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         Assert.Equal(UserStatus.Banned, reportedUser.Status);
         Assert.Null(reportedUser.RefreshToken);
         Assert.Null(reportedUser.FcmToken);
 
+        _userManagerMock.Verify(m => m.UpdateSecurityStampAsync(reportedUser), Times.Once);
         _realTimeNotifierMock.Verify(n => n.ForceLogoutAsync(reportedUserId, It.IsAny<string>()), Times.Once);
         _notificationRepoMock.Verify(n => n.AddAsync(It.Is<Notification>(notif =>
             notif.UserId == reportedUserId &&
@@ -438,7 +456,7 @@ public class SupportServiceTests
         var chat = new SupportChat { Id = chatId, Status = SupportChatStatus.Active, AdminId = "admin-1" };
         _supportRepoMock.Setup(r => r.GetChatByIdAsync(chatId)).ReturnsAsync(chat);
 
-        var result = await _service.CloseChatAsync(chatId, "admin-1");
+        var result = await _service.CloseChatAsync(chatId, "admin-1", callerIsAdmin: false);
 
         Assert.True(result.Succeeded);
         Assert.Equal(SupportChatStatus.Closed, chat.Status);
@@ -452,10 +470,10 @@ public class SupportServiceTests
         var owned = new SupportTicket { Id = Guid.NewGuid(), UserId = user.Id, User = user, Type = SupportTicketType.TechnicalProblem, Message = "Crash", ScreenshotPath = "Uploads/img/Support/t.png" };
         var anonymous = new SupportTicket { Id = Guid.NewGuid(), UserId = null, Type = SupportTicketType.GeneralQuestion, Message = "Hi", ContactEmail = "a@b.c" };
         var deleted = new SupportTicket { Id = Guid.NewGuid(), UserId = Guid.NewGuid(), User = null, Message = "Old", StatusCode = SupportTicketStatus.Resolved };
-        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10, false))
             .ReturnsAsync((3, new List<SupportTicket> { owned, anonymous, deleted }));
 
-        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10, callerIsAdmin: true);
 
         var items = result.Data!.ToList();
         Assert.True(result.Succeeded);
@@ -468,7 +486,6 @@ public class SupportServiceTests
         Assert.False(items[1].HasScreenshot);
         Assert.Equal("Deleted user", items[2].UserName);
         Assert.Equal(SupportTicketStatus.Resolved, items[2].Status);
-        // Listing tickets issues no URL and therefore writes no audit row.
         Assert.Empty(FileUrls.Calls);
     }
 
@@ -486,10 +503,10 @@ public class SupportServiceTests
             Type = type,
             Message = "Need help"
         };
-        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10, false))
             .ReturnsAsync((1, new List<SupportTicket> { ticket }));
 
-        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10, callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         var item = Assert.Single(result.Data!);
@@ -522,10 +539,10 @@ public class SupportServiceTests
             User = user,
             Message = "Need help"
         };
-        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10, false))
             .ReturnsAsync((1, new List<SupportTicket> { ticket }));
 
-        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10, callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         var item = Assert.Single(result.Data!);
@@ -563,10 +580,10 @@ public class SupportServiceTests
             Message = "Deleted user without shot",
             ScreenshotPath = null
         };
-        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10))
+        _supportRepoMock.Setup(r => r.GetPagedTicketsAsync(null, null, 1, 10, false))
             .ReturnsAsync((3, new List<SupportTicket> { anonymousWithScreenshot, deletedWithScreenshot, deletedWithoutScreenshot }));
 
-        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10);
+        var result = await _service.GetAdminTicketsAsync(null, null, 1, 10, callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         var items = result.Data!.ToList();
@@ -607,7 +624,7 @@ public class SupportServiceTests
         var ticket = new SupportTicket { Id = Guid.NewGuid(), Status = "Open" };
         _supportRepoMock.Setup(r => r.GetTicketByIdAsync(ticket.Id)).ReturnsAsync(ticket);
 
-        var result = await _service.UpdateTicketStatusAsync(ticket.Id, SupportTicketStatus.Resolved);
+        var result = await _service.UpdateTicketStatusAsync(ticket.Id, SupportTicketStatus.Resolved, "Issue fixed", Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         Assert.Equal("Resolved", ticket.Status);
@@ -623,8 +640,9 @@ public class SupportServiceTests
         var ticket = new SupportTicket { Id = Guid.NewGuid(), Status = "Resolved", StatusCode = SupportTicketStatus.Resolved, ResolvedAt = DateTime.UtcNow };
         _supportRepoMock.Setup(r => r.GetTicketByIdAsync(ticket.Id)).ReturnsAsync(ticket);
 
-        await _service.UpdateTicketStatusAsync(ticket.Id, SupportTicketStatus.Open);
+        var result = await _service.UpdateTicketStatusAsync(ticket.Id, SupportTicketStatus.Open, "User replied with more details", Guid.NewGuid(), callerIsAdmin: true);
 
+        Assert.True(result.Succeeded);
         Assert.Equal("Open", ticket.Status);
         Assert.Equal(SupportTicketStatus.Open, ticket.StatusCode);
         Assert.Null(ticket.ResolvedAt);
@@ -635,7 +653,7 @@ public class SupportServiceTests
     {
         _supportRepoMock.Setup(r => r.GetTicketByIdAsync(It.IsAny<Guid>())).ReturnsAsync((SupportTicket?)null);
 
-        var result = await _service.UpdateTicketStatusAsync(Guid.NewGuid(), SupportTicketStatus.Resolved);
+        var result = await _service.UpdateTicketStatusAsync(Guid.NewGuid(), SupportTicketStatus.Resolved, "Closing ticket", Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
         _supportRepoMock.Verify(r => r.UpdateTicketAsync(It.IsAny<SupportTicket>()), Times.Never);

@@ -8,11 +8,11 @@ namespace Cocorra.DAL.DTOS.AdminDto
     {
         public string Id { get; set; } = default!;
         public string FullName { get; set; } = default!;
-        public string Email { get; set; } = default!;
-        public int Age { get; set; }
-        public string MBTI { get; set; } = default!;
-        public string Status { get; set; } = default!; // Active, Pending, Banned
-        public DateTime CreatedAt { get; set; } // لو عندك في الداتابيز، لو مفيش شيلها
+        public string? Email { get; set; }
+        public int? Age { get; set; }
+        public string? MBTI { get; set; }
+        public string Status { get; set; } = default!;
+        public DateTime CreatedAt { get; set; }
         // Always null in user responses: a voice recording is private, and a link to it is only
         // issued (and audit-logged) by GET Admin/User/{id}/VoiceUrl. Kept for response shape.
         public string? VoicePath { get; set; }

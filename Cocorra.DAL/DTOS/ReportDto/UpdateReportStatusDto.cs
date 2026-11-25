@@ -7,5 +7,7 @@ namespace Cocorra.DAL.DTOS.ReportDto
         [Required]
         [MaxLength(50)]
         public string Status { get; set; } = string.Empty;
+
+        public string? Reason { get; set; }
     }
 }

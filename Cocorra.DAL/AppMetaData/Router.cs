@@ -44,6 +44,11 @@ namespace Cocorra.DAL.AppMetaData
             public const string SystemLogs = Prefix + "/SystemLogs";      // GET ?level=&search=&from=&to=&pageNumber=&pageSize=
             public const string AuditLogs = Prefix + "/AuditLogs";        // GET ?action=&actorUserId=&targetUserId=&search=&from=&to=&pageNumber=&pageSize=
             public const string BroadcastNotification = Prefix + "/BroadcastNotification"; // POST
+
+            public const string VoiceReviewsPending = Prefix + "/VoiceReviews/Pending";           // GET ?pageNumber=&pageSize=
+            public const string VoiceReviewVoiceUrl = Prefix + "/VoiceReviews/{id}/VoiceUrl";     // GET: id is an opaque review ref
+            public const string VoiceReviewDecision = Prefix + "/VoiceReviews/{id}/Decision";     // POST
+            public const string StaffActivity = Prefix + "/Staff/{userId:guid}/Activity";        // GET ?category=&actionType=&fromUtc=&toUtc=&targetUserId=&pageNumber=&pageSize=
         }
         public static class RolesRouting
         {
@@ -96,11 +101,13 @@ namespace Cocorra.DAL.AppMetaData
             public const string Prefix = Rule + "Support";
             public const string SubmitTicket = Prefix + "/Ticket"; // POST
             public const string SubmitReport = Prefix + "/Report"; // POST
-            public const string AdminReports = Prefix + "/admin/reports"; // GET
+            public const string AdminReports = Prefix + "/admin/reports"; // GET ?category=&status=&pageNumber=&pageSize=
+            public const string AdminReportById = Prefix + "/admin/reports/{id:guid}"; // GET: records a Report.Viewed audit entry
             public const string AdminUpdateReportStatus = Prefix + "/admin/reports/{id:guid}/status"; // PUT
             public const string AdminTakeReportAction = Prefix + "/admin/reports/{id:guid}/action"; // POST
             public const string AdminReportScreenshotUrl = Prefix + "/admin/reports/{id:guid}/screenshot-url"; // GET: 15-min presigned URL
             public const string AdminTickets = Prefix + "/admin/tickets"; // GET: paged
+            public const string AdminTicketById = Prefix + "/admin/tickets/{id:guid}"; // GET: records a Ticket.Viewed audit entry
             public const string AdminUpdateTicketStatus = Prefix + "/admin/tickets/{id:guid}/status"; // PUT
             public const string AdminTicketScreenshotUrl = Prefix + "/admin/tickets/{id:guid}/screenshot-url"; // GET: 15-min presigned URL
             public const string MyChat = Prefix + "/chat/my-chat"; // GET

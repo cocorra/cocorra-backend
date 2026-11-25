@@ -198,6 +198,7 @@ public class PushPayloadFormattingTests
         var userManagerMock = CreateMockUserManager();
         var mutedUser = new ApplicationUser { Id = reportedUserId, FcmToken = "muted_device_token" };
         userManagerMock.Setup(m => m.FindByIdAsync(reportedUserId.ToString())).ReturnsAsync(mutedUser);
+        userManagerMock.Setup(m => m.GetRolesAsync(mutedUser)).ReturnsAsync(new List<string> { AppRoles.User });
         userManagerMock.Setup(m => m.SetLockoutEnabledAsync(mutedUser, true)).ReturnsAsync(IdentityResult.Success);
         userManagerMock.Setup(m => m.SetLockoutEndDateAsync(mutedUser, It.IsAny<DateTimeOffset?>()))
             .ReturnsAsync(IdentityResult.Success);
@@ -217,7 +218,10 @@ public class PushPayloadFormattingTests
             new ConfigurationBuilder().Build());
 
         var result = await supportService.TakeActionOnReportAsync(
-            report.Id, new TakeReportActionDto { Action = AdminReportAction.Mute24h });
+            report.Id,
+            new TakeReportActionDto { Action = AdminReportAction.Mute24h, Reason = "Temporary mute for harassment" },
+            Guid.NewGuid(),
+            callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
 

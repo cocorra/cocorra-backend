@@ -1,8 +1,10 @@
+using Cocorra.API.Authorization;
 using Cocorra.API.Controllers;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.Analytics;
 using Cocorra.BLL.Services.AnalyticsService;
 using Cocorra.DAL.DTOS.AnalyticsDto;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
@@ -248,6 +250,19 @@ public class AnalyticsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(response, ok.Value);
+    }
+
+    [Fact]
+    public void Controller_HasAdminOnlyPolicyAndNoRolesAttribute()
+    {
+        var authorizeAttributes = typeof(AnalyticsController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .OfType<AuthorizeAttribute>()
+            .ToList();
+
+        var attr = Assert.Single(authorizeAttributes);
+        Assert.Equal(AuthPolicies.AdminOnly, attr.Policy);
+        Assert.True(string.IsNullOrEmpty(attr.Roles));
     }
 
     [Fact]

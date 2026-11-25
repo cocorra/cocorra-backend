@@ -30,15 +30,31 @@ namespace Cocorra.DAL.Repository.SupportRepository
             await _dbContext.SaveChangesAsync();
         }
 
-        public async Task<List<Report>> GetFilteredReportsAsync(ReportCategory? category, string? status)
+        private Task<List<Guid>> GetAdminRoleIdsAsync()
         {
-            var query = _dbContext.Reports
+            var normalizedAdmin = AppRoles.Admin.ToUpperInvariant();
+            return _dbContext.Roles
                 .AsNoTracking()
-                .Include(r => r.Reporter)
-                .Include(r => r.ReportedUser)
-                .Include(r => r.ReportedRoom)
-                    .ThenInclude(room => room!.Host)
-                .AsQueryable();
+                .Where(r => r.Name == AppRoles.Admin || r.NormalizedName == normalizedAdmin)
+                .Select(r => r.Id)
+                .ToListAsync();
+        }
+
+        public async Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(
+            ReportCategory? category, string? status, int pageNumber, int pageSize, bool excludeAdmins = false)
+        {
+            var query = _dbContext.Reports.AsNoTracking().AsQueryable();
+
+            if (excludeAdmins)
+            {
+                var adminRoleIds = await GetAdminRoleIdsAsync();
+                if (adminRoleIds.Count > 0)
+                {
+                    query = query.Where(r =>
+                        !_dbContext.UserRoles.Any(ur => ur.UserId == r.ReporterId && adminRoleIds.Contains(ur.RoleId))
+                        && (r.ReportedUserId == null || !_dbContext.UserRoles.Any(ur => ur.UserId == r.ReportedUserId.Value && adminRoleIds.Contains(ur.RoleId))));
+                }
+            }
 
             if (category.HasValue)
             {
@@ -50,9 +66,20 @@ namespace Cocorra.DAL.Repository.SupportRepository
                 query = query.Where(r => r.Status == status);
             }
 
-            return await query
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .Include(r => r.Reporter)
+                .Include(r => r.ReportedUser)
+                .Include(r => r.ReportedRoom)
+                    .ThenInclude(room => room!.Host)
                 .OrderByDescending(r => r.CreatedAt)
+                .ThenByDescending(r => r.Id)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
                 .ToListAsync();
+
+            return (totalCount, items);
         }
 
         public async Task<Report?> GetReportByIdAsync(Guid reportId)
@@ -60,15 +87,44 @@ namespace Cocorra.DAL.Repository.SupportRepository
             return await _dbContext.Reports.FindAsync(reportId);
         }
 
+        public async Task<Report?> GetReportDetailsByIdAsync(Guid reportId)
+        {
+            return await _dbContext.Reports
+                .AsNoTracking()
+                .Include(r => r.Reporter)
+                .Include(r => r.ReportedUser)
+                .Include(r => r.ReportedRoom)
+                    .ThenInclude(room => room!.Host)
+                .FirstOrDefaultAsync(r => r.Id == reportId);
+        }
+
         public async Task<SupportTicket?> GetTicketByIdAsync(Guid ticketId)
         {
             return await _dbContext.SupportTickets.FindAsync(ticketId);
         }
 
+        public async Task<SupportTicket?> GetTicketDetailsByIdAsync(Guid ticketId)
+        {
+            return await _dbContext.SupportTickets
+                .AsNoTracking()
+                .Include(t => t.User)
+                .FirstOrDefaultAsync(t => t.Id == ticketId);
+        }
+
         public async Task<(int TotalCount, List<SupportTicket> Items)> GetPagedTicketsAsync(
-            SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize)
+            SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize, bool excludeAdmins = false)
         {
             var query = _dbContext.SupportTickets.AsNoTracking().AsQueryable();
+
+            if (excludeAdmins)
+            {
+                var adminRoleIds = await GetAdminRoleIdsAsync();
+                if (adminRoleIds.Count > 0)
+                {
+                    query = query.Where(t =>
+                        t.UserId == null || !_dbContext.UserRoles.Any(ur => ur.UserId == t.UserId.Value && adminRoleIds.Contains(ur.RoleId)));
+                }
+            }
 
             if (type.HasValue)
                 query = query.Where(t => t.Type == type.Value);
@@ -149,11 +205,32 @@ namespace Cocorra.DAL.Repository.SupportRepository
             }
         }
 
+        public Task ReleaseActiveChatsForStaffAsync(string adminId) =>
+            ReleaseActiveChatsForStaffAsync(_dbContext, adminId);
+
+        public static async Task ReleaseActiveChatsForStaffAsync(AppDbContext dbContext, string adminId)
+        {
+            var activeChats = await dbContext.SupportChats
+                .Where(c => c.AdminId == adminId && c.Status == SupportChatStatus.Active)
+                .ToListAsync();
+
+            if (activeChats.Count == 0)
+                return;
+
+            foreach (var chat in activeChats)
+            {
+                chat.AdminId = null;
+                chat.Status = SupportChatStatus.Pending;
+            }
+
+            await dbContext.SaveChangesAsync();
+        }
+
         public async Task<List<SupportChat>> GetPendingChatsAsync(int pageNumber, int pageSize)
         {
             return await _dbContext.SupportChats
                 .Include(c => c.Messages)
-                .Where(c => c.Status == SupportChatStatus.Pending)
+                .Where(c => c.Status == SupportChatStatus.Pending && c.AdminId == null)
                 .OrderByDescending(c => c.CreatedAt)
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
@@ -163,7 +240,7 @@ namespace Cocorra.DAL.Repository.SupportRepository
         public async Task<int> GetPendingChatsCountAsync()
         {
             return await _dbContext.SupportChats
-                .CountAsync(c => c.Status == SupportChatStatus.Pending);
+                .CountAsync(c => c.Status == SupportChatStatus.Pending && c.AdminId == null);
         }
 
         public async Task<List<SupportChat>> GetAdminActiveChatsAsync(string adminId, int pageNumber, int pageSize)

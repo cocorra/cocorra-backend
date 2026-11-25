@@ -61,7 +61,7 @@ namespace Cocorra.DAL.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
-                    b.Property<DateTime>("CohortDate")
+                    b.Property<DateOnly>("CohortDate")
                         .HasColumnType("date");
 
                     b.Property<DateTime>("ComputedAtUtc")
@@ -106,7 +106,7 @@ namespace Cocorra.DAL.Migrations
                     b.Property<DateTime>("ComputedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateTime>("Date")
+                    b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
                     b.Property<Guid>("HostId")
@@ -144,7 +144,7 @@ namespace Cocorra.DAL.Migrations
                     b.Property<DateTime>("ComputedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateTime>("Date")
+                    b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
                     b.Property<int>("DistinctActiveHosts")
@@ -199,7 +199,7 @@ namespace Cocorra.DAL.Migrations
                     b.Property<DateTime>("ComputedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateTime>("Date")
+                    b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
                     b.Property<int>("DistinctJoiners")
@@ -254,7 +254,7 @@ namespace Cocorra.DAL.Migrations
                     b.Property<DateTime>("ComputedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateTime>("Date")
+                    b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
                     b.Property<string>("MetricKey")
@@ -452,8 +452,24 @@ namespace Cocorra.DAL.Migrations
                     b.Property<Guid?>("ActorUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Category")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<string>("DetailsJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EntityId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("EntityType")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("FromState")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("IpAddress")
                         .HasMaxLength(64)
@@ -462,12 +478,20 @@ namespace Cocorra.DAL.Migrations
                     b.Property<DateTime>("OccurredAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("TargetDisplay")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
                     b.Property<Guid?>("TargetUserId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ToState")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("UserAgent")
                         .HasMaxLength(512)

@@ -1,11 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using System.ComponentModel.DataAnnotations;
+using Cocorra.DAL.Enums;
 
 namespace Cocorra.DAL.DTOS.AdminDto
 {
     public class ChangeStatusDto
     {
-        public UserStatus NewStatus { get; set; }
+        [Required]
+        public UserStatus? NewStatus { get; set; }
+        public string? Reason { get; set; }
     }
 }

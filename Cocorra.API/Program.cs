@@ -211,9 +211,12 @@ builder.Services.AddScoped<IBlockedDevicesService, BlockedDevicesService>();
 builder.Services.AddScoped<IUploadVoice, UploadVoice>();
 builder.Services.AddScoped<IRoomRepository, RoomRepository>();
 builder.Services.AddScoped<IRoomService, RoomService>();
+builder.Services.AddSingleton<Cocorra.API.Hubs.IStaffConnectionRevoker, Cocorra.API.Hubs.StaffConnectionRevoker>();
 builder.Services.AddScoped<IAuthServices, AuthServices>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IRolesService, RolesService>();
+builder.Services.AddScoped<Cocorra.BLL.Services.VoiceReviewService.IVoiceReviewService, Cocorra.BLL.Services.VoiceReviewService.VoiceReviewService>();
+builder.Services.AddScoped<Cocorra.BLL.Services.StaffActivityService.IStaffActivityService, Cocorra.BLL.Services.StaffActivityService.StaffActivityService>();
 builder.Services.AddScoped<IFriendRepository, FriendRepository>();
 builder.Services.AddScoped<IFriendService, FriendService>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
@@ -518,7 +521,13 @@ builder.Services.AddAuthentication(options =>
             if (!string.IsNullOrEmpty(userId))
             {
                 var user = await userManager.FindByIdAsync(userId);
-                if (user != null && await userManager.IsLockedOutAsync(user))
+                if (user == null)
+                {
+                    context.Fail("User no longer exists.");
+                    return;
+                }
+
+                if (await userManager.IsLockedOutAsync(user))
                 {
                     context.Fail("User is locked out.");
                     return;
@@ -528,7 +537,7 @@ builder.Services.AddAuthentication(options =>
                 // rotates on both). Tokens without the claim predate it and are still accepted;
                 // they expire within a day of this check shipping.
                 var stampClaim = context.Principal?.FindFirst(SecurityStampClaim.Type)?.Value;
-                if (user != null && stampClaim != null && !SecurityStampClaim.Matches(user.SecurityStamp, stampClaim))
+                if (stampClaim != null && !SecurityStampClaim.Matches(user.SecurityStamp, stampClaim))
                 {
                     context.Fail("Token was issued before the last password change.");
                 }
@@ -537,27 +546,9 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// SECURITY: Custom Authorization Policies for Voice Verification flow.
-// Forcing VerificationStatus=Active as the default policy is the strictly better security posture.
-// Any existing Active users with old tokens (missing the claim) will need to re-login once.
-// This is acceptable because JWT expiry is 1 day, so the migration window is at most 24 hours.
-builder.Services.AddAuthorization(options =>
-{
-    // Default policy: Requires VerificationStatus=Active.
-    // Every bare [Authorize] attribute will enforce this automatically.
-    options.DefaultPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .RequireClaim("VerificationStatus", "Active")
-        .Build();
-
-    // Named policy for verification-stage endpoints (ReRecord, etc.).
-    // Allows Pending, ReRecord, AND Active users — so admins/active users can also reach it if needed.
-    options.AddPolicy("VerificationOnly", policy =>
-    {
-        policy.RequireAuthenticatedUser();
-        policy.RequireClaim("VerificationStatus", "Pending", "ReRecord", "Active");
-    });
-});
+// Every policy requires VerificationStatus=Active except VerificationOnly. See AuthPolicies for
+// why role checks must go through these policies rather than [Authorize(Roles = ...)].
+builder.Services.AddAuthorization(Cocorra.API.Authorization.AuthPolicies.Register);
 #endregion
 
 #region Rate Limiting

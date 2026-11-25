@@ -1,3 +1,4 @@
+using Cocorra.API.Authorization;
 using Cocorra.API.Filters;
 using Cocorra.BLL.Services.Analytics;
 using Cocorra.BLL.Services.AnalyticsService;
@@ -8,11 +9,10 @@ using Microsoft.AspNetCore.Mvc;
 namespace Cocorra.API.Controllers
 {
     /// <summary>
-    /// Data-Driven Decisions — analytics endpoints for Admins and Coaches.
+    /// Data-Driven Decisions — analytics endpoints for Admins.
     ///
     /// All endpoints:
-    ///   - Require a valid JWT with VerificationStatus=Active (default policy).
-    ///   - Require the Admin or Coach role.
+    ///   - Require a valid JWT with VerificationStatus=Active and the Admin role (AdminOnly policy).
     ///   - Default date range: last 30 days (resolved in the service layer).
     ///   - Range bounds (from/to) are instants and must carry an offset ("Z" or "+02:00");
     ///     offset-less values are rejected with 400. Response timestamps are UTC; day, week,
@@ -20,7 +20,7 @@ namespace Cocorra.API.Controllers
     ///   - Responses are cached for 10 minutes; simultaneous requests share one DB query.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
     [RequireUtcOffset]
     public class AnalyticsController : ControllerBase
     {
@@ -271,7 +271,6 @@ namespace Cocorra.API.Controllers
         /// moderation data, and a Coach has no need for platform-wide safety rates.
         /// </summary>
         [HttpGet(Router.AnalyticsRouting.ReportRate)]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> GetReportRateByCategory(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null)
@@ -288,7 +287,6 @@ namespace Cocorra.API.Controllers
         /// by contract, because a mean over a bimodal wait hides the users being harmed.
         /// </summary>
         [HttpGet(Router.AnalyticsRouting.ReviewLatency)]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> GetReviewLatency(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null)
@@ -305,7 +303,6 @@ namespace Cocorra.API.Controllers
         /// is no error tracking, so this counts problems users reported, not failures.
         /// </summary>
         [HttpGet(Router.AnalyticsRouting.Support)]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> GetSupportAnalytics(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null)
@@ -349,7 +346,6 @@ namespace Cocorra.API.Controllers
         /// the response carries the caveat that a difference is an association, not a cause.
         /// </summary>
         [HttpGet(Router.AnalyticsRouting.Mbti)]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> GetMbtiDichotomies(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null)
@@ -378,7 +374,6 @@ namespace Cocorra.API.Controllers
         /// stopped three days ago.
         /// </summary>
         [HttpGet(Router.AnalyticsRouting.SystemHealth)]
-        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> GetSystemHealth(CancellationToken cancellationToken)
         {
             var health = await _pipelineHealth.GetHealthAsync(cancellationToken);
@@ -394,7 +389,6 @@ namespace Cocorra.API.Controllers
         /// the run is capped, cancelled or fails partway.
         /// </summary>
         [HttpPost(Router.AnalyticsRouting.Backfill)]
-        [Authorize(Roles = "Admin")]
         [CalendarDates]
         public async Task<IActionResult> RunBackfill(
             [FromQuery] DateTime from,
@@ -415,7 +409,6 @@ namespace Cocorra.API.Controllers
         /// validation method, plus a trust level.
         /// </summary>
         [HttpGet(Router.AnalyticsRouting.MetricsRegistry)]
-        [Authorize(Roles = "Admin")]
         public IActionResult GetMetricsRegistry()
         {
             return Ok(new

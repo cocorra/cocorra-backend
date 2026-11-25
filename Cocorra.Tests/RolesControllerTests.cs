@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using Cocorra.API.Controllers;
+using Cocorra.API.Hubs;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.RolesService;
 using Cocorra.DAL.DTOS.AdminDto;
@@ -6,7 +8,6 @@ using Cocorra.DAL.DTOS.Role;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
-using System.Security.Claims;
 using Xunit;
 
 namespace Cocorra.Tests;
@@ -14,13 +15,16 @@ namespace Cocorra.Tests;
 public class RolesControllerTests
 {
     private readonly Mock<IRolesService> _rolesServiceMock = new();
+    private readonly Mock<IStaffConnectionRevoker> _revokerMock = new();
 
-    private RolesController CreateController()
+    private RolesController CreateController(Guid? adminId = null)
     {
-        var admin = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()) }, "Test"));
+        var claims = adminId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, adminId.Value.ToString()) }
+            : new[] { new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()) };
+        var admin = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
 
-        return new RolesController(_rolesServiceMock.Object)
+        return new RolesController(_rolesServiceMock.Object, _revokerMock.Object)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = admin } }
         };
@@ -69,9 +73,9 @@ public class RolesControllerTests
     }
 
     [Fact]
-    public async Task ManageUserRoles_Success_ReturnsOk()
+    public async Task ManageUserRoles_Success_ReturnsOkAndInvokesRevoker()
     {
-        var dto = new ManageUserRolesDto { UserId = Guid.NewGuid() };
+        var dto = new ManageUserRolesDto { UserId = Guid.NewGuid(), Roles = new List<string> { "Moderator" } };
         var serviceResponse = new Response<string>
         {
             Succeeded = true,
@@ -86,6 +90,41 @@ public class RolesControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(serviceResponse, ok.Value);
+        _revokerMock.Verify(r => r.RevokeAsync(dto.UserId), Times.Once);
+    }
+
+    [Fact]
+    public async Task ManageUserRoles_Failure_ReturnsBadRequestWithoutRevoking()
+    {
+        var dto = new ManageUserRolesDto { UserId = Guid.NewGuid(), Roles = new List<string> { "Admin" } };
+        var serviceResponse = new Response<string>
+        {
+            Succeeded = false,
+            StatusCode = System.Net.HttpStatusCode.BadRequest,
+            Message = "Cannot assign the Admin role through this endpoint."
+        };
+
+        _rolesServiceMock.Setup(s => s.ManageUserRolesAsync(dto, It.IsAny<Guid>())).ReturnsAsync(serviceResponse);
+
+        var controller = CreateController();
+        var result = await controller.ManageUserRoles(dto);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(serviceResponse, badRequest.Value);
+        _revokerMock.Verify(r => r.RevokeAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ManageUserRoles_InvalidModelState_ReturnsBadRequestWithoutRevoking()
+    {
+        var controller = CreateController();
+        controller.ModelState.AddModelError("Roles", "Required");
+
+        var result = await controller.ManageUserRoles(new ManageUserRolesDto { UserId = Guid.NewGuid() });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        _rolesServiceMock.Verify(s => s.ManageUserRolesAsync(It.IsAny<ManageUserRolesDto>(), It.IsAny<Guid>()), Times.Never);
+        _revokerMock.Verify(r => r.RevokeAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]
@@ -112,7 +151,7 @@ public class RolesControllerTests
     }
 
     [Fact]
-    public async Task CreateUser_Success_ReturnsOk()
+    public async Task CreateUser_Success_ReturnsOkWithoutRevoking()
     {
         var dto = new CreateUserDto
         {
@@ -137,10 +176,11 @@ public class RolesControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(serviceResponse, ok.Value);
+        _revokerMock.Verify(r => r.RevokeAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]
-    public async Task CreateUser_Failure_ReturnsBadRequest()
+    public async Task CreateUser_Failure_ReturnsBadRequestWithoutRevoking()
     {
         var dto = new CreateUserDto { Email = "fail@example.com" };
         var serviceResponse = new Response<UserDto>
@@ -157,5 +197,6 @@ public class RolesControllerTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal(serviceResponse, badRequest.Value);
+        _revokerMock.Verify(r => r.RevokeAsync(It.IsAny<Guid>()), Times.Never);
     }
 }

@@ -1,4 +1,3 @@
-using Cocorra.Tests.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,9 +7,9 @@ using System.Threading.Tasks;
 using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.RolesService;
 using Cocorra.DAL.Data;
-using Cocorra.DAL.DTOS.AdminDto;
 using Cocorra.DAL.DTOS.Role;
 using Cocorra.DAL.Models;
+using Cocorra.Tests.Helpers;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -70,7 +69,7 @@ public class RolesServiceAuditTests : IDisposable
         var (service, roleMgr, userMgr) = CreateService();
 
         await roleMgr.CreateAsync(new IdentityRole<Guid>("OldRole"));
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("NewRole"));
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.RecordReviewer));
 
         var user = new ApplicationUser
         {
@@ -87,7 +86,7 @@ public class RolesServiceAuditTests : IDisposable
         var dto = new ManageUserRolesDto
         {
             UserId = user.Id,
-            Roles = new List<string> { "NewRole" }
+            Roles = new List<string> { AppRoles.RecordReviewer }
         };
 
         AuditEntry? capturedEntry = null;
@@ -105,6 +104,9 @@ public class RolesServiceAuditTests : IDisposable
         Assert.Equal(actorUserId, capturedEntry.ActorUserId);
         Assert.Equal(user.Id, capturedEntry.TargetUserId);
         Assert.Equal("audited_user@cocorra.com", capturedEntry.TargetDisplay);
+        Assert.Equal(AuditCategories.Roles, capturedEntry.Category);
+        Assert.Equal(AuditEntityTypes.User, capturedEntry.EntityType);
+        Assert.Equal(user.Id.ToString(), capturedEntry.EntityId);
 
         var json = JsonSerializer.Serialize(capturedEntry.Details, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         using var doc = JsonDocument.Parse(json);
@@ -112,7 +114,7 @@ public class RolesServiceAuditTests : IDisposable
         var added = doc.RootElement.GetProperty("added").EnumerateArray().Select(x => x.GetString()).ToList();
         var removed = doc.RootElement.GetProperty("removed").EnumerateArray().Select(x => x.GetString()).ToList();
 
-        Assert.Equal(new[] { "NewRole" }, added);
+        Assert.Equal(new[] { AppRoles.RecordReviewer }, added);
         Assert.Equal(new[] { "OldRole" }, removed);
     }
 
@@ -153,8 +155,8 @@ public class RolesServiceAuditTests : IDisposable
     {
         var (service, roleMgr, userMgr) = CreateService();
 
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("Admin"));
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("Moderator"));
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Admin));
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Moderator));
 
         var adminUser = new ApplicationUser
         {
@@ -165,12 +167,12 @@ public class RolesServiceAuditTests : IDisposable
             LastName = "Target"
         };
         await userMgr.CreateAsync(adminUser);
-        await userMgr.AddToRoleAsync(adminUser, "Admin");
+        await userMgr.AddToRoleAsync(adminUser, AppRoles.Admin);
 
         var dto = new ManageUserRolesDto
         {
             UserId = adminUser.Id,
-            Roles = new List<string> { "Moderator" }
+            Roles = new List<string> { AppRoles.Moderator }
         };
 
         var result = await service.ManageUserRolesAsync(dto, Guid.NewGuid());
@@ -186,7 +188,7 @@ public class RolesServiceAuditTests : IDisposable
     {
         var (service, roleMgr, _) = CreateService();
 
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Coach));
 
         var actorUserId = Guid.NewGuid();
         var dto = new CreateUserDto
@@ -195,7 +197,7 @@ public class RolesServiceAuditTests : IDisposable
             LastName = "CoachLastName",
             Email = "coach_created@cocorra.com",
             Password = "Password123!",
-            Role = "Coach"
+            Role = AppRoles.Coach
         };
 
         AuditEntry? capturedEntry = null;
@@ -214,12 +216,37 @@ public class RolesServiceAuditTests : IDisposable
         Assert.Equal(actorUserId, capturedEntry.ActorUserId);
         Assert.Equal(Guid.Parse(result.Data!.Id), capturedEntry.TargetUserId);
         Assert.Equal("coach_created@cocorra.com", capturedEntry.TargetDisplay);
+        Assert.Equal(AuditCategories.Roles, capturedEntry.Category);
+        Assert.Equal(AuditEntityTypes.User, capturedEntry.EntityType);
+        Assert.Equal(result.Data!.Id, capturedEntry.EntityId);
 
         var json = JsonSerializer.Serialize(capturedEntry.Details, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         using var doc = JsonDocument.Parse(json);
         var roles = doc.RootElement.GetProperty("roles").EnumerateArray().Select(x => x.GetString()).ToList();
 
-        Assert.Equal(new[] { "Coach" }, roles);
+        Assert.Equal(new[] { AppRoles.Coach }, roles);
+    }
+
+    [Fact]
+    public async Task CreateUserWithRoleAsync_AdminRoleRefused_RecordsNothing()
+    {
+        var (service, roleMgr, _) = CreateService();
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Admin));
+
+        var dto = new CreateUserDto
+        {
+            FirstName = "Refused",
+            LastName = "Admin",
+            Email = "refused_admin@cocorra.com",
+            Password = "Password123!",
+            Role = AppRoles.Admin
+        };
+
+        var result = await service.CreateUserWithRoleAsync(dto, Guid.NewGuid());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        _auditLogMock.Verify(a => a.RecordAsync(It.IsAny<AuditEntry>()), Times.Never);
     }
 
     [Fact]
@@ -227,15 +254,15 @@ public class RolesServiceAuditTests : IDisposable
     {
         var (service, roleMgr, _) = CreateService();
 
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Coach));
 
         var dto = new CreateUserDto
         {
             FirstName = "Weak",
             LastName = "PasswordUser",
             Email = "weak_pw@cocorra.com",
-            Password = "123", // Fails ASP.NET Identity default password complexity
-            Role = "Coach"
+            Password = "123",
+            Role = AppRoles.Coach
         };
 
         var result = await service.CreateUserWithRoleAsync(dto, Guid.NewGuid());
@@ -250,8 +277,8 @@ public class RolesServiceAuditTests : IDisposable
     public async Task UpdateRoleDisplayNameAsync_SetThenReset_KeepsRoleNameAndRecordsEachChange()
     {
         var (service, roleMgr, _) = CreateService();
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
-        var coach = await roleMgr.FindByNameAsync("Coach");
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Coach));
+        var coach = await roleMgr.FindByNameAsync(AppRoles.Coach);
         var actorUserId = Guid.NewGuid();
 
         var captured = new List<AuditEntry>();
@@ -262,17 +289,17 @@ public class RolesServiceAuditTests : IDisposable
         var set = await service.UpdateRoleDisplayNameAsync(coach!.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "  Mentor  " }, actorUserId);
 
         Assert.True(set.Succeeded);
-        Assert.Equal("Coach", set.Data!.Name);
+        Assert.Equal(AppRoles.Coach, set.Data!.Name);
         Assert.Equal("Mentor", set.Data.DisplayName);
-        Assert.True(await roleMgr.RoleExistsAsync("Coach"));
+        Assert.True(await roleMgr.RoleExistsAsync(AppRoles.Coach));
 
         var listed = await service.GetRolesAsync();
-        Assert.Contains(listed.Data!, r => r.Name == "Coach" && r.DisplayName == "Mentor");
+        Assert.Contains(listed.Data!, r => r.Name == AppRoles.Coach && r.DisplayName == "Mentor");
 
         var reset = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "" }, actorUserId);
 
         Assert.True(reset.Succeeded);
-        Assert.Equal("Coach", reset.Data!.DisplayName);
+        Assert.Equal(AppRoles.Coach, reset.Data!.DisplayName);
 
         Assert.Equal(2, captured.Count);
         Assert.All(captured, e =>
@@ -280,23 +307,30 @@ public class RolesServiceAuditTests : IDisposable
             Assert.Equal(AuditActions.RoleDisplayNameChanged, e.Action);
             Assert.Equal(actorUserId, e.ActorUserId);
             Assert.Null(e.TargetUserId);
-            Assert.Equal("Coach", e.TargetDisplay);
+            Assert.Equal(AppRoles.Coach, e.TargetDisplay);
+            Assert.Equal(AuditCategories.Roles, e.Category);
+            Assert.Equal(AuditEntityTypes.Role, e.EntityType);
+            Assert.Equal(coach.Id.ToString(), e.EntityId);
         });
+        Assert.Equal(AppRoles.Coach, captured[0].FromState);
+        Assert.Equal("Mentor", captured[0].ToState);
+        Assert.Equal("Mentor", captured[1].FromState);
+        Assert.Equal(AppRoles.Coach, captured[1].ToState);
 
         var json = JsonSerializer.Serialize(captured[1].Details, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("Mentor", doc.RootElement.GetProperty("from").GetString());
-        Assert.Equal("Coach", doc.RootElement.GetProperty("to").GetString());
+        Assert.Equal(AppRoles.Coach, doc.RootElement.GetProperty("to").GetString());
     }
 
     [Fact]
     public async Task UpdateRoleDisplayNameAsync_NameShownByAnotherRole_RejectsAndRecordsNothing()
     {
         var (service, roleMgr, _) = CreateService();
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("Coach"));
-        await roleMgr.CreateAsync(new IdentityRole<Guid>("Moderator"));
-        var coach = await roleMgr.FindByNameAsync("Coach");
-        var moderator = await roleMgr.FindByNameAsync("Moderator");
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Coach));
+        await roleMgr.CreateAsync(new IdentityRole<Guid>(AppRoles.Moderator));
+        var coach = await roleMgr.FindByNameAsync(AppRoles.Coach);
+        var moderator = await roleMgr.FindByNameAsync(AppRoles.Moderator);
 
         var sameAsName = await service.UpdateRoleDisplayNameAsync(coach!.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "moderator" }, Guid.NewGuid());
         Assert.False(sameAsName.Succeeded);
@@ -311,7 +345,7 @@ public class RolesServiceAuditTests : IDisposable
         var tooLong = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = new string('x', 51) }, Guid.NewGuid());
         Assert.False(tooLong.Succeeded);
 
-        var unchanged = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = "Coach" }, Guid.NewGuid());
+        var unchanged = await service.UpdateRoleDisplayNameAsync(coach.Id.ToString(), new UpdateRoleDisplayNameDto { DisplayName = AppRoles.Coach }, Guid.NewGuid());
         Assert.False(unchanged.Succeeded);
 
         _auditLogMock.Verify(a => a.RecordAsync(It.IsAny<AuditEntry>()), Times.Never);

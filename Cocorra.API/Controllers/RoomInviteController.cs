@@ -1,7 +1,9 @@
+using Cocorra.API.Authorization;
 using Cocorra.API.Filters;
 using Cocorra.BLL.Services.RoomInviteService;
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS.RoomInviteDto;
+using Cocorra.DAL.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -66,11 +68,11 @@ namespace Cocorra.API.Controllers
             if (!Guid.TryParse(userIdString, out Guid userId)) return Unauthorized();
 
             // Inviter-or-host-or-admin is decided in the service, which knows the room's host.
-            var result = await _inviteService.RevokeInviteAsync(inviteCode, userId, User.IsInRole("Admin"));
+            var result = await _inviteService.RevokeInviteAsync(inviteCode, userId, User.IsInRole(AppRoles.Admin));
             return StatusCode((int)result.StatusCode, result);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Policy = AuthPolicies.AdminOnly)]
         [HttpGet(Router.AdminRouting.InviteStats)]
         [RequireUtcOffset]
         public async Task<IActionResult> GetStats(

@@ -16,6 +16,8 @@ namespace Cocorra.DAL.DTOS.AdminDto
         public List<Guid> UserIds { get; set; } = new();
 
         [Required]
-        public UserStatus NewStatus { get; set; }
+        public UserStatus? NewStatus { get; set; }
+
+        public string? Reason { get; set; }
     }
 }
