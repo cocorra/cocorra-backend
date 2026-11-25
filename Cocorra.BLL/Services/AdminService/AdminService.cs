@@ -528,11 +528,7 @@ namespace Cocorra.BLL.Services.AdminService
                 user.VoicePath = null;
 
                 if (!callerIsAdmin)
-                {
                     user.Email = null;
-                    user.Age = null;
-                    user.MBTI = null;
-                }
             }
 
             return Paginated(list, totalCount, page, pageSize);
@@ -553,8 +549,8 @@ namespace Cocorra.BLL.Services.AdminService
                 Id = user.Id.ToString(),
                 FullName = $"{user.FirstName} {user.LastName}",
                 Email = callerIsAdmin ? user.Email : null,
-                Age = callerIsAdmin ? user.Age : null,
-                MBTI = callerIsAdmin ? (user.MBTI ?? "N/A") : null,
+                Age = user.Age,
+                MBTI = user.MBTI ?? "N/A",
                 Status = user.Status.ToString(),
                 CreatedAt = user.CreatedAt,
                 VoicePath = null,

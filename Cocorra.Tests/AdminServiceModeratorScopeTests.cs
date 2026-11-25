@@ -89,7 +89,7 @@ public class AdminServiceModeratorScopeTests : IDisposable
         UserStatus status,
         string role,
         int age = 26,
-        string mbti = "ENFP")
+        string? mbti = "ENFP")
     {
         using var scope = _services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
@@ -154,7 +154,7 @@ public class AdminServiceModeratorScopeTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAllUsersAsync_AsModerator_ExcludesAdminsFromRowsAndTotalCountAndMasksPii()
+    public async Task GetAllUsersAsync_AsModerator_ExcludesAdminsFromRowsAndTotalCountAndMasksEmailButShowsAgeAndMbti()
     {
         var admin = await SeedUserAsync("Alice", "Admin", "admin@cocorra.test", UserStatus.Active, AppRoles.Admin, age: 35, mbti: "ENTJ");
         var plain = await SeedUserAsync("Bob", "Member", "bob@cocorra.test", UserStatus.Active, AppRoles.User, age: 27, mbti: "INFP");
@@ -170,14 +170,17 @@ public class AdminServiceModeratorScopeTests : IDisposable
             Assert.Equal(2, modResult.TotalCount);
             Assert.Equal(2, modUsers.Count);
             Assert.DoesNotContain(modUsers, u => u.Id == admin.Id.ToString());
-            Assert.Contains(modUsers, u => u.Id == plain.Id.ToString());
-            Assert.Contains(modUsers, u => u.Id == coach.Id.ToString());
-            Assert.All(modUsers, u =>
-            {
-                Assert.Null(u.Email);
-                Assert.Null(u.Age);
-                Assert.Null(u.MBTI);
-            });
+            Assert.All(modUsers, u => Assert.Null(u.Email));
+
+            var bobForMod = modUsers.Single(u => u.Id == plain.Id.ToString());
+            Assert.Null(bobForMod.Email);
+            Assert.Equal(27, bobForMod.Age);
+            Assert.Equal("INFP", bobForMod.MBTI);
+
+            var caraForMod = modUsers.Single(u => u.Id == coach.Id.ToString());
+            Assert.Null(caraForMod.Email);
+            Assert.Equal(31, caraForMod.Age);
+            Assert.Equal("ENFJ", caraForMod.MBTI);
 
             var adminResult = await service.GetAllUsersAsync(search: null, page: 1, pageSize: 10, callerIsAdmin: true);
             var adminUsers = adminResult.Data!.ToList();
@@ -229,14 +232,36 @@ public class AdminServiceModeratorScopeTests : IDisposable
             var modPlainDetail = await service.GetUserByIdAsync(plain.Id, callerIsAdmin: false);
             Assert.True(modPlainDetail.Succeeded);
             Assert.Null(modPlainDetail.Data!.Email);
-            Assert.Null(modPlainDetail.Data.Age);
-            Assert.Null(modPlainDetail.Data.MBTI);
+            Assert.Equal(24, modPlainDetail.Data.Age);
+            Assert.Equal("ISTP", modPlainDetail.Data.MBTI);
 
             var adminSelfDetail = await service.GetUserByIdAsync(admin.Id, callerIsAdmin: true);
             Assert.True(adminSelfDetail.Succeeded);
             Assert.Equal("root@cocorra.test", adminSelfDetail.Data!.Email);
             Assert.Equal(40, adminSelfDetail.Data.Age);
             Assert.Equal("INTJ", adminSelfDetail.Data.MBTI);
+        }
+    }
+
+    [Fact]
+    public async Task GetUserByIdAsync_AsModerator_UserWithNullMbtiReturnsFallbackMbtiAndAge()
+    {
+        var plain = await SeedUserAsync("Lina", "Member", "lina@cocorra.test", UserStatus.Active, AppRoles.User, age: 29, mbti: null);
+
+        var (service, _, scope) = CreateServiceScope();
+        using (scope)
+        {
+            var modDetail = await service.GetUserByIdAsync(plain.Id, callerIsAdmin: false);
+            Assert.True(modDetail.Succeeded);
+            Assert.Null(modDetail.Data!.Email);
+            Assert.Equal(29, modDetail.Data.Age);
+            Assert.Equal("N/A", modDetail.Data.MBTI);
+
+            var adminDetail = await service.GetUserByIdAsync(plain.Id, callerIsAdmin: true);
+            Assert.True(adminDetail.Succeeded);
+            Assert.Equal("lina@cocorra.test", adminDetail.Data!.Email);
+            Assert.Equal(29, adminDetail.Data.Age);
+            Assert.Equal("N/A", adminDetail.Data.MBTI);
         }
     }
 
