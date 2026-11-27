@@ -817,6 +817,7 @@ public class SupportChatScopingTests : IDisposable
             _inner.GetPagedReportsAsync(category, status, pageNumber, pageSize, excludeAdmins);
         public Task<Report?> GetReportByIdAsync(Guid reportId) => _inner.GetReportByIdAsync(reportId);
         public Task<Report?> GetReportDetailsByIdAsync(Guid reportId) => _inner.GetReportDetailsByIdAsync(reportId);
+        public Task<Guid?> GetRoomHostIdAsync(Guid roomId) => _inner.GetRoomHostIdAsync(roomId);
         public Task<SupportTicket?> GetTicketByIdAsync(Guid ticketId) => _inner.GetTicketByIdAsync(ticketId);
         public Task<SupportTicket?> GetTicketDetailsByIdAsync(Guid ticketId) => _inner.GetTicketDetailsByIdAsync(ticketId);
         public Task<(int TotalCount, List<SupportTicket> Items)> GetPagedTicketsAsync(SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize, bool excludeAdmins = false) =>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 using Cocorra.BLL.Services.AdminService;
 using Cocorra.BLL.Services.AuditLogs;
@@ -89,7 +90,21 @@ public class AdminServiceModeratorScopeTests : IDisposable
         UserStatus status,
         string role,
         int age = 26,
-        string? mbti = "ENFP")
+        string? mbti = "ENFP",
+        string? fcmToken = null,
+        DateTimeOffset? lockoutEnd = null) =>
+        await SeedUserWithRolesAsync(firstName, lastName, email, status, new[] { role }, age, mbti, fcmToken, lockoutEnd);
+
+    private async Task<ApplicationUser> SeedUserWithRolesAsync(
+        string firstName,
+        string lastName,
+        string email,
+        UserStatus status,
+        IEnumerable<string> roles,
+        int age = 26,
+        string? mbti = "ENFP",
+        string? fcmToken = null,
+        DateTimeOffset? lockoutEnd = null)
     {
         using var scope = _services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
@@ -103,12 +118,25 @@ public class AdminServiceModeratorScopeTests : IDisposable
             Age = age,
             MBTI = mbti,
             Status = status,
+            FcmToken = fcmToken,
             CreatedAt = DateTime.UtcNow
         };
         var created = await userManager.CreateAsync(user);
         Assert.True(created.Succeeded);
-        var addedRole = await userManager.AddToRoleAsync(user, role);
-        Assert.True(addedRole.Succeeded);
+        foreach (var role in roles)
+        {
+            var addedRole = await userManager.AddToRoleAsync(user, role);
+            Assert.True(addedRole.Succeeded);
+        }
+
+        if (lockoutEnd.HasValue)
+        {
+            var lockoutEnabled = await userManager.SetLockoutEnabledAsync(user, true);
+            Assert.True(lockoutEnabled.Succeeded);
+            var lockoutSet = await userManager.SetLockoutEndDateAsync(user, lockoutEnd);
+            Assert.True(lockoutSet.Succeeded);
+        }
+
         return (await userManager.FindByIdAsync(user.Id.ToString()))!;
     }
 
@@ -266,14 +294,19 @@ public class AdminServiceModeratorScopeTests : IDisposable
     }
 
     [Theory]
-    [InlineData(AppRoles.Admin)]
     [InlineData(AppRoles.Moderator)]
     [InlineData(AppRoles.RecordReviewer)]
     [InlineData(AppRoles.Coach)]
-    public async Task ChangeUserStatusAsync_AsModeratorTargetingProtectedRole_Returns403AndLeavesStateAndAuditUntouched(string targetRole)
+    public async Task ChangeUserStatusAsync_AsModeratorTargetingStaffRole_Returns403AndLeavesStateAndAuditUntouched(string targetRole)
     {
         var actorId = Guid.NewGuid();
-        var target = await SeedUserAsync("Staff", targetRole, $"{targetRole.ToLowerInvariant()}@cocorra.test", UserStatus.Active, targetRole);
+        var target = await SeedUserAsync(
+            "Staff",
+            targetRole,
+            $"{targetRole.ToLowerInvariant()}@cocorra.test",
+            UserStatus.Active,
+            targetRole,
+            fcmToken: "staff-fcm");
         var originalStamp = target.SecurityStamp;
 
         var (service, _, scope) = CreateServiceScope();
@@ -283,6 +316,7 @@ public class AdminServiceModeratorScopeTests : IDisposable
 
             Assert.False(result.Succeeded);
             Assert.Equal(HttpStatusCode.Forbidden, result.StatusCode);
+            Assert.Equal("Moderators cannot change the status of staff or admin accounts.", result.Message);
             Assert.False(result.SessionRevoked);
         }
 
@@ -290,6 +324,273 @@ public class AdminServiceModeratorScopeTests : IDisposable
         Assert.Equal(UserStatus.Active, reloaded.Status);
         Assert.Equal(originalStamp, reloaded.SecurityStamp);
         Assert.Empty(await ReadAllAuditLogsAsync());
+        _emailServiceMock.Verify(
+            e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _pushServiceMock.Verify(
+            p => p.SendPushNotificationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(UserStatus.Active, UserStatus.Banned)]
+    [InlineData(UserStatus.Banned, UserStatus.Active)]
+    [InlineData(UserStatus.Active, UserStatus.Active)]
+    [InlineData(UserStatus.Banned, UserStatus.Banned)]
+    public async Task ChangeUserStatusAsync_AsModeratorTargetingAdmin_IndistinguishableFromMissingUserAndLeavesStateUntouched(
+        UserStatus initialStatus, UserStatus newStatus)
+    {
+        var actorId = Guid.NewGuid();
+        var initialLockoutEnd = initialStatus == UserStatus.Banned
+            ? new DateTimeOffset(2099, 1, 1, 0, 0, 0, TimeSpan.Zero)
+            : (DateTimeOffset?)null;
+        var admin = await SeedUserAsync(
+            "Hidden",
+            "Admin",
+            $"admin_{initialStatus}_{newStatus}@cocorra.test",
+            initialStatus,
+            AppRoles.Admin,
+            fcmToken: "admin-fcm",
+            lockoutEnd: initialLockoutEnd);
+        var originalStamp = admin.SecurityStamp;
+        var originalLockoutEnabled = admin.LockoutEnabled;
+        var originalLockoutEnd = admin.LockoutEnd;
+
+        var (service, _, scope) = CreateServiceScope();
+        using (scope)
+        {
+            var adminResult = await service.ChangeUserStatusAsync(admin.Id, newStatus, "Attempt on admin", actorId, callerIsAdmin: false);
+            var missingResult = await service.ChangeUserStatusAsync(Guid.NewGuid(), newStatus, "Attempt on missing user", actorId, callerIsAdmin: false);
+
+            Assert.False(adminResult.Succeeded);
+            Assert.False(missingResult.Succeeded);
+            Assert.Equal(HttpStatusCode.NotFound, adminResult.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, missingResult.StatusCode);
+            Assert.Equal("User not found", adminResult.Message);
+            Assert.Equal(missingResult.Message, adminResult.Message);
+            Assert.False(adminResult.SessionRevoked);
+            Assert.False(missingResult.SessionRevoked);
+        }
+
+        var reloaded = await ReloadUserAsync(admin.Id);
+        Assert.Equal(initialStatus, reloaded.Status);
+        Assert.Equal(originalStamp, reloaded.SecurityStamp);
+        Assert.Equal(originalLockoutEnabled, reloaded.LockoutEnabled);
+        Assert.Equal(originalLockoutEnd, reloaded.LockoutEnd);
+        Assert.Empty(await ReadAllAuditLogsAsync());
+        _emailServiceMock.Verify(
+            e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _pushServiceMock.Verify(
+            p => p.SendPushNotificationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ChangeUserStatusAsync_AsModeratorTargetingAdminAndModeratorMultiRole_ReturnsNotFoundOverForbidden()
+    {
+        var actorId = Guid.NewGuid();
+        var target = await SeedUserWithRolesAsync(
+            "Dual",
+            "AdminMod",
+            "dual_admin_mod@cocorra.test",
+            UserStatus.Active,
+            new[] { AppRoles.Moderator, AppRoles.Admin },
+            fcmToken: "dual-fcm");
+        var originalStamp = target.SecurityStamp;
+        var originalLockoutEnabled = target.LockoutEnabled;
+        var originalLockoutEnd = target.LockoutEnd;
+
+        var (service, _, scope) = CreateServiceScope();
+        using (scope)
+        {
+            var result = await service.ChangeUserStatusAsync(target.Id, UserStatus.Banned, "Attempt on dual-role admin", actorId, callerIsAdmin: false);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+            Assert.Equal("User not found", result.Message);
+            Assert.False(result.SessionRevoked);
+        }
+
+        var reloaded = await ReloadUserAsync(target.Id);
+        Assert.Equal(UserStatus.Active, reloaded.Status);
+        Assert.Equal(originalStamp, reloaded.SecurityStamp);
+        Assert.Equal(originalLockoutEnabled, reloaded.LockoutEnabled);
+        Assert.Equal(originalLockoutEnd, reloaded.LockoutEnd);
+        Assert.Empty(await ReadAllAuditLogsAsync());
+        _emailServiceMock.Verify(
+            e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _pushServiceMock.Verify(
+            p => p.SendPushNotificationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ChangeUserStatusAsync_AsAdminTargetingAdmin_ReturnsBadRequestAndLeavesStateUntouched()
+    {
+        var actingAdminId = Guid.NewGuid();
+        var targetAdmin = await SeedUserAsync(
+            "Peer",
+            "Admin",
+            "peer_admin@cocorra.test",
+            UserStatus.Active,
+            AppRoles.Admin,
+            fcmToken: "peer-admin-fcm");
+        var originalStamp = targetAdmin.SecurityStamp;
+        var originalLockoutEnabled = targetAdmin.LockoutEnabled;
+        var originalLockoutEnd = targetAdmin.LockoutEnd;
+
+        var (service, _, scope) = CreateServiceScope();
+        using (scope)
+        {
+            var result = await service.ChangeUserStatusAsync(targetAdmin.Id, UserStatus.Banned, "Admin peer attempt", actingAdminId, callerIsAdmin: true);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+            Assert.Equal("Cannot perform actions on an Admin account.", result.Message);
+            Assert.False(result.SessionRevoked);
+        }
+
+        var reloaded = await ReloadUserAsync(targetAdmin.Id);
+        Assert.Equal(UserStatus.Active, reloaded.Status);
+        Assert.Equal(originalStamp, reloaded.SecurityStamp);
+        Assert.Equal(originalLockoutEnabled, reloaded.LockoutEnabled);
+        Assert.Equal(originalLockoutEnd, reloaded.LockoutEnd);
+        Assert.Empty(await ReadAllAuditLogsAsync());
+        _emailServiceMock.Verify(
+            e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _pushServiceMock.Verify(
+            p => p.SendPushNotificationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task GetDashboardStatsAsync_MixedPopulation_ExcludesAdminsForModeratorAndMatchesUserList()
+    {
+        await SeedUserAsync("Admin", "Active1", "admin_a1@cocorra.test", UserStatus.Active, AppRoles.Admin);
+        await SeedUserAsync("Admin", "Active2", "admin_a2@cocorra.test", UserStatus.Active, AppRoles.Admin);
+        await SeedUserAsync("Admin", "Pending", "admin_p@cocorra.test", UserStatus.Pending, AppRoles.Admin);
+        await SeedUserAsync("Admin", "Banned", "admin_b@cocorra.test", UserStatus.Banned, AppRoles.Admin);
+        await SeedUserAsync("Admin", "Rejected", "admin_r@cocorra.test", UserStatus.Rejected, AppRoles.Admin);
+        await SeedUserAsync("Admin", "ReRecord", "admin_rr@cocorra.test", UserStatus.ReRecord, AppRoles.Admin);
+
+        await SeedUserAsync("Plain", "Active", "u_a@cocorra.test", UserStatus.Active, AppRoles.User);
+        await SeedUserAsync("Mod", "Active", "m_a@cocorra.test", UserStatus.Active, AppRoles.Moderator);
+        await SeedUserAsync("Coach", "Active", "c_a@cocorra.test", UserStatus.Active, AppRoles.Coach);
+        await SeedUserAsync("Reviewer", "Active", "rev_a@cocorra.test", UserStatus.Active, AppRoles.RecordReviewer);
+        await SeedUserAsync("Plain", "Pending1", "u_p1@cocorra.test", UserStatus.Pending, AppRoles.User);
+        await SeedUserAsync("Plain", "Pending2", "u_p2@cocorra.test", UserStatus.Pending, AppRoles.User);
+        await SeedUserAsync("Plain", "Banned", "u_b@cocorra.test", UserStatus.Banned, AppRoles.User);
+        await SeedUserAsync("Coach", "Banned", "c_b@cocorra.test", UserStatus.Banned, AppRoles.Coach);
+        await SeedUserAsync("Plain", "Rejected", "u_r@cocorra.test", UserStatus.Rejected, AppRoles.User);
+        await SeedUserAsync("Plain", "ReRecord", "u_rr@cocorra.test", UserStatus.ReRecord, AppRoles.User);
+        await SeedUserAsync("Reviewer", "ReRecord", "rev_rr@cocorra.test", UserStatus.ReRecord, AppRoles.RecordReviewer);
+
+        var (service, _, scope) = CreateServiceScope();
+        using (scope)
+        {
+            var modStats = await service.GetDashboardStatsAsync(callerIsAdmin: false);
+            var adminStats = await service.GetDashboardStatsAsync(callerIsAdmin: true);
+            var modList = await service.GetAllUsersAsync(null, 1, 100, callerIsAdmin: false);
+            var adminList = await service.GetAllUsersAsync(null, 1, 100, callerIsAdmin: true);
+
+            Assert.True(modStats.Succeeded);
+            Assert.Equal(HttpStatusCode.OK, modStats.StatusCode);
+            Assert.NotNull(modStats.Data);
+            Assert.Equal(11, modStats.Data!.TotalUsers);
+            Assert.Equal(4, modStats.Data.ActiveUsers);
+            Assert.Equal(2, modStats.Data.PendingUsers);
+            Assert.Equal(2, modStats.Data.BannedUsers);
+            Assert.Equal(1, modStats.Data.RejectedUsers);
+            Assert.Equal(2, modStats.Data.ReRecordUsers);
+            Assert.Equal(modList.TotalCount, modStats.Data.TotalUsers);
+
+            Assert.True(adminStats.Succeeded);
+            Assert.Equal(HttpStatusCode.OK, adminStats.StatusCode);
+            Assert.NotNull(adminStats.Data);
+            Assert.Equal(17, adminStats.Data!.TotalUsers);
+            Assert.Equal(6, adminStats.Data.ActiveUsers);
+            Assert.Equal(3, adminStats.Data.PendingUsers);
+            Assert.Equal(3, adminStats.Data.BannedUsers);
+            Assert.Equal(2, adminStats.Data.RejectedUsers);
+            Assert.Equal(3, adminStats.Data.ReRecordUsers);
+            Assert.Equal(adminList.TotalCount, adminStats.Data.TotalUsers);
+        }
+    }
+
+    [Fact]
+    public async Task GetDashboardStatsAsync_MultiRoleAdminAndCoach_ExcludedForModerator()
+    {
+        await SeedUserWithRolesAsync(
+            "Dual",
+            "AdminCoach",
+            "admin_coach@cocorra.test",
+            UserStatus.Active,
+            new[] { AppRoles.Admin, AppRoles.Coach });
+        await SeedUserAsync("Pure", "Coach", "pure_coach@cocorra.test", UserStatus.Active, AppRoles.Coach);
+        await SeedUserAsync("Plain", "Pending", "plain_pending@cocorra.test", UserStatus.Pending, AppRoles.User);
+
+        var (service, _, scope) = CreateServiceScope();
+        using (scope)
+        {
+            var modStats = await service.GetDashboardStatsAsync(callerIsAdmin: false);
+            var adminStats = await service.GetDashboardStatsAsync(callerIsAdmin: true);
+            var modList = await service.GetAllUsersAsync(null, 1, 100, callerIsAdmin: false);
+
+            Assert.True(modStats.Succeeded);
+            Assert.Equal(2, modStats.Data!.TotalUsers);
+            Assert.Equal(1, modStats.Data.ActiveUsers);
+            Assert.Equal(1, modStats.Data.PendingUsers);
+            Assert.Equal(0, modStats.Data.BannedUsers);
+            Assert.Equal(0, modStats.Data.RejectedUsers);
+            Assert.Equal(0, modStats.Data.ReRecordUsers);
+            Assert.Equal(modList.TotalCount, modStats.Data.TotalUsers);
+
+            Assert.True(adminStats.Succeeded);
+            Assert.Equal(3, adminStats.Data!.TotalUsers);
+            Assert.Equal(2, adminStats.Data.ActiveUsers);
+            Assert.Equal(1, adminStats.Data.PendingUsers);
+            Assert.Equal(0, adminStats.Data.BannedUsers);
+            Assert.Equal(0, adminStats.Data.RejectedUsers);
+            Assert.Equal(0, adminStats.Data.ReRecordUsers);
+        }
+    }
+
+    [Fact]
+    public async Task GetDashboardStatsAsync_ZeroAdmins_ReturnsIdenticalCountsForModeratorAndAdmin()
+    {
+        await SeedUserAsync("Plain", "Active", "u_active@cocorra.test", UserStatus.Active, AppRoles.User);
+        await SeedUserAsync("Coach", "Active", "c_active@cocorra.test", UserStatus.Active, AppRoles.Coach);
+        await SeedUserAsync("Plain", "Pending", "u_pending@cocorra.test", UserStatus.Pending, AppRoles.User);
+        await SeedUserAsync("Plain", "Banned", "u_banned@cocorra.test", UserStatus.Banned, AppRoles.User);
+        await SeedUserAsync("Plain", "Rejected", "u_rejected@cocorra.test", UserStatus.Rejected, AppRoles.User);
+        await SeedUserAsync("Mod", "ReRecord", "m_rerecord@cocorra.test", UserStatus.ReRecord, AppRoles.Moderator);
+
+        var (service, _, scope) = CreateServiceScope();
+        using (scope)
+        {
+            var modStats = await service.GetDashboardStatsAsync(callerIsAdmin: false);
+            var adminStats = await service.GetDashboardStatsAsync(callerIsAdmin: true);
+
+            Assert.True(modStats.Succeeded);
+            Assert.True(adminStats.Succeeded);
+
+            Assert.Equal(6, modStats.Data!.TotalUsers);
+            Assert.Equal(2, modStats.Data.ActiveUsers);
+            Assert.Equal(1, modStats.Data.PendingUsers);
+            Assert.Equal(1, modStats.Data.BannedUsers);
+            Assert.Equal(1, modStats.Data.RejectedUsers);
+            Assert.Equal(1, modStats.Data.ReRecordUsers);
+
+            Assert.Equal(modStats.Data.TotalUsers, adminStats.Data!.TotalUsers);
+            Assert.Equal(modStats.Data.ActiveUsers, adminStats.Data.ActiveUsers);
+            Assert.Equal(modStats.Data.PendingUsers, adminStats.Data.PendingUsers);
+            Assert.Equal(modStats.Data.BannedUsers, adminStats.Data.BannedUsers);
+            Assert.Equal(modStats.Data.RejectedUsers, adminStats.Data.RejectedUsers);
+            Assert.Equal(modStats.Data.ReRecordUsers, adminStats.Data.ReRecordUsers);
+        }
     }
 
     [Theory]

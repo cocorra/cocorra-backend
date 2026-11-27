@@ -52,7 +52,10 @@ namespace Cocorra.DAL.Repository.SupportRepository
                 {
                     query = query.Where(r =>
                         !_dbContext.UserRoles.Any(ur => ur.UserId == r.ReporterId && adminRoleIds.Contains(ur.RoleId))
-                        && (r.ReportedUserId == null || !_dbContext.UserRoles.Any(ur => ur.UserId == r.ReportedUserId.Value && adminRoleIds.Contains(ur.RoleId))));
+                        && (r.ReportedUserId == null || !_dbContext.UserRoles.Any(ur => ur.UserId == r.ReportedUserId.Value && adminRoleIds.Contains(ur.RoleId)))
+                        && (r.ReportedRoomId == null || !_dbContext.Rooms.Any(room =>
+                            room.Id == r.ReportedRoomId
+                            && _dbContext.UserRoles.Any(ur => ur.UserId == room.HostId && adminRoleIds.Contains(ur.RoleId)))));
                 }
             }
 
@@ -96,6 +99,15 @@ namespace Cocorra.DAL.Repository.SupportRepository
                 .Include(r => r.ReportedRoom)
                     .ThenInclude(room => room!.Host)
                 .FirstOrDefaultAsync(r => r.Id == reportId);
+        }
+
+        public Task<Guid?> GetRoomHostIdAsync(Guid roomId)
+        {
+            return _dbContext.Rooms
+                .AsNoTracking()
+                .Where(r => r.Id == roomId)
+                .Select(r => (Guid?)r.HostId)
+                .FirstOrDefaultAsync();
         }
 
         public async Task<SupportTicket?> GetTicketByIdAsync(Guid ticketId)

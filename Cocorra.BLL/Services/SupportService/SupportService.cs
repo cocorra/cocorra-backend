@@ -100,9 +100,24 @@ namespace Cocorra.BLL.Services.SupportService
             return roles.Any(r => string.Equals(r, AppRoles.Admin, StringComparison.OrdinalIgnoreCase));
         }
 
-        private async Task<bool> ReportInvolvesAdminAsync(Report report) =>
-            await IsUserAdminAsync(report.ReporterId, report.Reporter)
-            || await IsUserAdminAsync(report.ReportedUserId, report.ReportedUser);
+        private async Task<bool> ReportInvolvesAdminAsync(Report report)
+        {
+            if (await IsUserAdminAsync(report.ReporterId, report.Reporter)
+                || await IsUserAdminAsync(report.ReportedUserId, report.ReportedUser))
+            {
+                return true;
+            }
+
+            if (!report.ReportedRoomId.HasValue)
+            {
+                return false;
+            }
+
+            var hostId = report.ReportedRoom?.HostId
+                ?? await _supportRepo.GetRoomHostIdAsync(report.ReportedRoomId.Value);
+
+            return await IsUserAdminAsync(hostId, report.ReportedRoom?.Host);
+        }
 
         private async Task<bool> IsActiveSupportStaffAsync(string staffUserId)
         {
@@ -472,6 +487,11 @@ namespace Cocorra.BLL.Services.SupportService
             var roles = await _userManager.GetRolesAsync(reportedUser) ?? Array.Empty<string>();
             if (!callerIsAdmin)
             {
+                if (roles.Any(r => string.Equals(r, AppRoles.Admin, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return (null, NotFound<string>("Reported user not found."));
+                }
+
                 if (AppRoles.AnyProtectedFromModerators(roles))
                 {
                     return (reportedUser, Forbidden<string>("Moderators cannot take actions against staff accounts."));

@@ -22,7 +22,7 @@ namespace Cocorra.BLL.Services.AdminService
         /// <summary>A fresh presigned URL to the user's voice recording; NotFound when there is none.</summary>
         Task<Response<PrivateFileUrlDto>> GetUserVoiceUrlAsync(Guid userId);
 
-        Task<Response<DashboardStatsDto>> GetDashboardStatsAsync();
+        Task<Response<DashboardStatsDto>> GetDashboardStatsAsync(bool callerIsAdmin);
 
         Task<StatusChangeResponse> ChangeUserStatusAsync(
             Guid userId,

@@ -13,6 +13,7 @@ namespace Cocorra.DAL.Repository.SupportRepository
         Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(ReportCategory? category, string? status, int pageNumber, int pageSize, bool excludeAdmins = false);
         Task<Report?> GetReportByIdAsync(Guid reportId);
         Task<Report?> GetReportDetailsByIdAsync(Guid reportId);
+        Task<Guid?> GetRoomHostIdAsync(Guid roomId);
         Task<SupportTicket?> GetTicketByIdAsync(Guid ticketId);
         Task<SupportTicket?> GetTicketDetailsByIdAsync(Guid ticketId);
         Task<(int TotalCount, List<SupportTicket> Items)> GetPagedTicketsAsync(SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize, bool excludeAdmins = false);

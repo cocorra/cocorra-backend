@@ -152,7 +152,7 @@ namespace Cocorra.API.Controllers
         [HttpGet(Router.AdminRouting.Stats)]
         public async Task<IActionResult> GetDashboardStats()
         {
-            var result = await _adminService.GetDashboardStatsAsync();
+            var result = await _adminService.GetDashboardStatsAsync(callerIsAdmin: User.IsInRole(AppRoles.Admin));
             return Ok(result);
         }
 

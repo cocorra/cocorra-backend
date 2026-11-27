@@ -114,20 +114,32 @@ public class SupportModerationTests : IDisposable
     private async Task<ApplicationUser> CreateUserWithRoleAsync(
         string role,
         string? emailPrefix = null,
-        UserStatus status = UserStatus.Active)
+        UserStatus status = UserStatus.Active,
+        string? firstName = null,
+        string? lastName = null) =>
+        await CreateUserWithRolesAsync(new[] { role }, emailPrefix, status, firstName, lastName);
+
+    private async Task<ApplicationUser> CreateUserWithRolesAsync(
+        IEnumerable<string> roles,
+        string? emailPrefix = null,
+        UserStatus status = UserStatus.Active,
+        string? firstName = null,
+        string? lastName = null)
     {
         using var scope = _services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 
+        var roleList = roles.ToList();
+        var primaryRole = roleList[0];
         var id = Guid.NewGuid();
-        var tag = emailPrefix ?? role.ToLowerInvariant();
+        var tag = emailPrefix ?? primaryRole.ToLowerInvariant();
         var user = new ApplicationUser
         {
             Id = id,
             UserName = $"{tag}-{id:N}",
             Email = $"{tag}-{id:N}@cocorra.test",
-            FirstName = role,
-            LastName = "Account",
+            FirstName = firstName ?? primaryRole,
+            LastName = lastName ?? "Account",
             Status = status,
             RefreshToken = $"refresh-{id:N}",
             FcmToken = $"fcm-{id:N}"
@@ -136,10 +148,34 @@ public class SupportModerationTests : IDisposable
         var createResult = await userManager.CreateAsync(user);
         Assert.True(createResult.Succeeded);
 
-        var roleResult = await userManager.AddToRoleAsync(user, role);
-        Assert.True(roleResult.Succeeded);
+        foreach (var role in roleList)
+        {
+            var roleResult = await userManager.AddToRoleAsync(user, role);
+            Assert.True(roleResult.Succeeded);
+        }
 
         return (await userManager.FindByIdAsync(id.ToString()))!;
+    }
+
+    private async Task<Room> SeedRoomAsync(Guid hostId, string title = "Voice Session")
+    {
+        using var scope = _services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var room = new Room
+        {
+            Id = Guid.NewGuid(),
+            HostId = hostId,
+            RoomTitle = title,
+            Category = RoomCategory.MentalHealth,
+            Status = RoomStatus.Live,
+            StartDate = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        db.Rooms.Add(room);
+        await db.SaveChangesAsync();
+        return room;
     }
 
     private async Task<Report> SeedReportAsync(
@@ -149,7 +185,8 @@ public class SupportModerationTests : IDisposable
         string status = "Open",
         ReportStatus statusCode = ReportStatus.Open,
         string? screenshotPath = null,
-        DateTime? createdAt = null)
+        DateTime? createdAt = null,
+        Guid? reportedRoomId = null)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -159,6 +196,7 @@ public class SupportModerationTests : IDisposable
             Id = Guid.NewGuid(),
             ReporterId = reporterId,
             ReportedUserId = reportedUserId,
+            ReportedRoomId = reportedRoomId,
             Category = category,
             Description = "Reported behavior",
             ScreenshotPath = screenshotPath,
@@ -1066,7 +1104,6 @@ public class SupportModerationTests : IDisposable
     }
 
     [Theory]
-    [InlineData(AppRoles.Admin)]
     [InlineData(AppRoles.Moderator)]
     [InlineData(AppRoles.RecordReviewer)]
     [InlineData(AppRoles.Coach)]
@@ -1082,6 +1119,31 @@ public class SupportModerationTests : IDisposable
             Assert.NotNull(denial);
             Assert.Equal(HttpStatusCode.Forbidden, denial!.StatusCode);
             Assert.Equal("Moderators cannot take actions against staff accounts.", denial.Message);
+        }
+    }
+
+    public static TheoryData<string[]> AdminTargetRoles => new()
+    {
+        { new[] { AppRoles.Admin } },
+        { new[] { AppRoles.Coach, AppRoles.Admin } }
+    };
+
+    [Theory]
+    [MemberData(nameof(AdminTargetRoles))]
+    public async Task AuthorizeReportTargetAsync_NonAdminCallerAgainstAdminTarget_ReturnsNotFoundAndNullUser(string[] roles)
+    {
+        var adminTarget = await CreateUserWithRolesAsync(roles);
+
+        var (scope, service, _, _) = CreateHarness();
+        using (scope)
+        {
+            var (user, denial) = await service.AuthorizeReportTargetAsync(adminTarget.Id, callerIsAdmin: false);
+
+            Assert.Null(user);
+            Assert.NotNull(denial);
+            Assert.False(denial!.Succeeded);
+            Assert.Equal(HttpStatusCode.NotFound, denial.StatusCode);
+            Assert.Equal("Reported user not found.", denial.Message);
         }
     }
 
@@ -1332,6 +1394,319 @@ public class SupportModerationTests : IDisposable
             Assert.True((await service.GetTicketByIdAsync(adminTicket.Id, admin.Id, callerIsAdmin: true)).Succeeded);
             Assert.True((await service.GetTicketScreenshotUrlAsync(adminTicket.Id, callerIsAdmin: true)).Succeeded);
             Assert.True((await service.UpdateTicketStatusAsync(adminTicket.Id, SupportTicketStatus.Resolved, "Admin closed", admin.Id, callerIsAdmin: true)).Succeeded);
+        }
+    }
+
+    private static async Task AssertModeratorReportEndpointsReturnNotFoundAsync(
+        SupportService service,
+        Guid reportId,
+        AdminReportAction attemptedAction = AdminReportAction.RejectReport)
+    {
+        var detail = await service.GetReportByIdAsync(reportId, Guid.NewGuid(), callerIsAdmin: false);
+        Assert.False(detail.Succeeded);
+        Assert.Equal(HttpStatusCode.NotFound, detail.StatusCode);
+        Assert.Equal("Report not found.", detail.Message);
+
+        var screenshot = await service.GetReportScreenshotUrlAsync(reportId, callerIsAdmin: false);
+        Assert.False(screenshot.Succeeded);
+        Assert.Equal(HttpStatusCode.NotFound, screenshot.StatusCode);
+        Assert.Equal("Report not found.", screenshot.Message);
+
+        var statusUpdate = await service.UpdateReportStatusAsync(reportId, "Resolved", "Should fail", Guid.NewGuid(), callerIsAdmin: false);
+        Assert.False(statusUpdate.Succeeded);
+        Assert.Equal(HttpStatusCode.NotFound, statusUpdate.StatusCode);
+        Assert.Equal("Report not found.", statusUpdate.Message);
+
+        var action = await service.TakeActionOnReportAsync(
+            reportId,
+            new TakeReportActionDto { Action = attemptedAction, Reason = "Should fail" },
+            Guid.NewGuid(),
+            callerIsAdmin: false);
+        Assert.False(action.Succeeded);
+        Assert.Equal(HttpStatusCode.NotFound, action.StatusCode);
+        Assert.Equal("Report not found.", action.Message);
+    }
+
+    [Fact]
+    public async Task TakeActionOnReportAsync_ModeratorAgainstMultiRoleAdminAndCoach_ReturnsNotFoundAndLeavesStateUntouched()
+    {
+        var reporter = await CreateUserWithRoleAsync(AppRoles.User, "reporter");
+        var multiRoleAdmin = await CreateUserWithRolesAsync(new[] { AppRoles.Coach, AppRoles.Admin }, "admincoach");
+        var originalStamp = multiRoleAdmin.SecurityStamp;
+        var originalRefresh = multiRoleAdmin.RefreshToken;
+        var originalFcm = multiRoleAdmin.FcmToken;
+        var report = await SeedReportAsync(reporter.Id, multiRoleAdmin.Id);
+
+        var (scope, service, _, _) = CreateHarness();
+        using (scope)
+        {
+            var result = await service.TakeActionOnReportAsync(
+                report.Id,
+                new TakeReportActionDto { Action = AdminReportAction.BanUser, Reason = "Attempt on dual-role admin" },
+                Guid.NewGuid(),
+                callerIsAdmin: false);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+            Assert.Equal("Report not found.", result.Message);
+        }
+
+        var persistedReport = await ReadReportAsync(report.Id);
+        Assert.Equal("Open", persistedReport.Status);
+        Assert.Equal(ReportStatus.Open, persistedReport.StatusCode);
+        Assert.Null(persistedReport.ResolvedAt);
+
+        var persistedUser = await ReadUserAsync(multiRoleAdmin.Id);
+        Assert.Equal(UserStatus.Active, persistedUser.Status);
+        Assert.False(persistedUser.LockoutEnabled);
+        Assert.Null(persistedUser.LockoutEnd);
+        Assert.Equal(originalStamp, persistedUser.SecurityStamp);
+        Assert.Equal(originalRefresh, persistedUser.RefreshToken);
+        Assert.Equal(originalFcm, persistedUser.FcmToken);
+
+        Assert.Equal(0, await CountNotificationsAsync(multiRoleAdmin.Id));
+        Assert.Empty(await ReadAuditLogsAsync());
+        _realTimeNotifierMock.Verify(n => n.ForceLogoutAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        _pushServiceMock.Verify(
+            p => p.SendPushNotificationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ReportEndpoints_AdminHostedRoom_HiddenFromModeratorAndVisibleToAdminWithHostName()
+    {
+        var adminHost = await CreateUserWithRoleAsync(AppRoles.Admin, "adminhost", firstName: "Nour", lastName: "AdminHost");
+        var coachHost = await CreateUserWithRoleAsync(AppRoles.Coach, "coachhost", firstName: "Tariq", lastName: "CoachHost");
+        var plainHost = await CreateUserWithRoleAsync(AppRoles.User, "plainhost", firstName: "Maya", lastName: "PlainHost");
+        var reporter = await CreateUserWithRoleAsync(AppRoles.User, "reporter", firstName: "Rami", lastName: "Reporter");
+
+        var adminRoom = await SeedRoomAsync(adminHost.Id, "Admin Lounge");
+        var coachRoom = await SeedRoomAsync(coachHost.Id, "Coach Session");
+        var plainRoom = await SeedRoomAsync(plainHost.Id, "Community Hangout");
+
+        var adminRoomReport = await SeedReportAsync(
+            reporter.Id,
+            reportedUserId: null,
+            screenshotPath: "Uploads/img/Support/admin-room.png",
+            reportedRoomId: adminRoom.Id);
+        var coachRoomReport = await SeedReportAsync(
+            reporter.Id,
+            reportedUserId: null,
+            screenshotPath: "Uploads/img/Support/coach-room.png",
+            reportedRoomId: coachRoom.Id);
+        var plainRoomReport = await SeedReportAsync(
+            reporter.Id,
+            reportedUserId: null,
+            screenshotPath: "Uploads/img/Support/plain-room.png",
+            reportedRoomId: plainRoom.Id);
+
+        var (scope, service, _, _) = CreateHarness();
+        using (scope)
+        {
+            var modList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: false);
+            var modItems = modList.Data!.ToList();
+
+            Assert.True(modList.Succeeded);
+            Assert.Equal(2, modList.TotalCount);
+            Assert.Equal(2, modItems.Count);
+            Assert.DoesNotContain(modItems, r => r.Id == adminRoomReport.Id);
+            Assert.DoesNotContain(modItems, r => r.ReportedRoomHostName == "Nour AdminHost");
+
+            var coachItem = Assert.Single(modItems, r => r.Id == coachRoomReport.Id);
+            Assert.Equal("Tariq CoachHost", coachItem.ReportedRoomHostName);
+
+            var plainItem = Assert.Single(modItems, r => r.Id == plainRoomReport.Id);
+            Assert.Equal("Maya PlainHost", plainItem.ReportedRoomHostName);
+
+            await AssertModeratorReportEndpointsReturnNotFoundAsync(service, adminRoomReport.Id);
+
+            Assert.Empty(_fileUrls.Calls);
+            Assert.Empty(await ReadAuditLogsAsync());
+            var persistedAfterMod = await ReadReportAsync(adminRoomReport.Id);
+            Assert.Equal("Open", persistedAfterMod.Status);
+            Assert.Equal(ReportStatus.Open, persistedAfterMod.StatusCode);
+            Assert.Null(persistedAfterMod.ResolvedAt);
+
+            var adminList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: true);
+            Assert.Equal(3, adminList.TotalCount);
+            var adminListItem = Assert.Single(adminList.Data!, r => r.Id == adminRoomReport.Id);
+            Assert.Equal("Nour AdminHost", adminListItem.ReportedRoomHostName);
+
+            var adminDetail = await service.GetReportByIdAsync(adminRoomReport.Id, adminHost.Id, callerIsAdmin: true);
+            Assert.True(adminDetail.Succeeded);
+            Assert.Equal("Nour AdminHost", adminDetail.Data!.ReportedRoomHostName);
+
+            Assert.True((await service.GetReportScreenshotUrlAsync(adminRoomReport.Id, callerIsAdmin: true)).Succeeded);
+            Assert.True((await service.UpdateReportStatusAsync(adminRoomReport.Id, "Resolved", "Admin resolved room report", adminHost.Id, callerIsAdmin: true)).Succeeded);
+        }
+    }
+
+    [Fact]
+    public async Task GetFilteredReportsAsync_ModeratorPagingAcrossAdminHostedRoom_ExcludesHiddenFromPagesAndTotals()
+    {
+        var adminHost = await CreateUserWithRoleAsync(AppRoles.Admin, "pagingadmin");
+        var coachHost = await CreateUserWithRoleAsync(AppRoles.Coach, "pagingcoach");
+        var reporter = await CreateUserWithRoleAsync(AppRoles.User, "pagingreporter");
+
+        var adminRoom = await SeedRoomAsync(adminHost.Id, "Hidden Room");
+        var coachRoom = await SeedRoomAsync(coachHost.Id, "Visible Room");
+        var baseTime = new DateTime(2026, 7, 1, 12, 0, 0, DateTimeKind.Utc);
+
+        var visibleOlder = await SeedReportAsync(reporter.Id, null, createdAt: baseTime.AddMinutes(1), reportedRoomId: coachRoom.Id);
+        var hiddenMiddle = await SeedReportAsync(reporter.Id, null, createdAt: baseTime.AddMinutes(2), reportedRoomId: adminRoom.Id);
+        var visibleNewer = await SeedReportAsync(reporter.Id, null, createdAt: baseTime.AddMinutes(3), reportedRoomId: coachRoom.Id);
+
+        var (scope, service, _, _) = CreateHarness();
+        using (scope)
+        {
+            var modPage1 = await service.GetFilteredReportsAsync(null, null, pageNumber: 1, pageSize: 1, callerIsAdmin: false);
+            var modPage2 = await service.GetFilteredReportsAsync(null, null, pageNumber: 2, pageSize: 1, callerIsAdmin: false);
+            var modPage3 = await service.GetFilteredReportsAsync(null, null, pageNumber: 3, pageSize: 1, callerIsAdmin: false);
+
+            Assert.Equal(2, modPage1.TotalCount);
+            Assert.Equal(2, modPage1.TotalPages);
+            Assert.True(modPage1.HasNextPage);
+            Assert.False(modPage1.HasPreviousPage);
+            Assert.Equal(visibleNewer.Id, Assert.Single(modPage1.Data!).Id);
+
+            Assert.Equal(2, modPage2.TotalCount);
+            Assert.Equal(2, modPage2.TotalPages);
+            Assert.False(modPage2.HasNextPage);
+            Assert.True(modPage2.HasPreviousPage);
+            Assert.Equal(visibleOlder.Id, Assert.Single(modPage2.Data!).Id);
+
+            Assert.Equal(2, modPage3.TotalCount);
+            Assert.Equal(2, modPage3.TotalPages);
+            Assert.Empty(modPage3.Data!);
+
+            var adminPage1 = await service.GetFilteredReportsAsync(null, null, pageNumber: 1, pageSize: 1, callerIsAdmin: true);
+            var adminPage2 = await service.GetFilteredReportsAsync(null, null, pageNumber: 2, pageSize: 1, callerIsAdmin: true);
+            var adminPage3 = await service.GetFilteredReportsAsync(null, null, pageNumber: 3, pageSize: 1, callerIsAdmin: true);
+
+            Assert.Equal(3, adminPage1.TotalCount);
+            Assert.Equal(3, adminPage1.TotalPages);
+            Assert.Equal(visibleNewer.Id, Assert.Single(adminPage1.Data!).Id);
+            Assert.Equal(hiddenMiddle.Id, Assert.Single(adminPage2.Data!).Id);
+            Assert.Equal(visibleOlder.Id, Assert.Single(adminPage3.Data!).Id);
+        }
+    }
+
+    [Fact]
+    public async Task ReportEndpoints_MultiRoleAdminAndCoachHostedRoom_HiddenFromModeratorAndVisibleToAdmin()
+    {
+        var multiRoleHost = await CreateUserWithRolesAsync(
+            new[] { AppRoles.Coach, AppRoles.Admin },
+            "multihost",
+            firstName: "Layla",
+            lastName: "MultiHost");
+        var reporter = await CreateUserWithRoleAsync(AppRoles.User, "reporter");
+        var room = await SeedRoomAsync(multiRoleHost.Id, "Dual-Role Host Room");
+        var report = await SeedReportAsync(
+            reporter.Id,
+            reportedUserId: null,
+            screenshotPath: "Uploads/img/Support/multi-host.png",
+            reportedRoomId: room.Id);
+
+        var (scope, service, _, _) = CreateHarness();
+        using (scope)
+        {
+            var modList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: false);
+            Assert.Equal(0, modList.TotalCount);
+            Assert.Empty(modList.Data!);
+
+            await AssertModeratorReportEndpointsReturnNotFoundAsync(service, report.Id);
+
+            Assert.Empty(_fileUrls.Calls);
+            Assert.Empty(await ReadAuditLogsAsync());
+            Assert.Equal(ReportStatus.Open, (await ReadReportAsync(report.Id)).StatusCode);
+
+            var adminList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: true);
+            Assert.Equal(1, adminList.TotalCount);
+            Assert.Equal(report.Id, Assert.Single(adminList.Data!).Id);
+
+            var adminDetail = await service.GetReportByIdAsync(report.Id, multiRoleHost.Id, callerIsAdmin: true);
+            Assert.True(adminDetail.Succeeded);
+            Assert.Equal("Layla MultiHost", adminDetail.Data!.ReportedRoomHostName);
+        }
+    }
+
+    [Fact]
+    public async Task ReportEndpoints_AdminHostedRoomWithPlainReportedUser_HiddenFromModeratorAndLeavesUserUntouched()
+    {
+        var adminHost = await CreateUserWithRoleAsync(AppRoles.Admin, "adminhost", firstName: "Omar", lastName: "AdminHost");
+        var reporter = await CreateUserWithRoleAsync(AppRoles.User, "reporter");
+        var plainReported = await CreateUserWithRoleAsync(AppRoles.User, "plainreported");
+        var originalStamp = plainReported.SecurityStamp;
+
+        var adminRoom = await SeedRoomAsync(adminHost.Id, "Admin Mixed Room");
+        var report = await SeedReportAsync(
+            reporter.Id,
+            reportedUserId: plainReported.Id,
+            screenshotPath: "Uploads/img/Support/mixed-room.png",
+            reportedRoomId: adminRoom.Id);
+
+        var (scope, service, _, _) = CreateHarness();
+        using (scope)
+        {
+            var modList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: false);
+            Assert.Equal(0, modList.TotalCount);
+            Assert.Empty(modList.Data!);
+
+            await AssertModeratorReportEndpointsReturnNotFoundAsync(service, report.Id, AdminReportAction.BanUser);
+
+            Assert.Empty(_fileUrls.Calls);
+            Assert.Empty(await ReadAuditLogsAsync());
+            Assert.Equal(ReportStatus.Open, (await ReadReportAsync(report.Id)).StatusCode);
+
+            var persistedUser = await ReadUserAsync(plainReported.Id);
+            Assert.Equal(UserStatus.Active, persistedUser.Status);
+            Assert.Equal(originalStamp, persistedUser.SecurityStamp);
+            Assert.Equal(0, await CountNotificationsAsync(plainReported.Id));
+            _realTimeNotifierMock.Verify(n => n.ForceLogoutAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+
+            var adminList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: true);
+            Assert.Equal(1, adminList.TotalCount);
+            Assert.Equal(report.Id, Assert.Single(adminList.Data!).Id);
+
+            var adminDetail = await service.GetReportByIdAsync(report.Id, adminHost.Id, callerIsAdmin: true);
+            Assert.True(adminDetail.Succeeded);
+            Assert.Equal(plainReported.Id, adminDetail.Data!.ReportedUserId);
+            Assert.Equal("Omar AdminHost", adminDetail.Data.ReportedRoomHostName);
+        }
+    }
+
+    [Fact]
+    public async Task ReportEndpoints_NonAdminHostedRoomFiledByAdmin_HiddenFromModeratorAndVisibleToAdmin()
+    {
+        var adminReporter = await CreateUserWithRoleAsync(AppRoles.Admin, "adminreporter");
+        var coachHost = await CreateUserWithRoleAsync(AppRoles.Coach, "coachhost", firstName: "Hana", lastName: "CoachHost");
+        var coachRoom = await SeedRoomAsync(coachHost.Id, "Coach Hosted Room");
+        var report = await SeedReportAsync(
+            adminReporter.Id,
+            reportedUserId: null,
+            screenshotPath: "Uploads/img/Support/admin-reporter-room.png",
+            reportedRoomId: coachRoom.Id);
+
+        var (scope, service, _, _) = CreateHarness();
+        using (scope)
+        {
+            var modList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: false);
+            Assert.Equal(0, modList.TotalCount);
+            Assert.Empty(modList.Data!);
+
+            await AssertModeratorReportEndpointsReturnNotFoundAsync(service, report.Id);
+
+            Assert.Empty(_fileUrls.Calls);
+            Assert.Empty(await ReadAuditLogsAsync());
+            Assert.Equal(ReportStatus.Open, (await ReadReportAsync(report.Id)).StatusCode);
+
+            var adminList = await service.GetFilteredReportsAsync(null, null, 1, 10, callerIsAdmin: true);
+            Assert.Equal(1, adminList.TotalCount);
+            Assert.Equal(report.Id, Assert.Single(adminList.Data!).Id);
+
+            var adminDetail = await service.GetReportByIdAsync(report.Id, adminReporter.Id, callerIsAdmin: true);
+            Assert.True(adminDetail.Succeeded);
+            Assert.Equal("Hana CoachHost", adminDetail.Data!.ReportedRoomHostName);
         }
     }
 }
