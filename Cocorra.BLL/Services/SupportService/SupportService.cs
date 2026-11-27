@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Cocorra.BLL.Base;
+using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.RealTimeNotifier;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.BLL.Services.Storage;
@@ -25,6 +26,10 @@ namespace Cocorra.BLL.Services.SupportService
 {
     public class SupportService : ResponseHandler, ISupportService
     {
+        private const int MinReasonLength = 3;
+        private const int MaxReasonLength = 1000;
+        private const string InvalidReasonMessage = "A reason between 3 and 1000 characters is required.";
+
         private readonly ISupportRepository _supportRepo;
         private readonly IUploadImage _uploadImage;
         private readonly UserManager<ApplicationUser> _userManager;
@@ -34,6 +39,7 @@ namespace Cocorra.BLL.Services.SupportService
         private readonly IEventTracker _eventTracker;
         private readonly ILogger<SupportService> _logger;
         private readonly IPrivateFileUrlIssuer _fileUrls;
+        private readonly IAuditLogService? _auditLog;
         private readonly string _baseUrl;
 
         public SupportService(
@@ -46,7 +52,9 @@ namespace Cocorra.BLL.Services.SupportService
             IEventTracker eventTracker,
             ILogger<SupportService> logger,
             IPrivateFileUrlIssuer fileUrls,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            // Optional so existing direct callers keep compiling; DI always supplies IAuditLogService.
+            IAuditLogService? auditLog = null)
         {
             _supportRepo = supportRepo;
             _uploadImage = uploadImage;
@@ -57,7 +65,76 @@ namespace Cocorra.BLL.Services.SupportService
             _eventTracker = eventTracker;
             _logger = logger;
             _fileUrls = fileUrls;
+            _auditLog = auditLog;
             _baseUrl = configuration["AppSettings:BaseUrl"]?.TrimEnd('/') ?? "";
+        }
+
+        private Task RecordAuditAsync(AuditEntry entry) =>
+            _auditLog is null ? Task.CompletedTask : _auditLog.RecordAsync(entry);
+
+        private static bool TryNormalizeReason(string? reason, out string normalized)
+        {
+            normalized = (reason ?? string.Empty).Trim();
+            return normalized.Length >= MinReasonLength && normalized.Length <= MaxReasonLength;
+        }
+
+        private static bool TryParseReportStatus(string raw, out ReportStatus status)
+        {
+            if (string.IsNullOrWhiteSpace(raw) || char.IsDigit(raw[0]) || raw[0] is '+' or '-')
+            {
+                status = default;
+                return false;
+            }
+
+            return Enum.TryParse(raw, ignoreCase: true, out status) && Enum.IsDefined(status);
+        }
+
+        private async Task<bool> IsUserAdminAsync(Guid? userId, ApplicationUser? loadedUser = null)
+        {
+            if (!userId.HasValue) return false;
+
+            var user = loadedUser ?? await _userManager.FindByIdAsync(userId.Value.ToString());
+            if (user is null) return false;
+
+            var roles = await _userManager.GetRolesAsync(user) ?? Array.Empty<string>();
+            return roles.Any(r => string.Equals(r, AppRoles.Admin, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private async Task<bool> ReportInvolvesAdminAsync(Report report) =>
+            await IsUserAdminAsync(report.ReporterId, report.Reporter)
+            || await IsUserAdminAsync(report.ReportedUserId, report.ReportedUser);
+
+        private async Task<bool> IsActiveSupportStaffAsync(string staffUserId)
+        {
+            var staffUser = await _userManager.FindByIdAsync(staffUserId);
+            if (staffUser is null || staffUser.Status != UserStatus.Active)
+                return false;
+
+            if (await _userManager.IsLockedOutAsync(staffUser))
+                return false;
+
+            var roles = await _userManager.GetRolesAsync(staffUser) ?? Array.Empty<string>();
+            return roles.Any(r =>
+                string.Equals(r, AppRoles.Admin, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(r, AppRoles.Moderator, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static Guid? ParseGuidOrNull(string? raw) =>
+            Guid.TryParse(raw, out var parsed) ? parsed : null;
+
+        private static string FormatUserDisplay(ApplicationUser? user, string fallback)
+        {
+            if (user is null) return fallback;
+            if (!string.IsNullOrWhiteSpace(user.Email)) return user.Email;
+            var fullName = $"{user.FirstName} {user.LastName}".Trim();
+            return string.IsNullOrWhiteSpace(fullName) ? fallback : fullName;
+        }
+
+        private async Task<string> ResolveUserDisplayAsync(Guid? userId, string fallback)
+        {
+            if (!userId.HasValue) return fallback;
+            var user = await _userManager.FindByIdAsync(userId.Value.ToString());
+            return FormatUserDisplay(user, fallback);
         }
 
         public async Task<Response<string>> SubmitTicketAsync(Guid? userId, SubmitSupportTicketDto dto)
@@ -116,56 +193,85 @@ namespace Cocorra.BLL.Services.SupportService
             return Success("Report submitted successfully.");
         }
 
-        public async Task<Response<List<ReportDetailsDto>>> GetFilteredReportsAsync(ReportCategory? category, string? status)
+        public async Task<PagedResponse<ReportDetailsDto>> GetFilteredReportsAsync(
+            ReportCategory? category, string? status, int pageNumber = 1, int pageSize = 20, bool callerIsAdmin = false)
         {
-            var reports = await _supportRepo.GetFilteredReportsAsync(category, status);
+            pageNumber = Math.Max(1, pageNumber);
+            pageSize = Math.Clamp(pageSize, 1, 100);
 
-            var result = reports.Select(r => new ReportDetailsDto
-            {
-                Id = r.Id,
-                ReporterId = r.ReporterId,
-                ReporterName = r.Reporter != null
-                    ? $"{r.Reporter.FirstName} {r.Reporter.LastName}"
-                    : "Unknown",
-                ReportedUserId = r.ReportedUserId,
-                ReportedUserName = r.ReportedUser != null
-                    ? $"{r.ReportedUser.FirstName} {r.ReportedUser.LastName}"
-                    : null,
-                ReportedRoomId = r.ReportedRoomId,
-                ReportedRoomName = r.ReportedRoom?.RoomTitle,
-                ReportedRoomHostName = r.ReportedRoom?.Host != null
-                    ? $"{r.ReportedRoom.Host.FirstName} {r.ReportedRoom.Host.LastName}"
-                    : null,
-                ReportedRoomCreatedAt = r.ReportedRoom?.CreatedAt,
-                Category = (int)r.Category,
-                CategoryName = r.Category.ToString(),
-                Description = r.Description,
-                // Never a URL in a list; GetReportScreenshotUrlAsync issues one on demand.
-                ScreenshotPath = null,
-                HasScreenshot = _fileUrls.HasFile(r.ScreenshotPath),
-                Status = r.Status,
-                CreatedAt = r.CreatedAt
-            }).ToList();
+            var (totalCount, reports) = await _supportRepo.GetPagedReportsAsync(
+                category, status, pageNumber, pageSize, excludeAdmins: !callerIsAdmin);
+            var items = reports.Select(MapToReportDetailsDto).ToList();
 
-            return Success(result);
+            return Paginated(items, totalCount, pageNumber, pageSize);
         }
 
-        public async Task<Response<PrivateFileUrlDto>> GetReportScreenshotUrlAsync(Guid reportId)
+        public async Task<Response<ReportDetailsDto>> GetReportByIdAsync(Guid reportId, Guid callerId, bool callerIsAdmin)
+        {
+            var report = await _supportRepo.GetReportDetailsByIdAsync(reportId);
+            if (report == null || (!callerIsAdmin && await ReportInvolvesAdminAsync(report)))
+                return NotFound<ReportDetailsDto>("Report not found.");
+
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.ReportViewed,
+                callerId,
+                report.ReportedUserId,
+                FormatUserDisplay(report.ReportedUser, $"report {report.Id}"),
+                new { category = report.Category.ToString(), status = report.Status })
+            {
+                Category = AuditCategories.Report,
+                EntityType = AuditEntityTypes.Report,
+                EntityId = report.Id.ToString()
+            });
+
+            return Success(MapToReportDetailsDto(report));
+        }
+
+        private ReportDetailsDto MapToReportDetailsDto(Report report) => new()
+        {
+            Id = report.Id,
+            ReporterId = report.ReporterId,
+            ReporterName = report.Reporter != null
+                ? $"{report.Reporter.FirstName} {report.Reporter.LastName}"
+                : "Unknown",
+            ReportedUserId = report.ReportedUserId,
+            ReportedUserName = report.ReportedUser != null
+                ? $"{report.ReportedUser.FirstName} {report.ReportedUser.LastName}"
+                : null,
+            ReportedRoomId = report.ReportedRoomId,
+            ReportedRoomName = report.ReportedRoom?.RoomTitle,
+            ReportedRoomHostName = report.ReportedRoom?.Host != null
+                ? $"{report.ReportedRoom.Host.FirstName} {report.ReportedRoom.Host.LastName}"
+                : null,
+            ReportedRoomCreatedAt = report.ReportedRoom?.CreatedAt,
+            Category = (int)report.Category,
+            CategoryName = report.Category.ToString(),
+            Description = report.Description,
+            // Never a URL in a list or detail; GetReportScreenshotUrlAsync issues one on demand.
+            ScreenshotPath = null,
+            HasScreenshot = _fileUrls.HasFile(report.ScreenshotPath),
+            Status = report.Status,
+            CreatedAt = report.CreatedAt
+        };
+
+        public async Task<Response<PrivateFileUrlDto>> GetReportScreenshotUrlAsync(Guid reportId, bool callerIsAdmin)
         {
             var report = await _supportRepo.GetReportByIdAsync(reportId);
-            if (report == null) return NotFound<PrivateFileUrlDto>("Report not found.");
+            if (report == null || (!callerIsAdmin && await ReportInvolvesAdminAsync(report)))
+                return NotFound<PrivateFileUrlDto>("Report not found.");
 
             return await IssueScreenshotUrlAsync(
                 PrivateFileKind.ReportScreenshot,
-                new PrivateFileRef(report.Id, report.ScreenshotPath, report.ReporterId),
+                new PrivateFileRef(report.Id, report.ScreenshotPath, report.ReportedUserId),
                 "Support.ReportScreenshotUrl",
                 "This report has no screenshot.");
         }
 
-        public async Task<Response<PrivateFileUrlDto>> GetTicketScreenshotUrlAsync(Guid ticketId)
+        public async Task<Response<PrivateFileUrlDto>> GetTicketScreenshotUrlAsync(Guid ticketId, bool callerIsAdmin)
         {
             var ticket = await _supportRepo.GetTicketByIdAsync(ticketId);
-            if (ticket == null) return NotFound<PrivateFileUrlDto>("Ticket not found.");
+            if (ticket == null || (!callerIsAdmin && await IsUserAdminAsync(ticket.UserId, ticket.User)))
+                return NotFound<PrivateFileUrlDto>("Ticket not found.");
 
             return await IssueScreenshotUrlAsync(
                 PrivateFileKind.TicketScreenshot,
@@ -183,47 +289,105 @@ namespace Cocorra.BLL.Services.SupportService
             return Success(new PrivateFileUrlDto { Url = issued.Url, ExpiresAtUtc = issued.ExpiresAtUtc });
         }
 
-        public async Task<Response<string>> UpdateReportStatusAsync(Guid reportId, string newStatus)
+        public async Task<Response<string>> UpdateReportStatusAsync(
+            Guid reportId, string newStatus, string? reason, Guid callerId, bool callerIsAdmin)
         {
-            var report = await _supportRepo.GetReportByIdAsync(reportId);
-            if (report == null) return NotFound<string>("Report not found.");
+            if (!TryNormalizeReason(reason, out var normalizedReason))
+                return BadRequest<string>(InvalidReasonMessage);
 
-            report.Status = newStatus;
+            var trimmedStatus = (newStatus ?? string.Empty).Trim();
+            if (!TryParseReportStatus(trimmedStatus, out var parsedStatus))
+                return BadRequest<string>("Invalid report status. Allowed values: Open, Resolved, Rejected.");
+
+            var report = await _supportRepo.GetReportByIdAsync(reportId);
+            if (report == null || (!callerIsAdmin && await ReportInvolvesAdminAsync(report)))
+                return NotFound<string>("Report not found.");
+
+            var oldStatus = string.IsNullOrWhiteSpace(report.Status) ? report.StatusCode.ToString() : report.Status;
+            var canonicalStatus = parsedStatus.ToString();
+
+            if (string.Equals(oldStatus, canonicalStatus, StringComparison.OrdinalIgnoreCase)
+                && report.StatusCode == parsedStatus)
+                return BadRequest<string>($"Report is already in status '{oldStatus}'.");
+
+            report.Status = canonicalStatus;
+            report.StatusCode = parsedStatus;
+            report.ResolvedAt = parsedStatus == ReportStatus.Open ? null : report.ResolvedAt ?? DateTime.UtcNow;
             report.UpdatedAt = DateTime.UtcNow;
 
             await _supportRepo.UpdateReportAsync(report);
 
-            return Success($"Report status updated to '{newStatus}'.");
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.ReportStatusChanged,
+                callerId,
+                report.ReportedUserId,
+                await ResolveUserDisplayAsync(report.ReportedUserId, $"report {report.Id}"),
+                new { fromStatus = oldStatus, toStatus = canonicalStatus })
+            {
+                Category = AuditCategories.Report,
+                EntityType = AuditEntityTypes.Report,
+                EntityId = report.Id.ToString(),
+                FromState = oldStatus,
+                ToState = canonicalStatus,
+                Reason = normalizedReason
+            });
+
+            return Success($"Report status updated to '{canonicalStatus}'.");
         }
 
         public async Task<PagedResponse<SupportTicketDetailsDto>> GetAdminTicketsAsync(
-            SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize)
+            SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize, bool callerIsAdmin)
         {
-            var (totalCount, tickets) = await _supportRepo.GetPagedTicketsAsync(type, status, pageNumber, pageSize);
+            var (totalCount, tickets) = await _supportRepo.GetPagedTicketsAsync(
+                type, status, pageNumber, pageSize, excludeAdmins: !callerIsAdmin);
 
-            var items = tickets.Select(t => new SupportTicketDetailsDto
-            {
-                Id = t.Id,
-                UserId = t.UserId,
-                UserName = t.User != null
-                    ? $"{t.User.FirstName} {t.User.LastName}"
-                    : t.UserId == null ? "Anonymous" : "Deleted user",
-                UserEmail = t.User?.Email,
-                UserProfilePicture = BuildFullUrl(t.User?.ProfilePicturePath),
-                ContactEmail = t.ContactEmail,
-                Type = t.Type,
-                TypeName = TicketTypeName(t.Type),
-                Message = t.Message,
-                // Never a URL in a list; GetTicketScreenshotUrlAsync issues one on demand.
-                HasScreenshot = _fileUrls.HasFile(t.ScreenshotPath),
-                Status = t.StatusCode,
-                CreatedAt = t.CreatedAt,
-                UpdatedAt = t.UpdatedAt,
-                ResolvedAt = t.ResolvedAt
-            }).ToList();
+            var items = tickets.Select(t => MapToTicketDetailsDto(t, callerIsAdmin)).ToList();
 
             return Paginated(items, totalCount, pageNumber, pageSize);
         }
+
+        public async Task<Response<SupportTicketDetailsDto>> GetTicketByIdAsync(
+            Guid ticketId, Guid callerId, bool callerIsAdmin)
+        {
+            var ticket = await _supportRepo.GetTicketDetailsByIdAsync(ticketId);
+            if (ticket == null || (!callerIsAdmin && await IsUserAdminAsync(ticket.UserId, ticket.User)))
+                return NotFound<SupportTicketDetailsDto>("Ticket not found.");
+
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.TicketViewed,
+                callerId,
+                ticket.UserId,
+                FormatUserDisplay(ticket.User, ticket.ContactEmail ?? $"ticket {ticket.Id}"),
+                new { type = ticket.Type.ToString(), status = ticket.StatusCode.ToString() })
+            {
+                Category = AuditCategories.Ticket,
+                EntityType = AuditEntityTypes.Ticket,
+                EntityId = ticket.Id.ToString()
+            });
+
+            return Success(MapToTicketDetailsDto(ticket, callerIsAdmin));
+        }
+
+        private SupportTicketDetailsDto MapToTicketDetailsDto(SupportTicket ticket, bool includeEmails) => new()
+        {
+            Id = ticket.Id,
+            UserId = ticket.UserId,
+            UserName = ticket.User != null
+                ? $"{ticket.User.FirstName} {ticket.User.LastName}"
+                : ticket.UserId == null ? "Anonymous" : "Deleted user",
+            UserEmail = includeEmails ? ticket.User?.Email : null,
+            UserProfilePicture = BuildFullUrl(ticket.User?.ProfilePicturePath),
+            ContactEmail = includeEmails ? ticket.ContactEmail : null,
+            Type = ticket.Type,
+            TypeName = TicketTypeName(ticket.Type),
+            Message = ticket.Message,
+            // Never a URL in a list or detail; GetTicketScreenshotUrlAsync issues one on demand.
+            HasScreenshot = _fileUrls.HasFile(ticket.ScreenshotPath),
+            Status = ticket.StatusCode,
+            CreatedAt = ticket.CreatedAt,
+            UpdatedAt = ticket.UpdatedAt,
+            ResolvedAt = ticket.ResolvedAt
+        };
 
         private string? BuildFullUrl(string? path)
         {
@@ -247,10 +411,22 @@ namespace Cocorra.BLL.Services.SupportService
             _ => type.ToString()
         };
 
-        public async Task<Response<string>> UpdateTicketStatusAsync(Guid ticketId, SupportTicketStatus newStatus)
+        public async Task<Response<string>> UpdateTicketStatusAsync(
+            Guid ticketId, SupportTicketStatus newStatus, string? reason, Guid callerId, bool callerIsAdmin)
         {
+            if (!TryNormalizeReason(reason, out var normalizedReason))
+                return BadRequest<string>(InvalidReasonMessage);
+
+            if (!Enum.IsDefined(newStatus))
+                return BadRequest<string>("Invalid ticket status.");
+
             var ticket = await _supportRepo.GetTicketByIdAsync(ticketId);
-            if (ticket == null) return NotFound<string>("Ticket not found.");
+            if (ticket == null || (!callerIsAdmin && await IsUserAdminAsync(ticket.UserId, ticket.User)))
+                return NotFound<string>("Ticket not found.");
+
+            var oldStatus = ticket.StatusCode;
+            if (oldStatus == newStatus)
+                return BadRequest<string>($"Ticket is already '{newStatus}'.");
 
             // AN-033: the string and typed columns move together, and ResolvedAt marks when the
             // ticket reached a terminal state (cleared again if it is reopened).
@@ -261,21 +437,81 @@ namespace Cocorra.BLL.Services.SupportService
 
             await _supportRepo.UpdateTicketAsync(ticket);
 
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.TicketStatusChanged,
+                callerId,
+                ticket.UserId,
+                await ResolveUserDisplayAsync(ticket.UserId, ticket.ContactEmail ?? $"ticket {ticket.Id}"),
+                new { fromStatus = oldStatus.ToString(), toStatus = newStatus.ToString() })
+            {
+                Category = AuditCategories.Ticket,
+                EntityType = AuditEntityTypes.Ticket,
+                EntityId = ticket.Id.ToString(),
+                FromState = oldStatus.ToString(),
+                ToState = newStatus.ToString(),
+                Reason = normalizedReason
+            });
+
             return Success($"Ticket status updated to '{newStatus}'.");
         }
 
-        public async Task<Response<string>> TakeActionOnReportAsync(Guid reportId, TakeReportActionDto dto)
+        internal async Task<(ApplicationUser? User, Response<string>? Denial)> AuthorizeReportTargetAsync(
+            Guid? reportedUserId, bool callerIsAdmin)
         {
-            var report = await _supportRepo.GetReportByIdAsync(reportId);
-            if (report == null) return NotFound<string>("Report not found.");
-
-            if (report.ReportedUserId != null)
+            if (!reportedUserId.HasValue)
             {
-                var reportedUser = await _userManager.FindByIdAsync(report.ReportedUserId.Value.ToString());
-                if (reportedUser != null && await _userManager.IsInRoleAsync(reportedUser, "Admin"))
+                return (null, null);
+            }
+
+            var reportedUser = await _userManager.FindByIdAsync(reportedUserId.Value.ToString());
+            if (reportedUser is null)
+            {
+                return (null, null);
+            }
+
+            var roles = await _userManager.GetRolesAsync(reportedUser) ?? Array.Empty<string>();
+            if (!callerIsAdmin)
+            {
+                if (AppRoles.AnyProtectedFromModerators(roles))
                 {
-                    return BadRequest<string>("Cannot take disciplinary actions on an Admin account.");
+                    return (reportedUser, Forbidden<string>("Moderators cannot take actions against staff accounts."));
                 }
+
+                if (reportedUser.Status is UserStatus.Pending or UserStatus.ReRecord)
+                {
+                    return (reportedUser, Forbidden<string>("Moderators cannot take actions against accounts in voice verification."));
+                }
+
+                return (reportedUser, null);
+            }
+
+            if (roles.Any(r => string.Equals(r, AppRoles.Admin, StringComparison.OrdinalIgnoreCase)))
+            {
+                return (reportedUser, Forbidden<string>("Cannot take disciplinary actions on an Admin account."));
+            }
+
+            return (reportedUser, null);
+        }
+
+        public async Task<Response<string>> TakeActionOnReportAsync(
+            Guid reportId, TakeReportActionDto dto, Guid callerId, bool callerIsAdmin)
+        {
+            if (!TryNormalizeReason(dto.Reason, out var normalizedReason))
+                return BadRequest<string>(InvalidReasonMessage);
+
+            var report = await _supportRepo.GetReportByIdAsync(reportId);
+            if (report == null || (!callerIsAdmin && await ReportInvolvesAdminAsync(report)))
+                return NotFound<string>("Report not found.");
+
+            if (report.StatusCode != ReportStatus.Open)
+                return Conflict<string>("This report has already been handled.");
+
+            var oldStatus = string.IsNullOrWhiteSpace(report.Status) ? report.StatusCode.ToString() : report.Status;
+
+            var (reportedUser, denial) = await AuthorizeReportTargetAsync(report.ReportedUserId, callerIsAdmin);
+            if (denial != null)
+            {
+                return denial;
             }
 
             switch (dto.Action)
@@ -296,11 +532,10 @@ namespace Cocorra.BLL.Services.SupportService
                     };
                     await _notificationRepo.AddAsync(warning);
 
-                    var warnUser = await _userManager.FindByIdAsync(report.ReportedUserId.Value.ToString());
-                    if (!string.IsNullOrEmpty(warnUser?.FcmToken))
+                    if (!string.IsNullOrEmpty(reportedUser?.FcmToken))
                     {
                         var data = new Dictionary<string, string> { { "type", "report" }, { "reportId", report.Id.ToString() } };
-                        await _pushService.SendPushNotificationAsync(warnUser.FcmToken, warning.Title, warning.Message, data);
+                        await _pushService.SendPushNotificationAsync(reportedUser.FcmToken, warning.Title, warning.Message, data);
                     }
 
                     report.Status = "Resolved";
@@ -311,15 +546,14 @@ namespace Cocorra.BLL.Services.SupportService
                     if (report.ReportedUserId == null)
                         return BadRequest<string>("This report has no reported user to mute.");
 
-                    var muteUser = await _userManager.FindByIdAsync(report.ReportedUserId.Value.ToString());
-                    if (muteUser == null) return NotFound<string>("Reported user not found.");
+                    if (reportedUser == null) return NotFound<string>("Reported user not found.");
 
                     // Held in a variable rather than recomputed: the push below sends this
                     // exact instant to the app, and two calls to UtcNow would not agree.
                     var muteLockoutEnd = DateTimeOffset.UtcNow.AddHours(24);
 
-                    await _userManager.SetLockoutEnabledAsync(muteUser, true);
-                    await _userManager.SetLockoutEndDateAsync(muteUser, muteLockoutEnd);
+                    await _userManager.SetLockoutEnabledAsync(reportedUser, true);
+                    await _userManager.SetLockoutEndDateAsync(reportedUser, muteLockoutEnd);
 
                     // Force kick from any active room via SignalR
                     await _realTimeNotifier.ForceLogoutAsync(
@@ -338,7 +572,7 @@ namespace Cocorra.BLL.Services.SupportService
                     };
                     await _notificationRepo.AddAsync(muteNotification);
 
-                    if (!string.IsNullOrEmpty(muteUser?.FcmToken))
+                    if (!string.IsNullOrEmpty(reportedUser.FcmToken))
                     {
                         // Data-only, per the account_locked contract: empty title and body are
                         // what stop Firebase attaching a Notification object, so the app handles
@@ -352,7 +586,7 @@ namespace Cocorra.BLL.Services.SupportService
                             { "lockout_end", muteLockoutEnd.UtcDateTime.ToString("O") }
                         };
                         await _pushService.SendPushNotificationAsync(
-                            muteUser.FcmToken, "", "", data);
+                            reportedUser.FcmToken, "", "", data);
                     }
 
                     report.Status = "Resolved";
@@ -363,16 +597,15 @@ namespace Cocorra.BLL.Services.SupportService
                     if (report.ReportedUserId == null)
                         return BadRequest<string>("This report has no reported user to ban.");
 
-                    var banUser = await _userManager.FindByIdAsync(report.ReportedUserId.Value.ToString());
-                    if (banUser == null) return NotFound<string>("Reported user not found.");
+                    if (reportedUser == null) return NotFound<string>("Reported user not found.");
 
-                    banUser.Status = UserStatus.Banned;
-                    await _userManager.SetLockoutEnabledAsync(banUser, true);
-                    await _userManager.SetLockoutEndDateAsync(banUser, DateTimeOffset.UtcNow.AddYears(100));
+                    reportedUser.Status = UserStatus.Banned;
+                    await _userManager.SetLockoutEnabledAsync(reportedUser, true);
+                    await _userManager.SetLockoutEndDateAsync(reportedUser, DateTimeOffset.UtcNow.AddYears(100));
 
                     // Invalidate refresh token to prevent session resurrection
-                    banUser.RefreshToken = null;
-                    banUser.RefreshTokenExpiryTime = DateTime.UtcNow;
+                    reportedUser.RefreshToken = null;
+                    reportedUser.RefreshTokenExpiryTime = DateTime.UtcNow;
 
                     // Force kick from any active room via SignalR
                     await _realTimeNotifier.ForceLogoutAsync(
@@ -391,7 +624,7 @@ namespace Cocorra.BLL.Services.SupportService
                     };
                     await _notificationRepo.AddAsync(banNotification);
 
-                    if (!string.IsNullOrEmpty(banUser?.FcmToken))
+                    if (!string.IsNullOrEmpty(reportedUser.FcmToken))
                     {
                         var data = new Dictionary<string, string>
                         {
@@ -399,12 +632,14 @@ namespace Cocorra.BLL.Services.SupportService
                             { "lockout_end", DateTimeOffset.UtcNow.AddYears(100).UtcDateTime.ToString("O") }
                         };
                         await _pushService.SendPushNotificationAsync(
-                            banUser.FcmToken, "", "", data);
+                            reportedUser.FcmToken, "", "", data);
                     }
 
                     // Clear FCM token after push is sent
-                    banUser.FcmToken = null;
-                    await _userManager.UpdateAsync(banUser);
+                    reportedUser.FcmToken = null;
+                    await _userManager.UpdateAsync(reportedUser);
+                    await _userManager.UpdateSecurityStampAsync(reportedUser);
+                    await _supportRepo.ReleaseActiveChatsForStaffAsync(reportedUser.Id.ToString());
 
                     report.Status = "Resolved";
                     report.StatusCode = ReportStatus.Resolved;
@@ -426,6 +661,27 @@ namespace Cocorra.BLL.Services.SupportService
             report.ResolvedAt = DateTime.UtcNow;
 
             await _supportRepo.UpdateReportAsync(report);
+
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.ReportActionTaken,
+                callerId,
+                report.ReportedUserId,
+                FormatUserDisplay(reportedUser, $"report {report.Id}"),
+                new
+                {
+                    action = dto.Action.ToString(),
+                    reportCategory = report.Category.ToString(),
+                    outcome = report.StatusCode.ToString(),
+                    adminNote = dto.AdminNote
+                })
+            {
+                Category = AuditCategories.Report,
+                EntityType = AuditEntityTypes.Report,
+                EntityId = report.Id.ToString(),
+                FromState = oldStatus,
+                ToState = dto.Action.ToString(),
+                Reason = normalizedReason
+            });
 
             // AN-034: the enforcement OUTCOME. Report.Status alone cannot distinguish "we
             // banned someone" from "we dismissed it" — both end as a status change — so the
@@ -498,6 +754,7 @@ namespace Cocorra.BLL.Services.SupportService
         {
             var chat = await _supportRepo.GetUserOpenChatAsync(userId);
             bool isNew = false;
+            bool releasedOrphanedChat = false;
 
             if (chat == null)
             {
@@ -510,8 +767,18 @@ namespace Cocorra.BLL.Services.SupportService
                 await _supportRepo.AddChatAsync(chat);
                 isNew = true;
             }
+            else if (chat.Status == SupportChatStatus.Active)
+            {
+                if (string.IsNullOrEmpty(chat.AdminId) || !await IsActiveSupportStaffAsync(chat.AdminId))
+                {
+                    chat.AdminId = null;
+                    chat.Status = SupportChatStatus.Pending;
+                    await _supportRepo.UpdateChatAsync(chat);
+                    releasedOrphanedChat = true;
+                }
+            }
 
-            if (chat.Status == SupportChatStatus.Pending)
+            if (chat.Status == SupportChatStatus.Pending && !releasedOrphanedChat)
             {
                 var pendingMessages = await _supportRepo.GetPendingUserMessageCountAsync(chat.Id);
                 if (pendingMessages >= 3)
@@ -546,7 +813,10 @@ namespace Cocorra.BLL.Services.SupportService
             {
                 ChatId = chat.Id,
                 Message = messageDto,
-                IsNewChat = isNew
+                IsNewChat = isNew,
+                ClaimedByAdminId = chat.Status == SupportChatStatus.Active && !string.IsNullOrEmpty(chat.AdminId)
+                    ? chat.AdminId
+                    : null
             };
 
             // Only an Active chat has a counterpart to push to. While the chat is Pending it
@@ -575,7 +845,7 @@ namespace Cocorra.BLL.Services.SupportService
             var chat = await _supportRepo.GetChatByIdAsync(chatId);
             if (chat == null) return NotFound<string>("Chat not found.");
 
-            if (chat.Status != SupportChatStatus.Pending)
+            if (chat.Status != SupportChatStatus.Pending || !string.IsNullOrEmpty(chat.AdminId))
                 return BadRequest<string>("Chat is not pending.");
 
             chat.AdminId = adminId;
@@ -590,19 +860,32 @@ namespace Cocorra.BLL.Services.SupportService
                 return BadRequest<string>("This chat has already been claimed by another admin.");
             }
 
+            var targetUserId = ParseGuidOrNull(chat.UserId);
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.SupportChatClaimed,
+                ParseGuidOrNull(adminId),
+                targetUserId,
+                await ResolveUserDisplayAsync(targetUserId, $"chat {chat.Id}"),
+                null)
+            {
+                Category = AuditCategories.SupportChat,
+                EntityType = AuditEntityTypes.SupportChat,
+                EntityId = chat.Id.ToString()
+            });
+
             return Success("Chat claimed successfully.");
         }
 
-        public async Task<Response<AdminReplyResultDto>> AdminReplyAsync(Guid chatId, string adminId, SendMessageDto dto)
+        public async Task<Response<AdminReplyResultDto>> AdminReplyAsync(Guid chatId, string adminId, SendMessageDto dto, bool callerIsAdmin)
         {
             var chat = await _supportRepo.GetChatByIdAsync(chatId);
             if (chat == null) return NotFound<AdminReplyResultDto>("Chat not found.");
 
-            if (chat.AdminId != adminId)
-                return BadRequest<AdminReplyResultDto>("You are not assigned to this chat.");
-
             if (chat.Status != SupportChatStatus.Active)
                 return BadRequest<AdminReplyResultDto>("Chat is not active.");
+
+            if (!callerIsAdmin && chat.AdminId != adminId)
+                return BadRequest<AdminReplyResultDto>("You are not assigned to this chat.");
 
             var message = new SupportMessage
             {
@@ -615,6 +898,20 @@ namespace Cocorra.BLL.Services.SupportService
             };
 
             await _supportRepo.AddMessageAsync(message);
+
+            var targetUserId = ParseGuidOrNull(chat.UserId);
+            // Only record messageId so support message content never enters the audit log.
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.SupportChatReplied,
+                ParseGuidOrNull(adminId),
+                targetUserId,
+                await ResolveUserDisplayAsync(targetUserId, $"chat {chat.Id}"),
+                new { messageId = message.Id })
+            {
+                Category = AuditCategories.SupportChat,
+                EntityType = AuditEntityTypes.SupportChat,
+                EntityId = chat.Id.ToString()
+            });
 
             var messageDto = new SupportMessageDto
             {
@@ -639,7 +936,7 @@ namespace Cocorra.BLL.Services.SupportService
             return Success(resultDto);
         }
 
-        public async Task<Response<string>> CloseChatAsync(Guid chatId, string adminId)
+        public async Task<Response<string>> CloseChatAsync(Guid chatId, string adminId, bool callerIsAdmin)
         {
             var chat = await _supportRepo.GetChatByIdAsync(chatId);
             if (chat == null) return NotFound<string>("Chat not found.");
@@ -647,13 +944,29 @@ namespace Cocorra.BLL.Services.SupportService
             if (chat.Status == SupportChatStatus.Closed)
                 return BadRequest<string>("Chat is already closed.");
 
-            if (chat.AdminId != adminId)
+            if (chat.Status != SupportChatStatus.Active)
+                return BadRequest<string>("Chat is not active.");
+
+            if (!callerIsAdmin && chat.AdminId != adminId)
                 return BadRequest<string>("You are not assigned to this chat.");
 
             chat.Status = SupportChatStatus.Closed;
             chat.ClosedAt = DateTime.UtcNow;
 
             await _supportRepo.UpdateChatAsync(chat);
+
+            var targetUserId = ParseGuidOrNull(chat.UserId);
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.SupportChatClosed,
+                ParseGuidOrNull(adminId),
+                targetUserId,
+                await ResolveUserDisplayAsync(targetUserId, $"chat {chat.Id}"),
+                null)
+            {
+                Category = AuditCategories.SupportChat,
+                EntityType = AuditEntityTypes.SupportChat,
+                EntityId = chat.Id.ToString()
+            });
 
             return Success("Chat closed successfully.");
         }

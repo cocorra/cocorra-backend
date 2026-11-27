@@ -1,3 +1,4 @@
+using Cocorra.API.Authorization;
 using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.SystemLogs;
 using Cocorra.DAL.AppMetaData;
@@ -10,7 +11,7 @@ using System.Threading.Tasks;
 namespace Cocorra.API.Controllers
 {
     [ApiController]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
     public class AdminLogsController : ControllerBase
     {
         private const int MaxPageSize = 50;

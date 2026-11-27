@@ -66,7 +66,12 @@ namespace Cocorra.BLL.Services.Storage
                             userId = x.File.TargetUserId,
                             objectKey = x.Key
                         })
-                    }));
+                    })
+                {
+                    Category = AuditCategory(kind),
+                    EntityType = AuditEntityType(kind),
+                    EntityId = issued.Count == 1 ? issued[0].File.SubjectId.ToString() : null
+                });
             }
 
             return results;
@@ -78,6 +83,22 @@ namespace Cocorra.BLL.Services.Storage
             PrivateFileKind.ReportScreenshot => "report",
             PrivateFileKind.TicketScreenshot => "ticket",
             _ => "file"
+        };
+
+        private static string? AuditCategory(PrivateFileKind kind) => kind switch
+        {
+            PrivateFileKind.Voice => AuditCategories.VoiceReview,
+            PrivateFileKind.ReportScreenshot => AuditCategories.Report,
+            PrivateFileKind.TicketScreenshot => AuditCategories.Ticket,
+            _ => null
+        };
+
+        private static string? AuditEntityType(PrivateFileKind kind) => kind switch
+        {
+            PrivateFileKind.Voice => AuditEntityTypes.User,
+            PrivateFileKind.ReportScreenshot => AuditEntityTypes.Report,
+            PrivateFileKind.TicketScreenshot => AuditEntityTypes.Ticket,
+            _ => null
         };
 
         private Guid? CurrentUserId() =>

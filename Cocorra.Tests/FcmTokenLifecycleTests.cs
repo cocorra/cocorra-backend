@@ -198,13 +198,13 @@ public class FcmTokenLifecycleTests
             pushServiceMock.Object,
             blockedDevicesRepoMock.Object,
             new Mock<IEventTracker>().Object,
-            null!,
+            new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options),
             notificationRepoMock.Object,
             new FakePrivateFileUrlIssuer()
         );
 
         // Act
-        var result = await adminService.ChangeUserStatusAsync(userId, UserStatus.Banned, Guid.NewGuid());
+        var result = await adminService.ChangeUserStatusAsync(userId, UserStatus.Banned, "Policy violation", Guid.NewGuid(), callerIsAdmin: true);
 
         // Assert
         Assert.True(result.Succeeded);
@@ -251,12 +251,12 @@ public class FcmTokenLifecycleTests
             new Mock<IPushNotificationService>().Object,
             blockedDevicesRepoMock.Object,
             new Mock<IEventTracker>().Object,
-            null!,
+            new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options),
             new Mock<INotificationRepository>().Object,
             new FakePrivateFileUrlIssuer()
         );
 
-        var dto = new BlockDeviceAndEmailDto { Email = email };
+        var dto = new BlockDeviceAndEmailDto { Email = email, Reason = "Policy violation" };
 
         // Act
         var result = await adminService.BlockDeviceAndEmailAsync(dto, Guid.NewGuid());

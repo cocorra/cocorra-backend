@@ -21,6 +21,8 @@ namespace Cocorra.BLL.Services.AuditLogs
         private const int MaxTargetDisplayLength = 256;
         private const int MaxIpAddressLength = 64;
         private const int MaxUserAgentLength = 512;
+        private const int MaxShortFieldLength = 64;
+        private const int MaxReasonLength = 1000;
 
         // The dashboard reads details keys as-is, so they are stored in the API's casing.
         private static readonly JsonSerializerOptions DetailsJsonOptions = new(JsonSerializerDefaults.Web)
@@ -53,7 +55,14 @@ namespace Cocorra.BLL.Services.AuditLogs
                     ActorUserId = NullIfEmpty(entry.ActorUserId),
                     TargetUserId = NullIfEmpty(entry.TargetUserId),
                     TargetDisplay = LogText.Truncate(entry.TargetDisplay, MaxTargetDisplayLength),
-                    DetailsJson = entry.Details is null ? null : JsonSerializer.Serialize(entry.Details, DetailsJsonOptions)
+                    DetailsJson = entry.Details is null ? null : JsonSerializer.Serialize(entry.Details, DetailsJsonOptions),
+                    Category = entry.Category,
+                    EntityType = entry.EntityType,
+                    EntityId = LogText.Truncate(entry.EntityId, MaxShortFieldLength),
+                    FromState = LogText.Truncate(entry.FromState, MaxShortFieldLength),
+                    ToState = LogText.Truncate(entry.ToState, MaxShortFieldLength),
+                    Reason = LogText.Truncate(entry.Reason, MaxReasonLength),
+                    ActorRole = LogText.Truncate(entry.ActorRole, MaxRoleLength)
                 };
                 ApplyRequestContext(auditLog);
 
@@ -111,7 +120,10 @@ namespace Cocorra.BLL.Services.AuditLogs
             var roles = string.Join(",", user.FindAll(ClaimTypes.Role).Select(c => c.Value));
 
             auditLog.ActorEmail = LogText.Truncate(user.FindFirst(ClaimTypes.Email)?.Value, MaxEmailLength);
-            auditLog.ActorRole = roles.Length == 0 ? null : LogText.Truncate(roles, MaxRoleLength);
+            if (roles.Length > 0)
+            {
+                auditLog.ActorRole = LogText.Truncate(roles, MaxRoleLength);
+            }
             // Already the real client address: UseForwardedHeaders runs first in the pipeline.
             auditLog.IpAddress = LogText.Truncate(httpContext.Connection.RemoteIpAddress?.ToString(), MaxIpAddressLength);
 
@@ -131,7 +143,13 @@ namespace Cocorra.BLL.Services.AuditLogs
             TargetDisplay = log.TargetDisplay,
             Details = ParseDetails(log),
             IpAddress = log.IpAddress,
-            UserAgent = log.UserAgent
+            UserAgent = log.UserAgent,
+            Category = log.Category,
+            EntityType = log.EntityType,
+            EntityId = log.EntityId,
+            FromState = log.FromState,
+            ToState = log.ToState,
+            Reason = log.Reason
         };
 
         private JsonElement? ParseDetails(AuditLog log)

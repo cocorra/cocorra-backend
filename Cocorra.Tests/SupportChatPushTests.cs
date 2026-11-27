@@ -84,7 +84,7 @@ public class SupportChatPushTests
             .ReturnsAsync(new ApplicationUser { FcmToken = "user_device_token" });
 
         var result = await harness.Build().AdminReplyAsync(
-            chat.Id, adminId, new SendMessageDto { Content = "We are looking into it." });
+            chat.Id, adminId, new SendMessageDto { Content = "We are looking into it." }, callerIsAdmin: false);
 
         Assert.True(result.Succeeded);
         Assert.NotNull(harness.Sent);
@@ -115,7 +115,7 @@ public class SupportChatPushTests
             .ReturnsAsync(new ApplicationUser { FcmToken = null });
 
         var result = await harness.Build().AdminReplyAsync(
-            chat.Id, adminId, new SendMessageDto { Content = "Hello?" });
+            chat.Id, adminId, new SendMessageDto { Content = "Hello?" }, callerIsAdmin: false);
 
         Assert.True(result.Succeeded);
         Assert.Null(harness.Sent);
@@ -144,7 +144,7 @@ public class SupportChatPushTests
             .ThrowsAsync(new Exception("FCM unreachable"));
 
         var result = await harness.Build().AdminReplyAsync(
-            chat.Id, adminId, new SendMessageDto { Content = "Still there?" });
+            chat.Id, adminId, new SendMessageDto { Content = "Still there?" }, callerIsAdmin: false);
 
         Assert.True(result.Succeeded);
     }
@@ -168,7 +168,8 @@ public class SupportChatPushTests
 
         await harness.Build().AdminReplyAsync(
             chat.Id, adminId,
-            new SendMessageDto { Content = "{\"type\":\"image\",\"url\":\"https://cdn/x.png\"}" });
+            new SendMessageDto { Content = "{\"type\":\"image\",\"url\":\"https://cdn/x.png\"}" },
+            callerIsAdmin: false);
 
         Assert.NotNull(harness.Sent);
         Assert.DoesNotContain("{", harness.Sent!.Value.Body);
@@ -188,12 +189,15 @@ public class SupportChatPushTests
             Status = SupportChatStatus.Active
         };
 
+        var adminUser = new ApplicationUser { Status = UserStatus.Active, FcmToken = "admin_device_token" };
         var harness = new Harness();
         harness.Repo.Setup(r => r.GetUserOpenChatAsync(userId)).ReturnsAsync(chat);
         harness.Users.Setup(m => m.FindByIdAsync(userId))
             .ReturnsAsync(new ApplicationUser { FirstName = "Nadia", LastName = "Farouk" });
         harness.Users.Setup(m => m.FindByIdAsync("admin-1"))
-            .ReturnsAsync(new ApplicationUser { FcmToken = "admin_device_token" });
+            .ReturnsAsync(adminUser);
+        harness.Users.Setup(m => m.GetRolesAsync(adminUser))
+            .ReturnsAsync(new List<string> { AppRoles.Admin });
 
         var result = await harness.Build().SendMessageAsync(
             userId, new SendMessageDto { Content = "Any update?" });

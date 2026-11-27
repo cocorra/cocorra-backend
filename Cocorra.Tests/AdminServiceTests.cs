@@ -26,6 +26,8 @@ namespace Cocorra.Tests;
 
 public class AdminServiceTests : IDisposable
 {
+    private const string DefaultReason = "Moderation review decision";
+
     private readonly SqliteTestHost _host = new();
     private readonly Mock<UserManager<ApplicationUser>> _userManagerMock = TestIdentityHelper.CreateMockUserManager();
     private readonly Mock<IUploadVoice> _uploadVoiceMock = new();
@@ -70,7 +72,7 @@ public class AdminServiceTests : IDisposable
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync((ApplicationUser?)null);
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, Guid.NewGuid());
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, DefaultReason, Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -83,9 +85,10 @@ public class AdminServiceTests : IDisposable
         var userId = Guid.NewGuid();
         var user = new ApplicationUser { Id = userId, Status = UserStatus.Active };
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { AppRoles.User });
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, Guid.NewGuid());
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, DefaultReason, Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -107,15 +110,18 @@ public class AdminServiceTests : IDisposable
             FcmToken = "fcm_token_123"
         };
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { AppRoles.User });
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, adminId);
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, DefaultReason, adminId, callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
+        Assert.False(result.SessionRevoked);
         Assert.Equal(UserStatus.Active, user.Status);
         Assert.Null(user.VoiceVerificationPath);
 
+        _userManagerMock.Verify(m => m.UpdateSecurityStampAsync(user), Times.Never);
         _uploadVoiceMock.Verify(u => u.DeleteVoice("voices/test.mp3"), Times.Once);
         _notificationRepoMock.Verify(n => n.AddAsync(It.Is<Notification>(notif =>
             notif.UserId == userId && notif.Title.Contains("Verified"))), Times.Once);
@@ -145,7 +151,7 @@ public class AdminServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ChangeUserStatusAsync_BanActiveUser_LocksOutUserClearsTokensAndPushes()
+    public async Task ChangeUserStatusAsync_BanActiveUser_LocksOutUserClearsTokensRotatesStampAndPushes()
     {
         var userId = Guid.NewGuid();
         var adminId = Guid.NewGuid();
@@ -157,16 +163,19 @@ public class AdminServiceTests : IDisposable
             FcmToken = "fcm_xyz"
         };
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { AppRoles.User });
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, adminId);
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, DefaultReason, adminId, callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
+        Assert.True(result.SessionRevoked);
         Assert.Equal(UserStatus.Banned, user.Status);
         Assert.Null(user.RefreshToken);
-        Assert.Null(user.FcmToken); // Cleared after notification
+        Assert.Null(user.FcmToken);
 
+        _userManagerMock.Verify(m => m.UpdateSecurityStampAsync(user), Times.Once);
         _notificationRepoMock.Verify(n => n.AddAsync(It.Is<Notification>(notif =>
             notif.UserId == userId && notif.Type == NotificationType.AdminWarning)), Times.Once);
         _pushServiceMock.Verify(p => p.SendPushNotificationAsync(
@@ -180,7 +189,24 @@ public class AdminServiceTests : IDisposable
     public async Task BulkChangeUserStatusAsync_EmptyUserList_ReturnsBadRequest()
     {
         var service = CreateService();
-        var dto = new BulkChangeStatusDto { UserIds = new List<Guid>(), NewStatus = UserStatus.Active };
+        var dto = new BulkChangeStatusDto { UserIds = new List<Guid>(), NewStatus = UserStatus.Active, Reason = DefaultReason };
+
+        var result = await service.BulkChangeUserStatusAsync(dto, Guid.NewGuid());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task BulkChangeUserStatusAsync_MissingReason_ReturnsBadRequest()
+    {
+        var service = CreateService();
+        var dto = new BulkChangeStatusDto
+        {
+            UserIds = new List<Guid> { Guid.NewGuid() },
+            NewStatus = UserStatus.Active,
+            Reason = "  "
+        };
 
         var result = await service.BulkChangeUserStatusAsync(dto, Guid.NewGuid());
 
@@ -196,13 +222,15 @@ public class AdminServiceTests : IDisposable
         var otherUser = new ApplicationUser { Id = otherUserId, Status = UserStatus.Pending };
 
         _userManagerMock.Setup(m => m.FindByIdAsync(otherUserId.ToString())).ReturnsAsync(otherUser);
+        _userManagerMock.Setup(m => m.GetRolesAsync(otherUser)).ReturnsAsync(new List<string> { AppRoles.User });
         _userManagerMock.Setup(m => m.UpdateAsync(otherUser)).ReturnsAsync(IdentityResult.Success);
 
         var service = CreateService();
         var dto = new BulkChangeStatusDto
         {
             UserIds = new List<Guid> { adminId, otherUserId },
-            NewStatus = UserStatus.Active
+            NewStatus = UserStatus.Active,
+            Reason = DefaultReason
         };
 
         var result = await service.BulkChangeUserStatusAsync(dto, adminId);
@@ -220,20 +248,20 @@ public class AdminServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetUserByIdAsync_UserNotFound_ReturnsBadRequest()
+    public async Task GetUserByIdAsync_UserNotFound_ReturnsNotFound()
     {
         var userId = Guid.NewGuid();
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync((ApplicationUser?)null);
 
         var service = CreateService();
-        var result = await service.GetUserByIdAsync(userId);
+        var result = await service.GetUserByIdAsync(userId, callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
     }
 
     [Fact]
-    public async Task GetUserByIdAsync_ValidUser_MapsFieldsAndRoles()
+    public async Task GetUserByIdAsync_ValidUserAsAdmin_MapsFieldsAndRoles()
     {
         var userId = Guid.NewGuid();
         var user = new ApplicationUser
@@ -251,12 +279,14 @@ public class AdminServiceTests : IDisposable
         _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { "Member" });
 
         var service = CreateService();
-        var result = await service.GetUserByIdAsync(userId);
+        var result = await service.GetUserByIdAsync(userId, callerIsAdmin: true);
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
         Assert.Equal("David Miller", result.Data.FullName);
-        // No URL in the response and nothing issued: only GET .../VoiceUrl does that.
+        Assert.Equal("david@cocorra.com", result.Data.Email);
+        Assert.Equal(28, result.Data.Age);
+        Assert.Equal("ENFJ", result.Data.MBTI);
         Assert.Null(result.Data.VoicePath);
         Assert.True(result.Data.HasVoice);
         Assert.Empty(FileUrls.Calls);
@@ -266,7 +296,7 @@ public class AdminServiceTests : IDisposable
     [Fact]
     public async Task GetAllUsersAsync_ReturnsHasVoiceFlags_AndNeverAPathOrUrl()
     {
-        _userRepoMock.Setup(r => r.GetPaginatedUsersWithRolesAsync(null, 1, 10))
+        _userRepoMock.Setup(r => r.GetPaginatedUsersWithRolesAsync(null, 1, 10, false))
             .ReturnsAsync((3, new List<UserDto>
             {
                 new() { Id = Guid.NewGuid().ToString(), VoicePath = "Uploads/Voices/a.m4a", Roles = new List<string>() },
@@ -274,12 +304,11 @@ public class AdminServiceTests : IDisposable
                 new() { Id = Guid.NewGuid().ToString(), VoicePath = "Error:ServerException", Roles = new List<string>() }
             }));
 
-        var result = await CreateService().GetAllUsersAsync(null);
+        var result = await CreateService().GetAllUsersAsync(null, callerIsAdmin: true);
 
         var users = Assert.IsType<List<UserDto>>(result.Data);
         Assert.Equal(new[] { true, false, false }, users.Select(u => u.HasVoice));
         Assert.All(users, u => Assert.Null(u.VoicePath));
-        // Listing users issues no URL and therefore writes no audit row.
         Assert.Empty(FileUrls.Calls);
     }
 
@@ -331,7 +360,7 @@ public class AdminServiceTests : IDisposable
         _userManagerMock.Setup(m => m.FindByEmailAsync("missing@cocorra.com")).ReturnsAsync((ApplicationUser?)null);
 
         var service = CreateService();
-        var dto = new BlockDeviceAndEmailDto { Email = "missing@cocorra.com" };
+        var dto = new BlockDeviceAndEmailDto { Email = "missing@cocorra.com", Reason = DefaultReason };
 
         var result = await service.BlockDeviceAndEmailAsync(dto, Guid.NewGuid());
 
@@ -340,7 +369,20 @@ public class AdminServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task BlockDeviceAndEmailAsync_ValidUser_BansUserAndBlocksDevice()
+    public async Task BlockDeviceAndEmailAsync_InvalidReason_ReturnsBadRequest()
+    {
+        var service = CreateService();
+        var dto = new BlockDeviceAndEmailDto { Email = "spammer@cocorra.com", Reason = "no" };
+
+        var result = await service.BlockDeviceAndEmailAsync(dto, Guid.NewGuid());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        _userManagerMock.Verify(m => m.FindByEmailAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BlockDeviceAndEmailAsync_ValidUser_BansUserRotatesStampAndBlocksDevice()
     {
         var userId = Guid.NewGuid();
         var user = new ApplicationUser
@@ -356,7 +398,7 @@ public class AdminServiceTests : IDisposable
             .ReturnsAsync(2);
 
         var service = CreateService();
-        var dto = new BlockDeviceAndEmailDto { Email = "spammer@cocorra.com" };
+        var dto = new BlockDeviceAndEmailDto { Email = "spammer@cocorra.com", Reason = DefaultReason };
 
         var result = await service.BlockDeviceAndEmailAsync(dto, Guid.NewGuid());
 
@@ -366,9 +408,7 @@ public class AdminServiceTests : IDisposable
         Assert.Null(user.FcmToken);
         Assert.Equal(2, result.Data!.DevicesBlocked);
 
-        // The devices come from the login registry, not the request. This assertion used to
-        // check a device id carried on the DTO — which could only ever have been the acting
-        // admin's own, the reason those fields were removed.
+        _userManagerMock.Verify(m => m.UpdateSecurityStampAsync(user), Times.Once);
         _blockedDevicesRepoMock.Verify(b => b.BlockAllDevicesForUserAsync(userId), Times.Once);
     }
 
@@ -385,10 +425,8 @@ public class AdminServiceTests : IDisposable
         var service = CreateService();
 
         var result = await service.BlockDeviceAndEmailAsync(
-            new BlockDeviceAndEmailDto { Email = "ghost@cocorra.com" }, Guid.NewGuid());
+            new BlockDeviceAndEmailDto { Email = "ghost@cocorra.com", Reason = DefaultReason }, Guid.NewGuid());
 
-        // The ban still stands; only the device claim is withheld. A user who only ever signed
-        // in from a client that omits X-Device-Id has nothing in the registry.
         Assert.True(result.Succeeded);
         Assert.Equal(UserStatus.Banned, user.Status);
         Assert.Equal(0, result.Data!.DevicesBlocked);
@@ -401,10 +439,10 @@ public class AdminServiceTests : IDisposable
         var userId = Guid.NewGuid();
         var user = new ApplicationUser { Id = userId, Status = UserStatus.Active };
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(true);
+        _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { AppRoles.Admin });
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, Guid.NewGuid());
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, DefaultReason, Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -416,11 +454,11 @@ public class AdminServiceTests : IDisposable
     {
         var user = new ApplicationUser { Id = Guid.NewGuid(), Email = "admin@cocorra.com" };
         _userManagerMock.Setup(m => m.FindByEmailAsync("admin@cocorra.com")).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(true);
+        _userManagerMock.Setup(m => m.IsInRoleAsync(user, AppRoles.Admin)).ReturnsAsync(true);
 
         var service = CreateService();
         var result = await service.BlockDeviceAndEmailAsync(
-            new BlockDeviceAndEmailDto { Email = "admin@cocorra.com" }, Guid.NewGuid());
+            new BlockDeviceAndEmailDto { Email = "admin@cocorra.com", Reason = DefaultReason }, Guid.NewGuid());
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -445,7 +483,7 @@ public class AdminServiceTests : IDisposable
     [Fact]
     public async Task BroadcastNotificationAsync_NoEligibleUsers_ReturnsSuccessWithZeroCounts()
     {
-        var service = CreateService(out var db);
+        var service = CreateService(out _);
         var adminId = Guid.NewGuid();
 
         var result = await service.BroadcastNotificationAsync(

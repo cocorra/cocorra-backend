@@ -12,7 +12,7 @@ namespace Cocorra.DAL.Data // عدل الـ namespace حسب مكان الكلا
             var roleManager = serviceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
 
             // الأدوار الأساسية في السيستم
-            string[] roleNames = { "User", "Admin", "Coach", "Moderator" };
+            var roleNames = Cocorra.DAL.Models.AppRoles.All;
 
             foreach (var roleName in roleNames)
             {

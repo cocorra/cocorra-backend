@@ -1,10 +1,15 @@
+using System.Reflection;
+using Cocorra.API.Authorization;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.DAL.DTOS.RoomDto;
 using Cocorra.DAL.Enums;
+using Cocorra.DAL.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Moq;
 using System.Security.Claims;
@@ -386,5 +391,65 @@ public class RoomsControllerTests
 
         var obj = Assert.IsType<ObjectResult>(result);
         Assert.Equal(200, obj.StatusCode);
+    }
+
+    [Fact]
+    public void RoomsController_UsesPoliciesAndNoRawRoleAttributes()
+    {
+        var createAttr = typeof(Cocorra.API.Controllers.RoomsController)
+            .GetMethod(nameof(Cocorra.API.Controllers.RoomsController.Create))!
+            .GetCustomAttributes<AuthorizeAttribute>(false)
+            .Single();
+        Assert.Equal(AuthPolicies.AdminOrCoach, createAttr.Policy);
+        Assert.Null(createAttr.Roles);
+
+        var historyAttr = typeof(Cocorra.API.Controllers.RoomsController)
+            .GetMethod(nameof(Cocorra.API.Controllers.RoomsController.GetRoomHistory))!
+            .GetCustomAttributes<AuthorizeAttribute>(false)
+            .Single();
+        Assert.Equal(AuthPolicies.AdminOnly, historyAttr.Policy);
+        Assert.Null(historyAttr.Roles);
+
+        var allAuthorizeAttributes = typeof(Cocorra.API.Controllers.RoomsController)
+            .GetCustomAttributes<AuthorizeAttribute>(true)
+            .Concat(typeof(Cocorra.API.Controllers.RoomsController)
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .SelectMany(m => m.GetCustomAttributes<AuthorizeAttribute>(false)));
+
+        Assert.All(allAuthorizeAttributes, attr => Assert.Null(attr.Roles));
+    }
+
+    [Theory]
+    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Admin, AuthPolicies.ActiveStatus, true)]
+    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Coach, AuthPolicies.ActiveStatus, true)]
+    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Moderator, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.RecordReviewer, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.User, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Coach, "Pending", false)]
+    [InlineData(AuthPolicies.AdminOnly, AppRoles.Admin, AuthPolicies.ActiveStatus, true)]
+    [InlineData(AuthPolicies.AdminOnly, AppRoles.Moderator, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminOnly, AppRoles.RecordReviewer, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminOnly, AppRoles.Coach, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminOnly, AppRoles.User, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminOnly, AppRoles.Admin, "Pending", false)]
+    public async Task RoomPolicies_EnforceRoleAndActiveVerificationStatus(
+        string policy, string role, string verificationStatus, bool expectedAllowed)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorization(AuthPolicies.Register);
+        using var provider = services.BuildServiceProvider();
+        var authorizationService = provider.GetRequiredService<IAuthorizationService>();
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+            new Claim(ClaimTypes.Role, role),
+            new Claim(AuthPolicies.VerificationStatusClaim, verificationStatus)
+        }, "TestAuth"));
+
+        var result = await authorizationService.AuthorizeAsync(principal, null, policy);
+
+        Assert.Equal(expectedAllowed, result.Succeeded);
     }
 }

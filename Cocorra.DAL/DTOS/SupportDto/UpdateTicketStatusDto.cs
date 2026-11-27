@@ -8,5 +8,7 @@ namespace Cocorra.DAL.DTOS.SupportDto
         [Required]
         [EnumDataType(typeof(SupportTicketStatus))]
         public SupportTicketStatus? Status { get; set; }
+
+        public string? Reason { get; set; }
     }
 }

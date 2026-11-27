@@ -9,5 +9,7 @@ namespace Cocorra.DAL.DTOS.ReportDto
         public AdminReportAction Action { get; set; }
 
         public string? AdminNote { get; set; }
+
+        public string? Reason { get; set; }
     }
 }

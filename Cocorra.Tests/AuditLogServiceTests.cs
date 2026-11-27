@@ -330,4 +330,133 @@ public class AuditLogServiceTests : IDisposable
         Assert.Equal(JsonValueKind.Object, item.Details.Value.ValueKind);
         Assert.Equal("Active", item.Details.Value.GetProperty("status").GetString());
     }
+
+    [Fact]
+    public async Task RecordAsync_StructuredActivityFields_PersistedAndReturnedInAuditLogDto()
+    {
+        var (service, db) = CreateService();
+        _httpContextAccessorMock.Setup(h => h.HttpContext).Returns((HttpContext?)null);
+
+        var actorId = Guid.NewGuid();
+        var targetId = Guid.NewGuid();
+        var entityId = Guid.NewGuid().ToString();
+
+        await service.RecordAsync(new AuditEntry(
+            AuditActions.VoiceReviewDecision,
+            actorId,
+            targetId,
+            "user@cocorra.com",
+            new { shortRef = "VR-1234ABCD" })
+        {
+            Category = AuditCategories.VoiceReview,
+            EntityType = AuditEntityTypes.User,
+            EntityId = entityId,
+            FromState = "Pending",
+            ToState = "ReRecord",
+            Reason = "Audio too quiet to verify",
+            ActorRole = AppRoles.RecordReviewer
+        });
+
+        var row = await db.AuditLogs.AsNoTracking().SingleAsync();
+        Assert.Equal(AuditCategories.VoiceReview, row.Category);
+        Assert.Equal(AuditEntityTypes.User, row.EntityType);
+        Assert.Equal(entityId, row.EntityId);
+        Assert.Equal("Pending", row.FromState);
+        Assert.Equal("ReRecord", row.ToState);
+        Assert.Equal("Audio too quiet to verify", row.Reason);
+        Assert.Equal(AppRoles.RecordReviewer, row.ActorRole);
+
+        var page = await service.GetAuditLogsAsync(new AuditLogQueryDto());
+        var dto = Assert.Single(page.Data!);
+        Assert.Equal(AuditCategories.VoiceReview, dto.Category);
+        Assert.Equal(AuditEntityTypes.User, dto.EntityType);
+        Assert.Equal(entityId, dto.EntityId);
+        Assert.Equal("Pending", dto.FromState);
+        Assert.Equal("ReRecord", dto.ToState);
+        Assert.Equal("Audio too quiet to verify", dto.Reason);
+        Assert.Equal(AppRoles.RecordReviewer, dto.ActorRole);
+    }
+
+    [Fact]
+    public async Task RecordAsync_OverlongActivityFields_TruncatedToColumnLimits()
+    {
+        var (service, db) = CreateService();
+        _httpContextAccessorMock.Setup(h => h.HttpContext).Returns((HttpContext?)null);
+
+        await service.RecordAsync(new AuditEntry(
+            AuditActions.UserStatusChanged,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "user@cocorra.com",
+            null)
+        {
+            Category = AuditCategories.UserModeration,
+            EntityType = AuditEntityTypes.User,
+            EntityId = new string('E', 100),
+            FromState = new string('F', 100),
+            ToState = new string('T', 100),
+            Reason = new string('R', 1200),
+            ActorRole = new string('A', 100)
+        });
+
+        var row = await db.AuditLogs.AsNoTracking().SingleAsync();
+        Assert.Equal(64, row.EntityId!.Length);
+        Assert.Equal(new string('E', 64), row.EntityId);
+        Assert.Equal(64, row.FromState!.Length);
+        Assert.Equal(new string('F', 64), row.FromState);
+        Assert.Equal(64, row.ToState!.Length);
+        Assert.Equal(new string('T', 64), row.ToState);
+        Assert.Equal(1000, row.Reason!.Length);
+        Assert.Equal(new string('R', 1000), row.Reason);
+        Assert.Equal(64, row.ActorRole!.Length);
+        Assert.Equal(new string('A', 64), row.ActorRole);
+    }
+
+    [Fact]
+    public async Task RecordAsync_ActorRole_UsesEntryRoleWithoutHttpContextAndIsOverriddenByRequestRoles()
+    {
+        var (service, db) = CreateService();
+
+        _httpContextAccessorMock.Setup(h => h.HttpContext).Returns((HttpContext?)null);
+        await service.RecordAsync(new AuditEntry(AuditActions.RoomCreated, Guid.NewGuid(), null, null, null)
+        {
+            Category = AuditCategories.Room,
+            ActorRole = AppRoles.Coach
+        });
+
+        var contextWithoutRoles = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.Email, "hub@cocorra.com") }, "TestAuth"))
+        };
+        _httpContextAccessorMock.Setup(h => h.HttpContext).Returns(contextWithoutRoles);
+        await service.RecordAsync(new AuditEntry(AuditActions.RoomStarted, Guid.NewGuid(), null, null, null)
+        {
+            Category = AuditCategories.Room,
+            ActorRole = AppRoles.Coach
+        });
+
+        var contextWithRoles = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[]
+                {
+                    new Claim(ClaimTypes.Email, "admin@cocorra.com"),
+                    new Claim(ClaimTypes.Role, AppRoles.Admin),
+                    new Claim(ClaimTypes.Role, AppRoles.Moderator)
+                }, "TestAuth"))
+        };
+        _httpContextAccessorMock.Setup(h => h.HttpContext).Returns(contextWithRoles);
+        await service.RecordAsync(new AuditEntry(AuditActions.RoomEnded, Guid.NewGuid(), null, null, null)
+        {
+            Category = AuditCategories.Room,
+            ActorRole = AppRoles.Coach
+        });
+
+        var rows = await db.AuditLogs.AsNoTracking().OrderBy(r => r.Id).ToListAsync();
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(AppRoles.Coach, rows[0].ActorRole);
+        Assert.Equal(AppRoles.Coach, rows[1].ActorRole);
+        Assert.Equal("Admin,Moderator", rows[2].ActorRole);
+    }
 }

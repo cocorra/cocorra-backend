@@ -1,33 +1,38 @@
+using Cocorra.BLL.Base;
+using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.Email;
+using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.NotificationService;
+using Cocorra.BLL.Services.Storage;
 using Cocorra.BLL.Services.Upload;
+using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.AdminDto;
 using Cocorra.DAL.DTOS.StorageDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
-using Cocorra.BLL.Base;
+using Cocorra.DAL.Repository.BlockedDevicesRepository;
+using Cocorra.DAL.Repository.NotificationRepository;
+using Cocorra.DAL.Repository.SupportRepository;
+using Cocorra.DAL.Repository.UserRepository;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using Cocorra.DAL.Repository.UserRepository;
-using Cocorra.DAL.Repository.BlockedDevicesRepository;
-using Cocorra.DAL.Repository.NotificationRepository;
-using Cocorra.BLL.Services.EventTracking;
-using Cocorra.BLL.Services.AuditLogs;
-using Cocorra.BLL.Services.Storage;
-using Cocorra.DAL.Data;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace Cocorra.BLL.Services.AdminService
 {
     public class AdminService : ResponseHandler, IAdminService
     {
+        private const string ReRecordTitle = "إعادة تسجيل صوتي 🎙️";
+        private const string ReRecordBody = "نعتذر منك، نحتاج منك إعادة تسجيل المقطع الصوتي الخاص بك بوضوح أكبر.";
+        private const int MaxBulkStatusBatch = 200;
+
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IUploadVoice _uploadVoice;
         private readonly IEmailService _emailService;
-        private readonly string _baseUrl;
         private readonly string _emailLogoUrl;
         private readonly IUserRepository _userRepository;
         private readonly IPushNotificationService _pushService;
@@ -50,13 +55,11 @@ namespace Cocorra.BLL.Services.AdminService
             AppDbContext context,
             INotificationRepository notificationRepo,
             IPrivateFileUrlIssuer fileUrls,
-            // Optional so existing callers that construct AdminService directly keep compiling.
             IAuditLogService? auditLog = null)
         {
             _blockedDevicesRepository = blockedDevicesRepository;
             _userManager = userManager;
             _uploadVoice = uploadVoice;
-            _baseUrl = configuration["AppSettings:BaseUrl"]?.TrimEnd('/') ?? "";
             _emailLogoUrl = EmailTemplates.ResolveLogoUrl(configuration["EmailSettings:LogoUrl"]);
             _emailService = emailService;
             _userRepository = userRepository;
@@ -71,62 +74,197 @@ namespace Cocorra.BLL.Services.AdminService
         private Task RecordAuditAsync(AuditEntry entry) =>
             _auditLog is null ? Task.CompletedTask : _auditLog.RecordAsync(entry);
 
-        // Shared by the persisted Notification and the push so the two can't drift apart.
-        private const string ReRecordTitle = "إعادة تسجيل صوتي 🎙️";
-        private const string ReRecordBody = "نعتذر منك، نحتاج منك إعادة تسجيل المقطع الصوتي الخاص بك بوضوح أكبر.";
-
-        public async Task<Response<string>> ChangeUserStatusAsync(Guid userId, UserStatus newStatus, Guid adminId, bool isBulk = false)
+        public async Task<StatusChangeResponse> ChangeUserStatusAsync(
+            Guid userId,
+            UserStatus newStatus,
+            string? reason,
+            Guid actorUserId,
+            bool callerIsAdmin,
+            bool isBulk = false)
         {
-            var user = await _userManager.FindByIdAsync(userId.ToString());
-            if (user == null) return BadRequest<string>("User not found");
-
-            if (await _userManager.IsInRoleAsync(user, "Admin"))
-                return BadRequest<string>("Cannot perform actions on an Admin account.");
+            if (!AuditReasonValidator.TryValidateRequired(reason, out var normalizedReason, out var reasonError))
+                return StatusChangeResponse.From(BadRequest<string>(reasonError));
 
             if (!Enum.IsDefined(typeof(UserStatus), newStatus))
-                return BadRequest<string>("Invalid status value.");
+                return StatusChangeResponse.From(BadRequest<string>("Invalid status value."));
+
+            if (userId == actorUserId)
+                return StatusChangeResponse.From(BadRequest<string>("You cannot change your own status."));
+
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null)
+                return StatusChangeResponse.From(BadRequest<string>("User not found"));
+
+            var targetRoles = (await _userManager.GetRolesAsync(user)) ?? Array.Empty<string>();
+            var guardError = ValidateStatusChangePermission(user, targetRoles, newStatus, callerIsAdmin);
+            if (guardError != null)
+                return guardError;
 
             if (user.Status == newStatus)
-                return BadRequest<string>($"User is already {newStatus}");
+                return StatusChangeResponse.From(BadRequest<string>($"User is already {newStatus}"));
 
+            var transition = await ApplyStatusTransitionAsync(user, newStatus, targetRoles, actorUserId, isBulk);
+            if (!transition.Succeeded)
+            {
+                var errorResponse = transition.IsConcurrencyConflict
+                    ? Conflict<string>(transition.ErrorMessage ?? "The user's status was modified by another request.")
+                    : BadRequest<string>(transition.ErrorMessage ?? "Failed to change status");
+                return StatusChangeResponse.From(errorResponse);
+            }
+
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.UserStatusChanged,
+                actorUserId,
+                user.Id,
+                user.Email,
+                new { fromStatus = transition.OldStatus.ToString(), toStatus = transition.NewStatus.ToString(), isBulk })
+            {
+                Category = AuditCategories.UserModeration,
+                EntityType = AuditEntityTypes.User,
+                EntityId = user.Id.ToString(),
+                FromState = transition.OldStatus.ToString(),
+                ToState = transition.NewStatus.ToString(),
+                Reason = normalizedReason
+            });
+
+            return StatusChangeResponse.From(
+                Success($"User status changed from {transition.OldStatus} to {transition.NewStatus}"),
+                transition.ShouldRevokeSession);
+        }
+
+        private StatusChangeResponse? ValidateStatusChangePermission(
+            ApplicationUser user,
+            IList<string> targetRoles,
+            UserStatus newStatus,
+            bool callerIsAdmin)
+        {
+            if (!callerIsAdmin)
+            {
+                if (AppRoles.AnyProtectedFromModerators(targetRoles))
+                    return StatusChangeResponse.From(Forbidden<string>("Moderators cannot change the status of staff or admin accounts."));
+
+                if (user.Status is UserStatus.Pending or UserStatus.ReRecord)
+                    return StatusChangeResponse.From(Forbidden<string>("Moderators cannot change the status of accounts in voice verification."));
+
+                if (newStatus is not (UserStatus.Active or UserStatus.Banned))
+                    return StatusChangeResponse.From(Forbidden<string>("Moderators can only set user status to Active or Banned."));
+
+                return null;
+            }
+
+            if (targetRoles.Contains(AppRoles.Admin, StringComparer.OrdinalIgnoreCase))
+                return StatusChangeResponse.From(BadRequest<string>("Cannot perform actions on an Admin account."));
+
+            return null;
+        }
+
+        public async Task<StatusTransitionOutcome> ApplyStatusTransitionAsync(
+            ApplicationUser user,
+            UserStatus newStatus,
+            IEnumerable<string> targetRoles,
+            Guid actorUserId,
+            bool isBulk = false)
+        {
             var oldStatus = user.Status;
-            user.Status = newStatus;
+            var voicePathToDelete = newStatus is UserStatus.Active or UserStatus.Banned or UserStatus.Rejected or UserStatus.ReRecord
+                ? user.VoiceVerificationPath
+                : null;
 
-            // Captured in the switch, consumed by the push below once the update succeeds.
+            user.Status = newStatus;
+            var banLockoutEnd = ApplyStatusMutations(user, newStatus);
+
+            IdentityResult updateResult;
+            try
+            {
+                updateResult = await _userManager.UpdateAsync(user);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return new StatusTransitionOutcome(
+                    false,
+                    oldStatus,
+                    newStatus,
+                    false,
+                    "The user's status was modified by another request.",
+                    IsConcurrencyConflict: true);
+            }
+
+            if (!updateResult.Succeeded)
+                return FailedTransitionOutcome(oldStatus, newStatus, updateResult);
+
+            if (!string.IsNullOrEmpty(voicePathToDelete))
+            {
+                _uploadVoice.DeleteVoice(voicePathToDelete);
+            }
+
+            // Rotate security stamp for privileged accounts, terminal bans/rejections, and
+            // Active demotions, while keeping plain users' Pending->Active approval tokens intact.
+            var shouldRevokeSession = AppRoles.AnyProtectedFromModerators(targetRoles)
+                || newStatus is UserStatus.Banned or UserStatus.Rejected
+                || (oldStatus == UserStatus.Active && newStatus != UserStatus.Active);
+            if (shouldRevokeSession)
+            {
+                await _userManager.UpdateSecurityStampAsync(user);
+            }
+
+            if (newStatus is UserStatus.Banned or UserStatus.Rejected or UserStatus.Pending or UserStatus.ReRecord)
+            {
+                await ReleaseActiveSupportChatsAsync(user.Id);
+            }
+
+            TrackStatusTransitionEvents(user.Id, oldStatus, newStatus, actorUserId, isBulk);
+            await PersistStatusNotificationAsync(user.Id, newStatus);
+            await TrySendVerificationEmailAsync(user, newStatus);
+            await DispatchStatusPushAndCleanupFcmAsync(user, newStatus, banLockoutEnd);
+
+            return new StatusTransitionOutcome(true, oldStatus, newStatus, shouldRevokeSession);
+        }
+
+        private static StatusTransitionOutcome FailedTransitionOutcome(
+            UserStatus oldStatus,
+            UserStatus newStatus,
+            IdentityResult failedResult)
+        {
+            var isConcurrencyConflict = failedResult.Errors.Any(e =>
+                string.Equals(e.Code, nameof(IdentityErrorDescriber.ConcurrencyFailure), StringComparison.OrdinalIgnoreCase));
+
+            return new StatusTransitionOutcome(
+                false,
+                oldStatus,
+                newStatus,
+                false,
+                isConcurrencyConflict ? "The user's status was modified by another request." : "Failed to change status",
+                isConcurrencyConflict);
+        }
+
+        private static DateTimeOffset? ApplyStatusMutations(ApplicationUser user, UserStatus newStatus)
+        {
             DateTimeOffset? banLockoutEnd = null;
 
+            // Mutate in-memory so the single UpdateAsync commits every field atomically under one concurrency check.
             switch (newStatus)
             {
                 case UserStatus.Active:
-                    // Fully clear all lockout state to prevent ghost-bans.
-                    await _userManager.SetLockoutEnabledAsync(user, false);
-                    await _userManager.SetLockoutEndDateAsync(user, null);
-                    await _userManager.ResetAccessFailedCountAsync(user);
-                    _uploadVoice.DeleteVoice(user.VoiceVerificationPath);
+                    user.LockoutEnabled = false;
+                    user.LockoutEnd = null;
+                    user.AccessFailedCount = 0;
                     user.VoiceVerificationPath = null;
                     break;
 
                 case UserStatus.Banned:
-                    await _userManager.SetLockoutEnabledAsync(user, true);
+                    user.LockoutEnabled = true;
                     banLockoutEnd = DateTimeOffset.MaxValue;
-                    await _userManager.SetLockoutEndDateAsync(user, banLockoutEnd);
-                    _uploadVoice.DeleteVoice(user.VoiceVerificationPath);
+                    user.LockoutEnd = banLockoutEnd;
                     user.VoiceVerificationPath = null;
-
-                    // SECURITY: Invalidate refresh token to prevent session resurrection.
                     user.RefreshToken = null;
                     break;
 
                 case UserStatus.Rejected:
-                    _uploadVoice.DeleteVoice(user.VoiceVerificationPath);
                     user.VoiceVerificationPath = null;
-
-                    // Invalidate refresh token so rejected user can't silently refresh.
                     user.RefreshToken = null;
                     break;
 
                 case UserStatus.ReRecord:
-                    _uploadVoice.DeleteVoice(user.VoiceVerificationPath);
                     user.VoiceVerificationPath = null;
                     break;
 
@@ -134,177 +272,170 @@ namespace Cocorra.BLL.Services.AdminService
                     break;
             }
 
-            var result = await _userManager.UpdateAsync(user);
-
-            if (result.Succeeded)
-            {
-                _eventTracker.Track(EventTypes.VoiceVerificationResult, user.Id, new { status = newStatus.ToString() });
-
-                // AN-011: the only durable record of the transition, emitted after the update
-                // succeeded so a failed write cannot produce a phantom transition.
-                _eventTracker.Track(
-                    EventTypes.UserStatusChanged,
-                    user.Id,
-                    new
-                    {
-                        fromStatus = oldStatus.ToString(),
-                        toStatus = newStatus.ToString(),
-                        changedByAdminId = adminId,
-                        isBulkOperation = isBulk
-                    });
-
-                await RecordAuditAsync(new AuditEntry(
-                    AuditActions.UserStatusChanged,
-                    adminId,
-                    user.Id,
-                    user.Email,
-                    new { fromStatus = oldStatus.ToString(), toStatus = newStatus.ToString(), isBulk }));
-
-                if (newStatus == UserStatus.Active)
-                {
-                    // AN-010: idempotency is enforced by UX_UserEvents_EventId, not by reading
-                    // the table. The previous AnyAsync guard queried UserEvents while Track only
-                    // ENQUEUES, so two concurrent activations both saw "not yet activated" and
-                    // both emitted. A deterministic eventKey makes the duplicate impossible to
-                    // persist and removes a database round-trip from the activation path.
-                    _eventTracker.Track(
-                        EventTypes.ActivationCompleted,
-                        user.Id,
-                        properties: null,
-                        eventKey: $"{EventTypes.ActivationCompleted}:{user.Id}");
-                }
-
-                // Persist a Notification row so the decision survives a failed push and
-                // can still be read back from GET api/Notifications/my-notifications.
-                Notification? statusNotification = newStatus switch
-                {
-                    UserStatus.Active => new Notification
-                    {
-                        UserId = user.Id,
-                        Title = "Account Verified ✅",
-                        Message = "Your voice verification has been approved. You now have full access to Cocorra.",
-                        Type = NotificationType.System,
-                        IsRead = false
-                    },
-                    UserStatus.Banned => new Notification
-                    {
-                        UserId = user.Id,
-                        Title = "Account Suspended",
-                        Message = "Your account has been permanently suspended for violating community guidelines.",
-                        Type = NotificationType.AdminWarning,
-                        IsRead = false
-                    },
-                    UserStatus.Rejected => new Notification
-                    {
-                        UserId = user.Id,
-                        Title = "Verification Rejected",
-                        Message = "Your voice verification has been rejected. Please contact support for more information.",
-                        Type = NotificationType.System,
-                        IsRead = false
-                    },
-                    UserStatus.ReRecord => new Notification
-                    {
-                        UserId = user.Id,
-                        Title = ReRecordTitle,
-                        Message = ReRecordBody,
-                        Type = NotificationType.System,
-                        IsRead = false
-                    },
-                    _ => null
-                };
-
-                if (statusNotification != null)
-                {
-                    await _notificationRepo.AddAsync(statusNotification);
-                }
-
-                try
-                {
-                    await SendVerificationEmailAsync(user, newStatus);
-                }
-                catch { }
-
-                // All pushes live here, after a successful UpdateAsync, so a user is never
-                // told their status changed when the write actually failed.
-                if (!string.IsNullOrEmpty(user.FcmToken))
-                {
-                    switch (newStatus)
-                    {
-                        case UserStatus.Active:
-                            await _pushService.SendPushNotificationAsync(
-                                user.FcmToken,
-                                "Account Verified ✅",
-                                "Your account is now fully active.",
-                                new Dictionary<string, string> { { "type", "account_activated" } });
-                            break;
-
-                        case UserStatus.Banned:
-                            var banData = new Dictionary<string, string>
-                            {
-                                { "type", "account_locked" }
-                            };
-                            if (banLockoutEnd.HasValue)
-                            {
-                                banData["lockout_end"] = banLockoutEnd.Value.UtcDateTime.ToString("O");
-                            }
-                            await _pushService.SendPushNotificationAsync(user.FcmToken, "", "", banData);
-                            break;
-
-                        case UserStatus.Rejected:
-                            await _pushService.SendPushNotificationAsync(
-                                user.FcmToken, "", "",
-                                new Dictionary<string, string> { { "type", "account_rejected" } });
-                            break;
-
-                        case UserStatus.ReRecord:
-                            await _pushService.SendPushNotificationAsync(
-                                user.FcmToken, ReRecordTitle, ReRecordBody,
-                                new Dictionary<string, string> { { "type", "reRecord" } });
-                            break;
-                    }
-                }
-
-                // Clear FCM token AFTER the notification is dispatched so future pushes
-                // are not routed to a stale or reassigned device.
-                if (newStatus == UserStatus.Banned || newStatus == UserStatus.Rejected)
-                {
-                    user.FcmToken = null;
-                    await _userManager.UpdateAsync(user);
-                }
-
-                return Success($"User status changed from {oldStatus} to {newStatus}");
-            }
-
-            return BadRequest<string>("Failed to change status");
+            return banLockoutEnd;
         }
 
-        // Hard cap so a single request can't fan out into thousands of UserManager
-        // updates + emails + push notifications and starve the thread pool.
-        private const int MaxBulkStatusBatch = 200;
+        private Task ReleaseActiveSupportChatsAsync(Guid userId) =>
+            SupportRepository.ReleaseActiveChatsForStaffAsync(_context, userId.ToString());
+
+        private void TrackStatusTransitionEvents(
+            Guid userId,
+            UserStatus oldStatus,
+            UserStatus newStatus,
+            Guid actorUserId,
+            bool isBulk)
+        {
+            _eventTracker.Track(EventTypes.VoiceVerificationResult, userId, new { status = newStatus.ToString() });
+            _eventTracker.Track(
+                EventTypes.UserStatusChanged,
+                userId,
+                new
+                {
+                    fromStatus = oldStatus.ToString(),
+                    toStatus = newStatus.ToString(),
+                    changedByAdminId = actorUserId,
+                    isBulkOperation = isBulk
+                });
+
+            if (newStatus == UserStatus.Active)
+            {
+                _eventTracker.Track(
+                    EventTypes.ActivationCompleted,
+                    userId,
+                    properties: null,
+                    eventKey: $"{EventTypes.ActivationCompleted}:{userId}");
+            }
+        }
+
+        private async Task PersistStatusNotificationAsync(Guid userId, UserStatus newStatus)
+        {
+            Notification? notification = newStatus switch
+            {
+                UserStatus.Active => new Notification
+                {
+                    UserId = userId,
+                    Title = "Account Verified ✅",
+                    Message = "Your voice verification has been approved. You now have full access to Cocorra.",
+                    Type = NotificationType.System,
+                    IsRead = false
+                },
+                UserStatus.Banned => new Notification
+                {
+                    UserId = userId,
+                    Title = "Account Suspended",
+                    Message = "Your account has been permanently suspended for violating community guidelines.",
+                    Type = NotificationType.AdminWarning,
+                    IsRead = false
+                },
+                UserStatus.Rejected => new Notification
+                {
+                    UserId = userId,
+                    Title = "Verification Rejected",
+                    Message = "Your voice verification has been rejected. Please contact support for more information.",
+                    Type = NotificationType.System,
+                    IsRead = false
+                },
+                UserStatus.ReRecord => new Notification
+                {
+                    UserId = userId,
+                    Title = ReRecordTitle,
+                    Message = ReRecordBody,
+                    Type = NotificationType.System,
+                    IsRead = false
+                },
+                _ => null
+            };
+
+            if (notification != null)
+            {
+                await _notificationRepo.AddAsync(notification);
+            }
+        }
+
+        private async Task TrySendVerificationEmailAsync(ApplicationUser user, UserStatus newStatus)
+        {
+            // Email delivery is best-effort after the status update has already committed.
+            try
+            {
+                await SendVerificationEmailAsync(user, newStatus);
+            }
+            catch
+            {
+            }
+        }
+
+        private async Task DispatchStatusPushAndCleanupFcmAsync(
+            ApplicationUser user,
+            UserStatus newStatus,
+            DateTimeOffset? banLockoutEnd)
+        {
+            if (!string.IsNullOrEmpty(user.FcmToken))
+            {
+                switch (newStatus)
+                {
+                    case UserStatus.Active:
+                        await _pushService.SendPushNotificationAsync(
+                            user.FcmToken,
+                            "Account Verified ✅",
+                            "Your account is now fully active.",
+                            new Dictionary<string, string> { { "type", "account_activated" } });
+                        break;
+
+                    case UserStatus.Banned:
+                        var banData = new Dictionary<string, string> { { "type", "account_locked" } };
+                        if (banLockoutEnd.HasValue)
+                        {
+                            banData["lockout_end"] = banLockoutEnd.Value.UtcDateTime.ToString("O");
+                        }
+                        await _pushService.SendPushNotificationAsync(user.FcmToken, "", "", banData);
+                        break;
+
+                    case UserStatus.Rejected:
+                        await _pushService.SendPushNotificationAsync(
+                            user.FcmToken, "", "",
+                            new Dictionary<string, string> { { "type", "account_rejected" } });
+                        break;
+
+                    case UserStatus.ReRecord:
+                        await _pushService.SendPushNotificationAsync(
+                            user.FcmToken, ReRecordTitle, ReRecordBody,
+                            new Dictionary<string, string> { { "type", "reRecord" } });
+                        break;
+                }
+            }
+
+            if (newStatus is UserStatus.Banned or UserStatus.Rejected)
+            {
+                user.FcmToken = null;
+                await _userManager.UpdateAsync(user);
+            }
+        }
 
         public async Task<Response<BulkChangeStatusResultDto>> BulkChangeUserStatusAsync(BulkChangeStatusDto model, Guid adminId)
         {
             if (model?.UserIds == null || model.UserIds.Count == 0)
                 return BadRequest<BulkChangeStatusResultDto>("At least one user id is required.");
 
-            if (!Enum.IsDefined(typeof(UserStatus), model.NewStatus))
+            if (!model.NewStatus.HasValue || !Enum.IsDefined(typeof(UserStatus), model.NewStatus.Value))
                 return BadRequest<BulkChangeStatusResultDto>("Invalid status value.");
 
-            // De-duplicate ids so a repeated id isn't processed twice.
-            var distinctIds = model.UserIds.Distinct().ToList();
+            var newStatus = model.NewStatus.Value;
 
+            if (!AuditReasonValidator.TryValidateRequired(model.Reason, out var normalizedReason, out var reasonError))
+                return BadRequest<BulkChangeStatusResultDto>(reasonError);
+
+            var distinctIds = model.UserIds.Distinct().ToList();
             if (distinctIds.Count > MaxBulkStatusBatch)
                 return BadRequest<BulkChangeStatusResultDto>(
                     $"Too many users in one request. Maximum is {MaxBulkStatusBatch}.");
 
-            var result = new BulkChangeStatusResultDto { TotalRequested = distinctIds.Count };
+            var bulkResult = new BulkChangeStatusResultDto { TotalRequested = distinctIds.Count };
 
             foreach (var userId in distinctIds)
             {
-                // Guard: an admin cannot change their own status, even in bulk.
                 if (userId == adminId)
                 {
-                    result.Results.Add(new BulkItemResultDto
+                    bulkResult.Results.Add(new BulkItemResultDto
                     {
                         UserId = userId,
                         Succeeded = false,
@@ -313,34 +444,37 @@ namespace Cocorra.BLL.Services.AdminService
                     continue;
                 }
 
-                // Reuse the single-user path so all side effects (lockout, token
-                // invalidation, voice cleanup, email, push, event tracking) apply.
-                var single = await ChangeUserStatusAsync(userId, model.NewStatus, adminId, isBulk: true);
-                result.Results.Add(new BulkItemResultDto
+                var single = await ChangeUserStatusAsync(
+                    userId,
+                    newStatus,
+                    normalizedReason,
+                    adminId,
+                    callerIsAdmin: true,
+                    isBulk: true);
+
+                bulkResult.Results.Add(new BulkItemResultDto
                 {
                     UserId = userId,
                     Succeeded = single.Succeeded,
-                    Message = single.Message
+                    Message = single.Message,
+                    SessionRevoked = single.SessionRevoked
                 });
             }
 
-            result.SucceededCount = result.Results.Count(r => r.Succeeded);
-            result.FailedCount = result.Results.Count(r => !r.Succeeded);
+            bulkResult.SucceededCount = bulkResult.Results.Count(r => r.Succeeded);
+            bulkResult.FailedCount = bulkResult.Results.Count(r => !r.Succeeded);
 
-            var message = result.FailedCount == 0
-                ? $"All {result.SucceededCount} user(s) updated to {model.NewStatus}."
-                : $"{result.SucceededCount} succeeded, {result.FailedCount} failed.";
+            var message = bulkResult.FailedCount == 0
+                ? $"All {bulkResult.SucceededCount} user(s) updated to {newStatus}."
+                : $"{bulkResult.SucceededCount} succeeded, {bulkResult.FailedCount} failed.";
 
-            // The batch endpoint itself executed successfully even on partial failure;
-            // the caller inspects per-item Results. Always 200 here.
-            return Success(result, message: message);
+            return Success(bulkResult, message: message);
         }
 
         private async Task SendVerificationEmailAsync(ApplicationUser user, UserStatus newStatus)
         {
             if (string.IsNullOrEmpty(user.Email)) return;
 
-            // Templates HTML-encode the name themselves.
             var firstName = user.FirstName ?? string.Empty;
 
             switch (newStatus)
@@ -371,42 +505,55 @@ namespace Cocorra.BLL.Services.AdminService
             }
         }
 
-        public async Task<PagedResponse<UserDto>> GetAllUsersAsync(string? search, int page = 1, int pageSize = 10)
+        public async Task<PagedResponse<UserDto>> GetAllUsersAsync(
+            string? search,
+            int page = 1,
+            int pageSize = 10,
+            bool callerIsAdmin = false)
         {
-            var (totalCount, users) = await _userRepository.GetPaginatedUsersWithRolesAsync(search, page, pageSize);
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            var (totalCount, users) = await _userRepository.GetPaginatedUsersWithRolesAsync(
+                search,
+                page,
+                pageSize,
+                excludeAdmins: !callerIsAdmin);
+
             var list = users.ToList();
 
-            // No URLs in lists: they would be issued (and audit-logged) for every row shown,
-            // whether or not anyone plays them. The repository returns the stored value; it is
-            // reduced to a flag here and never leaves the API.
             foreach (var user in list)
             {
                 user.HasVoice = _fileUrls.HasFile(user.VoicePath);
                 user.VoicePath = null;
+
+                if (!callerIsAdmin)
+                    user.Email = null;
             }
 
             return Paginated(list, totalCount, page, pageSize);
         }
 
-        public async Task<Response<UserDto>> GetUserByIdAsync(Guid userId)
+        public async Task<Response<UserDto>> GetUserByIdAsync(Guid userId, bool callerIsAdmin = false)
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
-
             if (user == null)
-                return BadRequest<UserDto>("User not found");
+                return NotFound<UserDto>("User not found");
 
-            var roles = await _userManager.GetRolesAsync(user);
+            var roles = (await _userManager.GetRolesAsync(user)) ?? Array.Empty<string>();
+            if (!callerIsAdmin && roles.Contains(AppRoles.Admin, StringComparer.OrdinalIgnoreCase))
+                return NotFound<UserDto>("User not found");
 
             var userDto = new UserDto
             {
                 Id = user.Id.ToString(),
                 FullName = $"{user.FirstName} {user.LastName}",
-                Email = user.Email!,
+                Email = callerIsAdmin ? user.Email : null,
                 Age = user.Age,
                 MBTI = user.MBTI ?? "N/A",
                 Status = user.Status.ToString(),
                 CreatedAt = user.CreatedAt,
-                VoicePath = null, // fetched on demand through GetUserVoiceUrlAsync
+                VoicePath = null,
                 HasVoice = _fileUrls.HasFile(user.VoiceVerificationPath),
                 Roles = roles
             };
@@ -451,40 +598,37 @@ namespace Cocorra.BLL.Services.AdminService
         }
 
         public async Task<Response<BlockDeviceAndEmailResultDto>> BlockDeviceAndEmailAsync(
-            BlockDeviceAndEmailDto model, Guid adminId)
+            BlockDeviceAndEmailDto model,
+            Guid adminId)
         {
+            if (model == null || string.IsNullOrWhiteSpace(model.Email))
+                return BadRequest<BlockDeviceAndEmailResultDto>("Email is required.");
+
+            if (!AuditReasonValidator.TryValidateRequired(model.Reason, out var normalizedReason, out var reasonError))
+                return BadRequest<BlockDeviceAndEmailResultDto>(reasonError);
+
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
-            {
                 return NotFound<BlockDeviceAndEmailResultDto>("User not found with the provided email.");
-            }
 
-            if (await _userManager.IsInRoleAsync(user, "Admin"))
-            {
+            if (await _userManager.IsInRoleAsync(user, AppRoles.Admin))
                 return BadRequest<BlockDeviceAndEmailResultDto>("Cannot perform actions on an Admin account.");
-            }
 
             var oldStatus = user.Status;
 
-            // 1. Change user status to Banned and lockout
             user.Status = UserStatus.Banned;
             await _userManager.SetLockoutEnabledAsync(user, true);
             await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
-
-            // SECURITY: Invalidate refresh token and clear FCM token to prevent session resurrection or stale pushes.
             user.RefreshToken = null;
             user.RefreshTokenExpiryTime = DateTime.UtcNow;
             user.FcmToken = null;
 
             await _userManager.UpdateAsync(user);
+            await _userManager.UpdateSecurityStampAsync(user);
+            await ReleaseActiveSupportChatsAsync(user.Id);
 
-            // 2. Block every device this user was seen on. The device ids come from the
-            // registry written at their login — never from the request, which could only
-            // ever carry the acting admin's own device.
             var devicesBlocked = await _blockedDevicesRepository.BlockAllDevicesForUserAsync(user.Id);
 
-            // AN-011: a hard ban is a moderation action, so it gets the same attribution
-            // as an ordinary status change rather than vanishing from the audit trail.
             _eventTracker.Track(
                 EventTypes.UserStatusChanged,
                 user.Id,
@@ -502,7 +646,15 @@ namespace Cocorra.BLL.Services.AdminService
                 adminId,
                 user.Id,
                 user.Email,
-                new { fromStatus = oldStatus.ToString(), toStatus = UserStatus.Banned.ToString(), devicesBlocked }));
+                new { fromStatus = oldStatus.ToString(), toStatus = UserStatus.Banned.ToString(), devicesBlocked })
+            {
+                Category = AuditCategories.UserModeration,
+                EntityType = AuditEntityTypes.User,
+                EntityId = user.Id.ToString(),
+                FromState = oldStatus.ToString(),
+                ToState = UserStatus.Banned.ToString(),
+                Reason = normalizedReason
+            });
 
             var result = new BlockDeviceAndEmailResultDto
             {
@@ -512,8 +664,6 @@ namespace Cocorra.BLL.Services.AdminService
                 DevicesBlocked = devicesBlocked
             };
 
-            // The message stays honest when the registry had nothing for this user, which
-            // happens whenever they only ever used a client that omits X-Device-Id.
             var message = devicesBlocked > 0
                 ? $"Account permanently banned and {devicesBlocked} registered device(s) blocked."
                 : "Account permanently banned. No registered devices were found for this user.";
@@ -522,7 +672,8 @@ namespace Cocorra.BLL.Services.AdminService
         }
 
         public async Task<Response<BroadcastNotificationResultDto>> BroadcastNotificationAsync(
-            SendBroadcastNotificationDto model, Guid adminId)
+            SendBroadcastNotificationDto model,
+            Guid adminId)
         {
             if (model == null)
                 return BadRequest<BroadcastNotificationResultDto>("Request model cannot be null.");
@@ -535,16 +686,9 @@ namespace Cocorra.BLL.Services.AdminService
                 return BadRequest<BroadcastNotificationResultDto>("Notification body or message is required.");
 
             var query = _context.Users.AsNoTracking();
-
-            if (model.TargetStatus.HasValue)
-            {
-                query = query.Where(u => u.Status == model.TargetStatus.Value);
-            }
-            else
-            {
-                // By default, exclude banned and rejected accounts
-                query = query.Where(u => u.Status != UserStatus.Banned && u.Status != UserStatus.Rejected);
-            }
+            query = model.TargetStatus.HasValue
+                ? query.Where(u => u.Status == model.TargetStatus.Value)
+                : query.Where(u => u.Status != UserStatus.Banned && u.Status != UserStatus.Rejected);
 
             var targetUsers = await query
                 .Select(u => new { u.Id, u.FcmToken })
@@ -552,14 +696,7 @@ namespace Cocorra.BLL.Services.AdminService
 
             if (targetUsers.Count == 0)
             {
-                return Success(new BroadcastNotificationResultDto
-                {
-                    TotalTargetUsers = 0,
-                    TokensCount = 0,
-                    SuccessCount = 0,
-                    FailureCount = 0,
-                    InAppNotificationsCreated = 0
-                }, message: "No eligible users found to notify.");
+                return Success(new BroadcastNotificationResultDto(), message: "No eligible users found to notify.");
             }
 
             var fcmTokens = targetUsers
@@ -568,7 +705,7 @@ namespace Cocorra.BLL.Services.AdminService
                 .Distinct()
                 .ToList();
 
-            int inAppCount = 0;
+            var inAppCount = 0;
             if (model.SaveInAppNotification)
             {
                 var now = DateTime.UtcNow;
@@ -587,9 +724,8 @@ namespace Cocorra.BLL.Services.AdminService
                 inAppCount = inAppNotifications.Count;
             }
 
-            int successCount = 0;
-            int failureCount = 0;
-
+            var successCount = 0;
+            var failureCount = 0;
             if (fcmTokens.Count > 0)
             {
                 var pushResult = await _pushService.SendMulticastPushNotificationAsync(
@@ -616,7 +752,10 @@ namespace Cocorra.BLL.Services.AdminService
                     successCount,
                     failureCount,
                     inAppNotificationsCreated = inAppCount
-                }));
+                })
+            {
+                Category = AuditCategories.Notification
+            });
 
             var resultDto = new BroadcastNotificationResultDto
             {

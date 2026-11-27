@@ -1,4 +1,5 @@
 using Cocorra.BLL.Events;
+using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.DTOS.RoomDto;
@@ -30,20 +31,23 @@ public class RoomService : ResponseHandler, IRoomService
     private readonly LiveKitSettings _liveKitSettings;
     private readonly IEventTracker _eventTracker;
     private readonly ILogger<RoomService> _logger;
+    private readonly IAuditLogService? _auditLog;
 
     private static readonly HashSet<int> AllowedDurations = new() { 2, 3 };
 
     public RoomService(
-        IRoomRepository roomRepo, 
-        IMediator mediator, 
-        IUploadImage uploadImage, 
+        IRoomRepository roomRepo,
+        IMediator mediator,
+        IUploadImage uploadImage,
         IConfiguration configuration,
         IPushNotificationService pushService,
         UserManager<ApplicationUser> userManager,
         ILiveKitService liveKitService,
         IOptions<LiveKitSettings> liveKitSettings,
         IEventTracker eventTracker,
-        ILogger<RoomService> logger)
+        ILogger<RoomService> logger,
+        // Optional so existing direct callers keep compiling; DI always supplies IAuditLogService.
+        IAuditLogService? auditLog = null)
     {
         _roomRepo = roomRepo;
         _mediator = mediator;
@@ -55,6 +59,19 @@ public class RoomService : ResponseHandler, IRoomService
         _liveKitSettings = liveKitSettings.Value;
         _eventTracker = eventTracker;
         _logger = logger;
+        _auditLog = auditLog;
+    }
+
+    private Task RecordAuditAsync(AuditEntry entry) =>
+        _auditLog is null ? Task.CompletedTask : _auditLog.RecordAsync(entry);
+
+    private async Task<string?> ResolveActorRoleAsync(Guid userId, ApplicationUser? user)
+    {
+        user ??= await _userManager.FindByIdAsync(userId.ToString());
+        if (user is null) return null;
+
+        var roles = await _userManager.GetRolesAsync(user);
+        return roles is { Count: > 0 } ? string.Join(",", roles) : null;
     }
 
     private string? BuildFullUrl(string? relativePath)
@@ -175,6 +192,18 @@ public class RoomService : ResponseHandler, IRoomService
                     selectionMode = room.SelectionMode.ToString()
                 });
             }
+
+            await RecordAuditAsync(new AuditEntry(
+                AuditActions.RoomCreated,
+                hostId,
+                null,
+                room.RoomTitle,
+                new { title = room.RoomTitle })
+            {
+                Category = AuditCategories.Room,
+                EntityType = AuditEntityTypes.Room,
+                EntityId = room.Id.ToString()
+            });
 
             return Success(room.Id);
         }
@@ -360,6 +389,19 @@ public class RoomService : ResponseHandler, IRoomService
 
         _eventTracker.Track(EventTypes.RoomJoinApproved, hostId, new { roomId, approvedUserId = targetUserId });
         await _roomRepo.SaveChangesAsync();
+
+        await RecordAuditAsync(new AuditEntry(
+            AuditActions.RoomUserApproved,
+            hostId,
+            targetUserId,
+            ResolveFullName(approvedUser, targetUserId.ToString()),
+            new { title = room.RoomTitle })
+        {
+            Category = AuditCategories.Room,
+            EntityType = AuditEntityTypes.Room,
+            EntityId = room.Id.ToString()
+        });
+
         await _mediator.Publish(new UserApprovedToJoinRoomEvent(targetUserId, roomId));
         return Success(true, "User approved successfully.");
     }
@@ -611,6 +653,18 @@ public class RoomService : ResponseHandler, IRoomService
 
         await _roomRepo.SaveChangesAsync();
 
+        await RecordAuditAsync(new AuditEntry(
+            AuditActions.RoomStarted,
+            hostId,
+            null,
+            room.RoomTitle,
+            new { title = room.RoomTitle })
+        {
+            Category = AuditCategories.Room,
+            EntityType = AuditEntityTypes.Room,
+            EntityId = room.Id.ToString()
+        });
+
         return Success("Room is now live and notifications have been sent!");
     }
     public async Task<Response<string>> ToggleReminderAsync(Guid roomId, Guid userId)
@@ -721,6 +775,23 @@ public class RoomService : ResponseHandler, IRoomService
         }
 
         await _roomRepo.SaveChangesAsync();
+
+        // System auto-ends (host grace expiry, duration limit, account deletion) are not host actions.
+        if (_auditLog is not null && string.Equals(endReason, RoomEndReasons.HostEnded, StringComparison.Ordinal))
+        {
+            await _auditLog.RecordAsync(new AuditEntry(
+                AuditActions.RoomEnded,
+                hostId,
+                null,
+                room.RoomTitle,
+                new { title = room.RoomTitle })
+            {
+                Category = AuditCategories.Room,
+                EntityType = AuditEntityTypes.Room,
+                EntityId = room.Id.ToString(),
+                ActorRole = await ResolveActorRoleAsync(hostId, room.Host)
+            });
+        }
 
         // AN-019: durationHours measures against the SCHEDULED StartDate, so for a room that
         // started late it reports schedule length, not airtime. It is kept unchanged for

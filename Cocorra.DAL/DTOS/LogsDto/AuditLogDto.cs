@@ -19,5 +19,12 @@ namespace Cocorra.DAL.DTOS.LogsDto
 
         public string? IpAddress { get; set; }
         public string? UserAgent { get; set; }
+
+        public string? Category { get; set; }
+        public string? EntityType { get; set; }
+        public string? EntityId { get; set; }
+        public string? FromState { get; set; }
+        public string? ToState { get; set; }
+        public string? Reason { get; set; }
     }
 }

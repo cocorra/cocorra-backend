@@ -2,11 +2,13 @@ using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using Cocorra.API.Authorization;
 using Cocorra.API.Hubs;
 using Cocorra.BLL.Services.AdminService;
 using Cocorra.DAL.AppMetaData;
 using Cocorra.DAL.DTOS.AdminDto;
 using Cocorra.DAL.Enums;
+using Cocorra.DAL.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -14,40 +16,51 @@ using Microsoft.AspNetCore.SignalR;
 namespace Cocorra.API.Controllers
 {
     [ApiController]
-    [Authorize(Roles = "Admin,Moderator")]
+    [Authorize(Policy = AuthPolicies.AdminOrModerator)]
     public class AdminController : ControllerBase
     {
         private readonly IAdminService _adminService;
         private readonly IHubContext<RoomHub> _roomHubContext;
+        private readonly IStaffConnectionRevoker _staffConnectionRevoker;
 
-        public AdminController(IAdminService adminService, IHubContext<RoomHub> roomHubContext)
+        public AdminController(
+            IAdminService adminService,
+            IHubContext<RoomHub> roomHubContext,
+            IStaffConnectionRevoker staffConnectionRevoker)
         {
             _adminService = adminService;
             _roomHubContext = roomHubContext;
+            _staffConnectionRevoker = staffConnectionRevoker;
         }
 
         [HttpGet(Router.AdminRouting.GetAll)]
         public async Task<IActionResult> GetAllUsers(
             [FromQuery] string? search,
             [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10
-        )
+            [FromQuery] int pageSize = 10)
         {
-            var result = await _adminService.GetAllUsersAsync(search, page, pageSize);
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            var result = await _adminService.GetAllUsersAsync(
+                search,
+                page,
+                pageSize,
+                callerIsAdmin: User.IsInRole(AppRoles.Admin));
             return Ok(result);
         }
 
         [HttpGet(Router.AdminRouting.GetById)]
         public async Task<IActionResult> GetUserById([FromRoute] Guid id)
         {
-            var result = await _adminService.GetUserByIdAsync(id);
+            var result = await _adminService.GetUserByIdAsync(id, callerIsAdmin: User.IsInRole(AppRoles.Admin));
             if (!result.Succeeded)
-                return BadRequest(result);
+                return StatusCode((int)result.StatusCode, result);
 
             return Ok(result);
         }
 
-        // Admin and Moderator (class-level). Every URL issued is recorded in the audit log.
+        [Authorize(Policy = AuthPolicies.AdminOnly)]
         [HttpGet(Router.AdminRouting.VoiceUrl)]
         public async Task<IActionResult> GetUserVoiceUrl([FromRoute] Guid id)
         {
@@ -56,46 +69,53 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpPut(Router.AdminRouting.ChangeStatus)]
-        public async Task<IActionResult> ChangeStatus([FromRoute] Guid id,[FromBody] ChangeStatusDto model)
+        public async Task<IActionResult> ChangeStatus([FromRoute] Guid id, [FromBody] ChangeStatusDto model)
         {
-            var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (adminId == id.ToString())
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            if (!model.NewStatus.HasValue)
             {
-                return BadRequest(new { succeeded = false, message = "You cannot change your own status." });
+                return BadRequest(new { succeeded = false, message = "NewStatus is required." });
             }
 
-            // AN-011: forward the acting admin so the transition is attributable. The claim is
-            // already read above; it was simply not passed on.
-            if (!Guid.TryParse(adminId, out var adminGuid))
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actorGuid))
             {
                 return BadRequest(new { succeeded = false, message = "Could not resolve the acting admin identity." });
             }
 
-            var result = await _adminService.ChangeUserStatusAsync(id, model.NewStatus, adminGuid);
-            if (!result.Succeeded)
-                return BadRequest(result);
-
-            // SECURITY: If the user was banned or rejected, force-abort all their active SignalR
-            // connections. The JWT is stateless and cannot be revoked, so we must sever the
-            // transport to instantly boot them from any active room.
-            if (model.NewStatus == UserStatus.Banned || model.NewStatus == UserStatus.Rejected)
+            if (actorGuid == id)
             {
-                var reason = model.NewStatus == UserStatus.Banned
+                return BadRequest(new { succeeded = false, message = "You cannot change your own status." });
+            }
+
+            var newStatus = model.NewStatus.Value;
+            var result = await _adminService.ChangeUserStatusAsync(
+                id,
+                newStatus,
+                model.Reason,
+                actorGuid,
+                callerIsAdmin: User.IsInRole(AppRoles.Admin));
+            if (!result.Succeeded)
+                return StatusCode((int)result.StatusCode, result);
+
+            if (newStatus is UserStatus.Banned or UserStatus.Rejected)
+            {
+                var disconnectReason = newStatus == UserStatus.Banned
                     ? "Your account has been banned."
                     : "Your account has been rejected.";
+                await DisconnectUserFromRoomHubAsync(id, disconnectReason);
+            }
 
-                var connectionIds = RoomHub.GetConnectionsForUser(id);
-                foreach (var connId in connectionIds)
-                {
-                    await _roomHubContext.Clients.Client(connId)
-                        .SendAsync("ForceDisconnect", new { Reason = reason });
-                }
-                RoomHub.PurgeUserConnections(id);
+            if (result.SessionRevoked)
+            {
+                await _staffConnectionRevoker.RevokeAsync(id);
             }
 
             return Ok(result);
         }
 
+        [Authorize(Policy = AuthPolicies.AdminOnly)]
         [HttpPut(Router.AdminRouting.BulkChangeStatus)]
         public async Task<IActionResult> BulkChangeStatus([FromBody] BulkChangeStatusDto model)
         {
@@ -106,26 +126,24 @@ namespace Cocorra.API.Controllers
 
             var result = await _adminService.BulkChangeUserStatusAsync(model, adminId);
             if (!result.Succeeded)
-                return BadRequest(result);
+                return StatusCode((int)result.StatusCode, result);
 
-            // SECURITY: mirror the single-user endpoint — force-abort SignalR
-            // connections for every user that was successfully banned or rejected.
-            if (model.NewStatus == UserStatus.Banned || model.NewStatus == UserStatus.Rejected)
+            var succeededItems = result.Data!.Results.Where(r => r.Succeeded).ToList();
+            if (model.NewStatus is UserStatus.Banned or UserStatus.Rejected)
             {
-                var reason = model.NewStatus == UserStatus.Banned
+                var disconnectReason = model.NewStatus == UserStatus.Banned
                     ? "Your account has been banned."
                     : "Your account has been rejected.";
 
-                foreach (var item in result.Data!.Results.Where(r => r.Succeeded))
+                foreach (var item in succeededItems)
                 {
-                    var connectionIds = RoomHub.GetConnectionsForUser(item.UserId);
-                    foreach (var connId in connectionIds)
-                    {
-                        await _roomHubContext.Clients.Client(connId)
-                            .SendAsync("ForceDisconnect", new { Reason = reason });
-                    }
-                    RoomHub.PurgeUserConnections(item.UserId);
+                    await DisconnectUserFromRoomHubAsync(item.UserId, disconnectReason);
                 }
+            }
+
+            foreach (var item in succeededItems.Where(r => r.SessionRevoked))
+            {
+                await _staffConnectionRevoker.RevokeAsync(item.UserId);
             }
 
             return Ok(result);
@@ -138,6 +156,7 @@ namespace Cocorra.API.Controllers
             return Ok(result);
         }
 
+        [Authorize(Policy = AuthPolicies.AdminOnly)]
         [HttpPost(Router.AdminRouting.Prefix + "/BlockDeviceAndEmail")]
         public async Task<IActionResult> BlockDeviceAndEmail([FromBody] BlockDeviceAndEmailDto model)
         {
@@ -159,20 +178,14 @@ namespace Cocorra.API.Controllers
             if (!result.Succeeded)
                 return StatusCode((int)result.StatusCode, result);
 
-            // SECURITY: mirror ChangeStatus — the JWT is stateless and cannot be revoked, so
-            // sever the transport to boot the banned user out of any active room immediately.
             var bannedUserId = result.Data!.UserId;
-            var connectionIds = RoomHub.GetConnectionsForUser(bannedUserId);
-            foreach (var connId in connectionIds)
-            {
-                await _roomHubContext.Clients.Client(connId)
-                    .SendAsync("ForceDisconnect", new { Reason = "Your account has been banned." });
-            }
-            RoomHub.PurgeUserConnections(bannedUserId);
+            await DisconnectUserFromRoomHubAsync(bannedUserId, "Your account has been banned.");
+            await _staffConnectionRevoker.RevokeAsync(bannedUserId);
 
             return Ok(result);
         }
 
+        [Authorize(Policy = AuthPolicies.AdminOnly)]
         [HttpPost(Router.AdminRouting.BroadcastNotification)]
         [HttpPost(Router.AdminRouting.Prefix + "/Notifications/Broadcast")]
         public async Task<IActionResult> BroadcastNotification([FromBody] SendBroadcastNotificationDto model)
@@ -195,6 +208,17 @@ namespace Cocorra.API.Controllers
                 return StatusCode((int)result.StatusCode, result);
 
             return Ok(result);
+        }
+
+        private async Task DisconnectUserFromRoomHubAsync(Guid userId, string reason)
+        {
+            var connectionIds = RoomHub.GetConnectionsForUser(userId);
+            foreach (var connId in connectionIds)
+            {
+                await _roomHubContext.Clients.Client(connId)
+                    .SendAsync("ForceDisconnect", new { Reason = reason });
+            }
+            RoomHub.PurgeUserConnections(userId);
         }
     }
 }

@@ -32,6 +32,26 @@ namespace Cocorra.DAL.Models
 
         public string? DetailsJson { get; set; }
 
+        // Staff activity timeline fields. All nullable: rows written before they existed, and
+        // actions that have no entity or state change, leave them empty.
+        [MaxLength(32)]
+        public string? Category { get; set; } // use AuditCategories constants
+
+        [MaxLength(32)]
+        public string? EntityType { get; set; } // use AuditEntityTypes constants
+
+        [MaxLength(64)]
+        public string? EntityId { get; set; }
+
+        [MaxLength(64)]
+        public string? FromState { get; set; }
+
+        [MaxLength(64)]
+        public string? ToState { get; set; }
+
+        [MaxLength(1000)]
+        public string? Reason { get; set; }
+
         [MaxLength(64)]
         public string? IpAddress { get; set; }
 

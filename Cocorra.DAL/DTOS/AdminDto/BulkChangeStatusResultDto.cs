@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Cocorra.DAL.DTOS.AdminDto
 {
@@ -21,5 +22,8 @@ namespace Cocorra.DAL.DTOS.AdminDto
         public Guid UserId { get; set; }
         public bool Succeeded { get; set; }
         public string? Message { get; set; }
+
+        [JsonIgnore]
+        public bool SessionRevoked { get; set; }
     }
 }

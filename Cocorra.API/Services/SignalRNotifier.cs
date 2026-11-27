@@ -13,10 +13,12 @@ namespace Cocorra.API.Services
     public class SignalRNotifier : IRealTimeNotifier
     {
         private readonly IHubContext<RoomHub> _roomHubContext;
+        private readonly IStaffConnectionRevoker _staffConnectionRevoker;
 
-        public SignalRNotifier(IHubContext<RoomHub> roomHubContext)
+        public SignalRNotifier(IHubContext<RoomHub> roomHubContext, IStaffConnectionRevoker staffConnectionRevoker)
         {
             _roomHubContext = roomHubContext;
+            _staffConnectionRevoker = staffConnectionRevoker;
         }
 
         public async Task ForceLogoutAsync(Guid userId, string reason)
@@ -31,6 +33,9 @@ namespace Cocorra.API.Services
                     });
             }
             catch { /* SignalR broadcast failure must not block admin actions */ }
+
+            // A forced logout (ban, mute) must also end any staff support session the account holds.
+            await _staffConnectionRevoker.RevokeAsync(userId);
         }
 
         public async Task RoomEndedAsync(Guid roomId, string message)

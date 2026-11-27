@@ -1,3 +1,4 @@
+using Cocorra.BLL.Services.AuditLogs;
 using Cocorra.BLL.Services.ChatService;
 using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.RoomService;
@@ -25,11 +26,22 @@ namespace Cocorra.API.Hubs
         private readonly IEventTracker _eventTracker;
         private readonly RoomLifecycleSettings _roomLifecycle;
         private readonly ILogger<RoomHub> _logger;
+        private readonly IAuditLogService? _auditLog;
 
         // Thread-safe mapping: ConnectionId → (UserId, RoomId)
         private static readonly ConcurrentDictionary<string, (Guid UserId, Guid RoomId)> _connections = new();
 
-        public RoomHub(IRoomRepository roomRepo, IRoomService roomService, IChatService chatService, ILiveKitService liveKitService, IOptions<LiveKitSettings> liveKitSettings, IEventTracker eventTracker, IOptions<RoomLifecycleSettings> roomLifecycle, ILogger<RoomHub> logger)
+        public RoomHub(
+            IRoomRepository roomRepo,
+            IRoomService roomService,
+            IChatService chatService,
+            ILiveKitService liveKitService,
+            IOptions<LiveKitSettings> liveKitSettings,
+            IEventTracker eventTracker,
+            IOptions<RoomLifecycleSettings> roomLifecycle,
+            ILogger<RoomHub> logger,
+            // Optional so direct test construction keeps compiling; SignalR's per-invocation scope injects it.
+            IAuditLogService? auditLog = null)
         {
             _roomRepo = roomRepo;
             _roomService = roomService;
@@ -39,6 +51,7 @@ namespace Cocorra.API.Hubs
             _eventTracker = eventTracker;
             _roomLifecycle = roomLifecycle.Value;
             _logger = logger;
+            _auditLog = auditLog;
         }
 
         // ==========================================================================
@@ -166,6 +179,42 @@ namespace Cocorra.API.Hubs
             if (!string.IsNullOrWhiteSpace(user.UserName)) return user.UserName.Trim();
             if (!string.IsNullOrWhiteSpace(user.Email)) return user.Email.Trim();
             return fallback;
+        }
+
+        private string? GetActorRoles()
+        {
+            var roles = Context.User?.FindAll(ClaimTypes.Role)
+                .Select(c => c.Value)
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToArray();
+
+            return roles is { Length: > 0 } ? string.Join(",", roles) : null;
+        }
+
+        private async Task RecordHostAuditAsync(AuditEntry entry)
+        {
+            if (_auditLog is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await _auditLog.RecordAsync(entry with
+                {
+                    Category = AuditCategories.Room,
+                    EntityType = AuditEntityTypes.Room,
+                    ActorRole = GetActorRoles()
+                });
+            }
+            catch (Exception ex)
+            {
+                // AuditLogService.RecordAsync catches its own failures; this outer guard ensures
+                // audit can never disrupt a live room invocation.
+                _logger.LogWarning(ex,
+                    "Failed to record RoomHub audit {Action} for room {RoomId} by host {HostId}.",
+                    entry.Action, entry.EntityId, entry.ActorUserId);
+            }
         }
 
         /// <summary>
@@ -656,6 +705,16 @@ namespace Cocorra.API.Hubs
                 IsOnStage = true,
                 Name = ResolveDisplayName(participant.User)
             });
+
+            await RecordHostAuditAsync(new AuditEntry(
+                AuditActions.RoomStageApproved,
+                hostId,
+                targetGuid,
+                ResolveDisplayName(participant.User),
+                new { title = room.RoomTitle, viaHandRaise = handWasRaised })
+            {
+                EntityId = roomGuid.ToString()
+            });
         }
 
         public async Task MoveToAudience(string roomId, string targetUserId)
@@ -724,6 +783,16 @@ namespace Cocorra.API.Hubs
                 UserId = targetGuid,
                 IsMuted = true,
                 Name = ResolveDisplayName(participant.User)
+            });
+
+            await RecordHostAuditAsync(new AuditEntry(
+                AuditActions.RoomMovedToAudience,
+                hostId,
+                targetGuid,
+                ResolveDisplayName(participant.User),
+                new { title = room.RoomTitle })
+            {
+                EntityId = roomGuid.ToString()
             });
         }
 
@@ -847,6 +916,16 @@ namespace Cocorra.API.Hubs
                 AddedMinutes = minutes,
                 Name = ResolveDisplayName(participant.User)
             });
+
+            await RecordHostAuditAsync(new AuditEntry(
+                AuditActions.RoomExtraTimeGranted,
+                hostId,
+                targetGuid,
+                ResolveDisplayName(participant.User),
+                new { title = room.RoomTitle, addedMinutes = minutes, totalExtraMinutes = participant.ExtraMinutesGranted })
+            {
+                EntityId = roomGuid.ToString()
+            });
         }
 
         public async Task KickUser(string roomId, string targetUserId)
@@ -937,6 +1016,16 @@ namespace Cocorra.API.Hubs
             {
                 UserId = targetGuid,
                 Name = ResolveDisplayName(participant.User)
+            });
+
+            await RecordHostAuditAsync(new AuditEntry(
+                AuditActions.RoomUserKicked,
+                hostId,
+                targetGuid,
+                ResolveDisplayName(participant.User),
+                new { title = room.RoomTitle })
+            {
+                EntityId = roomGuid.ToString()
             });
         }
 

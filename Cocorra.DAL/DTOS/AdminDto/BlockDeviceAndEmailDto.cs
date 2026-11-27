@@ -13,5 +13,7 @@ namespace Cocorra.DAL.DTOS.AdminDto
         [Required]
         [EmailAddress]
         public string Email { get; set; } = null!;
+
+        public string? Reason { get; set; }
     }
 }

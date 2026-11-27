@@ -76,7 +76,7 @@ public class AdminServiceAuditTests : IDisposable
         };
 
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(false);
+        _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { AppRoles.User });
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
 
         AuditEntry? capturedEntry = null;
@@ -85,7 +85,13 @@ public class AdminServiceAuditTests : IDisposable
             .Returns(Task.CompletedTask);
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, adminId, isBulk: false);
+        var result = await service.ChangeUserStatusAsync(
+            userId,
+            UserStatus.Active,
+            "  Verified audio sample  ",
+            adminId,
+            callerIsAdmin: true,
+            isBulk: false);
 
         Assert.True(result.Succeeded);
         _auditLogMock.Verify(a => a.RecordAsync(It.IsAny<AuditEntry>()), Times.Once);
@@ -95,6 +101,12 @@ public class AdminServiceAuditTests : IDisposable
         Assert.Equal(adminId, capturedEntry.ActorUserId);
         Assert.Equal(userId, capturedEntry.TargetUserId);
         Assert.Equal("member@cocorra.com", capturedEntry.TargetDisplay);
+        Assert.Equal(AuditCategories.UserModeration, capturedEntry.Category);
+        Assert.Equal(AuditEntityTypes.User, capturedEntry.EntityType);
+        Assert.Equal(userId.ToString(), capturedEntry.EntityId);
+        Assert.Equal("Pending", capturedEntry.FromState);
+        Assert.Equal("Active", capturedEntry.ToState);
+        Assert.Equal("Verified audio sample", capturedEntry.Reason);
 
         var json = JsonSerializer.Serialize(capturedEntry.Details, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         using var doc = JsonDocument.Parse(json);
@@ -111,10 +123,10 @@ public class AdminServiceAuditTests : IDisposable
         var user = new ApplicationUser { Id = userId, Status = UserStatus.Active };
 
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(true);
+        _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { AppRoles.Admin });
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, adminId);
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Banned, "Policy violation", adminId, callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -129,10 +141,10 @@ public class AdminServiceAuditTests : IDisposable
         var user = new ApplicationUser { Id = userId, Status = UserStatus.Active };
 
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(false);
+        _userManagerMock.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string> { AppRoles.User });
 
         var service = CreateService();
-        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, adminId);
+        var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, "Duplicate activation", adminId, callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
@@ -151,7 +163,7 @@ public class AdminServiceAuditTests : IDisposable
 
         _userManagerMock.Setup(m => m.FindByIdAsync(user1Id.ToString())).ReturnsAsync(user1);
         _userManagerMock.Setup(m => m.FindByIdAsync(user2Id.ToString())).ReturnsAsync(user2);
-        _userManagerMock.Setup(m => m.IsInRoleAsync(It.IsAny<ApplicationUser>(), "Admin")).ReturnsAsync(false);
+        _userManagerMock.Setup(m => m.GetRolesAsync(It.IsAny<ApplicationUser>())).ReturnsAsync(new List<string> { AppRoles.User });
         _userManagerMock.Setup(m => m.UpdateAsync(It.IsAny<ApplicationUser>())).ReturnsAsync(IdentityResult.Success);
 
         var capturedEntries = new List<AuditEntry>();
@@ -163,7 +175,8 @@ public class AdminServiceAuditTests : IDisposable
         var dto = new BulkChangeStatusDto
         {
             UserIds = new List<Guid> { adminId, user1Id, user2Id },
-            NewStatus = UserStatus.Active
+            NewStatus = UserStatus.Active,
+            Reason = "Batch activation"
         };
 
         var result = await service.BulkChangeUserStatusAsync(dto, adminId);
@@ -178,6 +191,12 @@ public class AdminServiceAuditTests : IDisposable
         {
             Assert.Equal(AuditActions.UserStatusChanged, entry.Action);
             Assert.Equal(adminId, entry.ActorUserId);
+            Assert.Equal(AuditCategories.UserModeration, entry.Category);
+            Assert.Equal(AuditEntityTypes.User, entry.EntityType);
+            Assert.Equal(entry.TargetUserId.ToString(), entry.EntityId);
+            Assert.Equal("Pending", entry.FromState);
+            Assert.Equal("Active", entry.ToState);
+            Assert.Equal("Batch activation", entry.Reason);
 
             var json = JsonSerializer.Serialize(entry.Details, new JsonSerializerOptions(JsonSerializerDefaults.Web));
             using var doc = JsonDocument.Parse(json);
@@ -203,7 +222,7 @@ public class AdminServiceAuditTests : IDisposable
         };
 
         _userManagerMock.Setup(m => m.FindByEmailAsync("malicious@cocorra.com")).ReturnsAsync(user);
-        _userManagerMock.Setup(m => m.IsInRoleAsync(user, "Admin")).ReturnsAsync(false);
+        _userManagerMock.Setup(m => m.IsInRoleAsync(user, AppRoles.Admin)).ReturnsAsync(false);
         _userManagerMock.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
         _blockedDevicesRepoMock.Setup(b => b.BlockAllDevicesForUserAsync(userId)).ReturnsAsync(4);
 
@@ -213,7 +232,7 @@ public class AdminServiceAuditTests : IDisposable
             .Returns(Task.CompletedTask);
 
         var service = CreateService();
-        var dto = new BlockDeviceAndEmailDto { Email = "malicious@cocorra.com" };
+        var dto = new BlockDeviceAndEmailDto { Email = "malicious@cocorra.com", Reason = "Severe harassment" };
         var result = await service.BlockDeviceAndEmailAsync(dto, adminId);
 
         Assert.True(result.Succeeded);
@@ -224,6 +243,12 @@ public class AdminServiceAuditTests : IDisposable
         Assert.Equal(adminId, capturedEntry.ActorUserId);
         Assert.Equal(userId, capturedEntry.TargetUserId);
         Assert.Equal("malicious@cocorra.com", capturedEntry.TargetDisplay);
+        Assert.Equal(AuditCategories.UserModeration, capturedEntry.Category);
+        Assert.Equal(AuditEntityTypes.User, capturedEntry.EntityType);
+        Assert.Equal(userId.ToString(), capturedEntry.EntityId);
+        Assert.Equal("Active", capturedEntry.FromState);
+        Assert.Equal("Banned", capturedEntry.ToState);
+        Assert.Equal("Severe harassment", capturedEntry.Reason);
 
         var json = JsonSerializer.Serialize(capturedEntry.Details, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         using var doc = JsonDocument.Parse(json);

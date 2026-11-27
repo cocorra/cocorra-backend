@@ -1,3 +1,4 @@
+using Cocorra.API.Authorization;
 using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.DAL.AppMetaData;
@@ -29,7 +30,7 @@ namespace Cocorra.API.Controllers
         }
 
         [HttpPost(Router.RoomRouting.Create)]
-        [Authorize(Roles = "Admin,Coach")]
+        [Authorize(Policy = AuthPolicies.AdminOrCoach)]
         public async Task<IActionResult> Create([FromForm] CreateRoomDto dto, IFormFile? roomImage)
         {
             var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -161,7 +162,7 @@ namespace Cocorra.API.Controllers
         }
 
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Policy = AuthPolicies.AdminOnly)]
         [HttpGet(Router.RoomRouting.AdminHistory)]
         public async Task<IActionResult> GetRoomHistory([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20)
         {

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using Cocorra.API.Authorization;
 using Cocorra.API.Controllers;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.RoomInviteService;
@@ -122,7 +123,7 @@ public class RoomInviteControllerTests
     }
 
     [Fact]
-    public void GetStats_HasAuthorizeAttributeWithAdminRole()
+    public void GetStats_HasAuthorizeAttributeWithAdminOnlyPolicy()
     {
         var method = typeof(RoomInviteController).GetMethod(nameof(RoomInviteController.GetStats));
         Assert.NotNull(method);
@@ -132,7 +133,8 @@ public class RoomInviteControllerTests
             .FirstOrDefault();
 
         Assert.NotNull(authorizeAttribute);
-        Assert.Equal("Admin", authorizeAttribute!.Roles);
+        Assert.Equal(AuthPolicies.AdminOnly, authorizeAttribute!.Policy);
+        Assert.True(string.IsNullOrEmpty(authorizeAttribute.Roles));
     }
 
     // =========================================================================

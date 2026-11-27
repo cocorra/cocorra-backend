@@ -10,10 +10,12 @@ namespace Cocorra.DAL.Repository.SupportRepository
     {
         Task AddTicketAsync(SupportTicket ticket);
         Task AddReportAsync(Report report);
-        Task<List<Report>> GetFilteredReportsAsync(ReportCategory? category, string? status);
+        Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(ReportCategory? category, string? status, int pageNumber, int pageSize, bool excludeAdmins = false);
         Task<Report?> GetReportByIdAsync(Guid reportId);
+        Task<Report?> GetReportDetailsByIdAsync(Guid reportId);
         Task<SupportTicket?> GetTicketByIdAsync(Guid ticketId);
-        Task<(int TotalCount, List<SupportTicket> Items)> GetPagedTicketsAsync(SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize);
+        Task<SupportTicket?> GetTicketDetailsByIdAsync(Guid ticketId);
+        Task<(int TotalCount, List<SupportTicket> Items)> GetPagedTicketsAsync(SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize, bool excludeAdmins = false);
         Task UpdateTicketAsync(SupportTicket ticket);
         Task UpdateReportAsync(Report report);
 
@@ -24,6 +26,7 @@ namespace Cocorra.DAL.Repository.SupportRepository
         Task AddChatAsync(SupportChat chat);
         Task AddMessageAsync(SupportMessage message);
         Task UpdateChatAsync(SupportChat chat);
+        Task ReleaseActiveChatsForStaffAsync(string adminId);
         Task<List<SupportChat>> GetPendingChatsAsync(int pageNumber, int pageSize);
         Task<int> GetPendingChatsCountAsync();
         Task<List<SupportChat>> GetAdminActiveChatsAsync(string adminId, int pageNumber, int pageSize);

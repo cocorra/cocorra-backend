@@ -1,6 +1,7 @@
+using Cocorra.API.Authorization;
+using Cocorra.API.Hubs;
 using Cocorra.BLL.Services.RolesService;
 using Cocorra.DAL.AppMetaData;
-using Cocorra.DAL.DTOS;
 using Cocorra.DAL.DTOS.Role;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -12,16 +13,18 @@ using System.Threading.Tasks;
 namespace Cocorra.API.Controllers
 {
     [ApiController]
-    [Authorize(Roles = "Admin")] 
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
     public class RolesController : ControllerBase
     {
         private const string UnresolvedAdminMessage = "Could not resolve the acting admin identity.";
 
         private readonly IRolesService _rolesService;
+        private readonly IStaffConnectionRevoker _staffConnectionRevoker;
 
-        public RolesController(IRolesService rolesService)
+        public RolesController(IRolesService rolesService, IStaffConnectionRevoker staffConnectionRevoker)
         {
             _rolesService = rolesService;
+            _staffConnectionRevoker = staffConnectionRevoker;
         }
 
         [HttpGet(Router.RolesRouting.GetRoles)]
@@ -69,6 +72,8 @@ namespace Cocorra.API.Controllers
             var result = await _rolesService.ManageUserRolesAsync(model, adminGuid);
 
             if (!result.Succeeded) return BadRequest(result);
+
+            await _staffConnectionRevoker.RevokeAsync(model.UserId);
 
             return Ok(result);
         }

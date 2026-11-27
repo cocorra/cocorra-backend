@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using Cocorra.API.Authorization;
 using Cocorra.API.Controllers;
 using Cocorra.BLL.Base;
 using Cocorra.BLL.Services.AuditLogs;
@@ -24,7 +25,7 @@ public class AdminLogsControllerTests
         new(_systemLogServiceMock.Object, _auditLogServiceMock.Object);
 
     [Fact]
-    public void Controller_HasAuthorizeAttributeWithAdminRoleAndNotModerator()
+    public void Controller_HasAuthorizeAttributeWithAdminOnlyPolicy()
     {
         var controllerType = typeof(AdminLogsController);
 
@@ -35,8 +36,8 @@ public class AdminLogsControllerTests
 
         Assert.NotEmpty(authorizeAttributes);
         var authAttr = authorizeAttributes.First();
-        Assert.Equal("Admin", authAttr.Roles);
-        Assert.DoesNotContain("Moderator", authAttr.Roles ?? string.Empty);
+        Assert.Equal(AuthPolicies.AdminOnly, authAttr.Policy);
+        Assert.True(string.IsNullOrEmpty(authAttr.Roles));
     }
 
     [Fact]
