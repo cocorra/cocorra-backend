@@ -33,7 +33,13 @@ public class AdminControllerTests
     private AdminController CreateController(
         Guid? actorId = null,
         string email = "admin@example.com",
-        string role = AppRoles.Admin)
+        string role = AppRoles.Admin) =>
+        CreateController(new[] { role }, actorId, email);
+
+    private AdminController CreateController(
+        IEnumerable<string> roles,
+        Guid? actorId = null,
+        string email = "admin@example.com")
     {
         var controller = new AdminController(
             _adminServiceMock.Object,
@@ -44,9 +50,13 @@ public class AdminControllerTests
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, uid.ToString()),
-            new(ClaimTypes.Email, email),
-            new(ClaimTypes.Role, role)
+            new(ClaimTypes.Email, email)
         };
+        foreach (var role in roles)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
         var identity = new ClaimsIdentity(claims, "TestAuth");
         var principal = new ClaimsPrincipal(identity);
 
@@ -236,6 +246,35 @@ public class AdminControllerTests
     }
 
     [Fact]
+    public async Task ChangeStatus_ServiceReturnsNotFound_Propagates404AndDoesNotInvokeRevoker()
+    {
+        var moderatorId = Guid.NewGuid();
+        var targetUserId = Guid.NewGuid();
+        var controller = CreateController(moderatorId, email: "mod@example.com", role: AppRoles.Moderator);
+
+        var model = new ChangeStatusDto { NewStatus = UserStatus.Banned, Reason = "Target does not exist" };
+        var serviceResponse = StatusChangeResponse.From(
+            new Response<string>
+            {
+                Succeeded = false,
+                StatusCode = HttpStatusCode.NotFound,
+                Message = "User not found"
+            },
+            sessionRevoked: false);
+
+        _adminServiceMock
+            .Setup(s => s.ChangeUserStatusAsync(targetUserId, UserStatus.Banned, model.Reason, moderatorId, false, false))
+            .ReturnsAsync(serviceResponse);
+
+        var result = await controller.ChangeStatus(targetUserId, model);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(404, obj.StatusCode);
+        Assert.Equal(serviceResponse, obj.Value);
+        _revokerMock.Verify(r => r.RevokeAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
     public async Task BulkChangeStatus_InvalidModel_ReturnsBadRequestWithoutRevoking()
     {
         var controller = CreateController();
@@ -292,8 +331,18 @@ public class AdminControllerTests
         _revokerMock.Verify(r => r.RevokeAsync(failedUserId), Times.Never);
     }
 
-    [Fact]
-    public async Task GetDashboardStats_ReturnsOk()
+    public static TheoryData<string[], bool> DashboardStatsRoleCases => new()
+    {
+        { new[] { AppRoles.Admin }, true },
+        { new[] { AppRoles.Moderator }, false },
+        { new[] { AppRoles.Moderator, AppRoles.Coach }, false },
+        { new[] { AppRoles.Admin, AppRoles.Moderator }, true }
+    };
+
+    [Theory]
+    [MemberData(nameof(DashboardStatsRoleCases))]
+    public async Task GetDashboardStats_ByCallerRoles_PassesExpectedCallerIsAdminFlagAndReturnsOk(
+        string[] roles, bool expectedCallerIsAdmin)
     {
         var stats = new DashboardStatsDto
         {
@@ -309,13 +358,16 @@ public class AdminControllerTests
             Data = stats
         };
 
-        _adminServiceMock.Setup(s => s.GetDashboardStatsAsync()).ReturnsAsync(serviceResponse);
-        var controller = CreateController();
+        _adminServiceMock
+            .Setup(s => s.GetDashboardStatsAsync(expectedCallerIsAdmin))
+            .ReturnsAsync(serviceResponse);
+        var controller = CreateController(roles);
 
         var result = await controller.GetDashboardStats();
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(serviceResponse, ok.Value);
+        _adminServiceMock.Verify(s => s.GetDashboardStatsAsync(expectedCallerIsAdmin), Times.Once);
     }
 
     [Fact]

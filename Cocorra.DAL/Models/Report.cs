@@ -45,5 +45,35 @@ namespace Cocorra.DAL.Models
         /// unmeasurable — only the current status existed, with no record of when it changed.
         /// </summary>
         public DateTime? ResolvedAt { get; set; }
+
+        /// <summary>Null on reports filed before severity existed.</summary>
+        public ModerationSeverity? Severity { get; set; }
+
+        /// <summary>
+        /// For <see cref="ReportSource.AutoModeration"/> the reporter is the message sender, because
+        /// <see cref="ReporterId"/> is required and the previous release must still read these rows.
+        /// </summary>
+        public ReportSource Source { get; set; } = ReportSource.User;
+
+        public Guid? ReportedTextRoomId { get; set; }
+        [ForeignKey(nameof(ReportedTextRoomId))]
+        public virtual TextRoom? ReportedTextRoom { get; set; }
+
+        /// <summary>Deliberately not FK-linked: the evidence lives in <see cref="MessageContext"/>.</summary>
+        public long? ReportedTextRoomMessageId { get; set; }
+
+        public Guid? MatchedDictionaryEntryId { get; set; }
+
+        [MaxLength(100)]
+        public string? MatchedTerm { get; set; }
+
+        public int? ContextBeforeRequested { get; set; }
+
+        public int? ContextAfterRequested { get; set; }
+
+        /// <summary>Null while messages after the reported one are still being collected.</summary>
+        public DateTime? ContextCompletedAt { get; set; }
+
+        public virtual ICollection<ReportMessageContextEntry> MessageContext { get; set; } = new List<ReportMessageContextEntry>();
     }
 }

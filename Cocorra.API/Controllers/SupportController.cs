@@ -57,13 +57,17 @@ namespace Cocorra.API.Controllers
             [FromQuery] ReportCategory? category,
             [FromQuery] string? status,
             [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 20)
+            [FromQuery] int pageSize = 20,
+            [FromQuery] ModerationSeverity? severity = null,
+            [FromQuery] string? sort = null)
         {
             pageNumber = Math.Max(1, pageNumber);
             pageSize = Math.Clamp(pageSize, 1, 100);
 
             var callerIsAdmin = User.IsInRole(AppRoles.Admin);
-            var result = await _supportService.GetFilteredReportsAsync(category, status, pageNumber, pageSize, callerIsAdmin);
+            var prioritySort = string.Equals(sort, "priority", StringComparison.OrdinalIgnoreCase);
+            var result = await _supportService.GetFilteredReportsAsync(
+                new ReportListQuery(category, status, severity, prioritySort, pageNumber, pageSize), callerIsAdmin);
             return StatusCode((int)result.StatusCode, result);
         }
 

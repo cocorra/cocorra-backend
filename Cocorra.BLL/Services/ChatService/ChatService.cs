@@ -19,6 +19,8 @@ namespace Cocorra.BLL.Services.ChatService
 {
     public class ChatService : ResponseHandler, IChatService
     {
+        private const int MaxContentLength = 1000;
+
         private readonly IUserBlockRepository _blockRepo;
         private readonly IMessageRepository _messageRepo;
         private readonly IPushNotificationService _pushService;
@@ -52,25 +54,24 @@ namespace Cocorra.BLL.Services.ChatService
 
             var messages = await _messageRepo.GetChatHistoryAsync(currentUserId, friendId, pageNumber, pageSize);
 
-            var dtoList = messages.Select(m => new MessageDto
-            {
-                Id = m.Id,
-                SenderId = m.SenderId,
-                ReceiverId = m.ReceiverId,
-                Content = m.Content,
-                IsRead = m.IsRead,
-                CreatedAt = m.CreatedAt
-            }).ToList();
+            var dtoList = messages.Select(ToDto).ToList();
 
             return Success<IEnumerable<MessageDto>>(dtoList);
         }
 
-        public async Task<Response<MessageDto>> SaveMessageAsync(Guid senderId, Guid receiverId, string content)
+        public Task<Response<MessageDto>> SaveMessageAsync(Guid senderId, Guid receiverId, string content) =>
+            SaveMessageAsync(senderId, receiverId, content, MessageOrigin.Direct);
+
+        public async Task<Response<MessageDto>> SaveMessageAsync(Guid senderId, Guid receiverId, string content, MessageOrigin origin)
         {
             if (string.IsNullOrWhiteSpace(content))
                 return BadRequest<MessageDto>("Message cannot be empty.");
 
             content = content.Trim();
+
+            // Message.Content is nvarchar(1000); longer content failed at SaveChanges as a generic error.
+            if (content.Length > MaxContentLength)
+                return BadRequest<MessageDto>($"Message cannot be longer than {MaxContentLength} characters.");
 
             if (senderId == receiverId)
                 return BadRequest<MessageDto>("You cannot send messages to yourself.");
@@ -89,7 +90,9 @@ namespace Cocorra.BLL.Services.ChatService
                 ReceiverId = receiverId,
                 Content = content,
                 CreatedAt = DateTime.UtcNow,
-                IsRead = false
+                IsRead = false,
+                OriginRoomId = origin.RoomId,
+                OriginTextRoomId = origin.TextRoomId
             };
 
             await _messageRepo.AddAsync(message);
@@ -105,15 +108,7 @@ namespace Cocorra.BLL.Services.ChatService
                 contentLength = content?.Length ?? 0
             });
 
-            var dto = new MessageDto
-            {
-                Id = message.Id,
-                SenderId = message.SenderId,
-                ReceiverId = message.ReceiverId,
-                Content = message.Content,
-                IsRead = message.IsRead,
-                CreatedAt = message.CreatedAt
-            };
+            var dto = ToDto(message);
 
             try
             {
@@ -161,5 +156,17 @@ namespace Cocorra.BLL.Services.ChatService
 
             return Success("Messages marked as read.");
         }
+
+        private static MessageDto ToDto(Message m) => new()
+        {
+            Id = m.Id,
+            SenderId = m.SenderId,
+            ReceiverId = m.ReceiverId,
+            Content = m.Content,
+            IsRead = m.IsRead,
+            CreatedAt = m.CreatedAt,
+            OriginRoomId = m.OriginRoomId,
+            OriginTextRoomId = m.OriginTextRoomId
+        };
     }
 }

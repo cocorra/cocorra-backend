@@ -22,6 +22,7 @@ public class RoomHubTests
     private readonly Mock<IRoomRepository> _roomRepoMock = new();
     private readonly Mock<IRoomService> _roomServiceMock = new();
     private readonly Mock<IChatService> _chatServiceMock = new();
+    private readonly Mock<IDirectMessageNotifier> _dmNotifierMock = new();
     private readonly Mock<ILiveKitService> _liveKitServiceMock = new();
     private readonly Mock<IEventTracker> _eventTrackerMock = new();
     private readonly Mock<IHubCallerClients> _clientsMock = new();
@@ -52,6 +53,7 @@ public class RoomHubTests
             _roomRepoMock.Object,
             _roomServiceMock.Object,
             _chatServiceMock.Object,
+            _dmNotifierMock.Object,
             _liveKitServiceMock.Object,
             Options.Create(_settings),
             _eventTrackerMock.Object,
@@ -562,11 +564,13 @@ public class RoomHubTests
     }
 
     [Fact]
-    public async Task SendRoomPrivateMessage_Success_DeliversToUserAndConfirmsToCaller()
+    public async Task SendRoomPrivateMessage_Success_SavesWithRoomOriginAndDeliversOnBothHubs()
     {
         var userId = Guid.NewGuid();
         var targetUserId = Guid.NewGuid();
-        var hub = CreateHub(userId);
+        var roomId = Guid.NewGuid();
+        var hub = CreateHub(userId, connectionId: "conn-dm");
+        await JoinLiveRoomAsync(hub, roomId, userId);
 
         var messageDto = new MessageDto
         {
@@ -576,7 +580,7 @@ public class RoomHubTests
             Content = "Secret msg"
         };
 
-        _chatServiceMock.Setup(s => s.SaveMessageAsync(userId, targetUserId, "Secret msg"))
+        _chatServiceMock.Setup(s => s.SaveMessageAsync(userId, targetUserId, "Secret msg", new MessageOrigin(roomId, null)))
             .ReturnsAsync(new Response<MessageDto>
             {
                 Succeeded = true,
@@ -586,7 +590,40 @@ public class RoomHubTests
 
         await hub.SendRoomPrivateMessage(targetUserId, "Secret msg");
 
-        _userProxyMock.Verify(u => u.SendCoreAsync("ReceivePrivateMessage", It.IsAny<object[]>(), default), Times.Once);
-        _callerProxyMock.Verify(c => c.SendCoreAsync("PrivateMessageSent", It.IsAny<object[]>(), default), Times.Once);
+        _dmNotifierMock.Verify(n => n.DeliverAsync(messageDto), Times.Once);
+    }
+
+    [Fact]
+    public async Task SendRoomPrivateMessage_RejectedBySave_IsNotDelivered()
+    {
+        var userId = Guid.NewGuid();
+        var targetUserId = Guid.NewGuid();
+        var hub = CreateHub(userId);
+
+        _chatServiceMock.Setup(s => s.SaveMessageAsync(userId, targetUserId, "hi", It.IsAny<MessageOrigin>()))
+            .ReturnsAsync(new Response<MessageDto> { Succeeded = false, Message = "You cannot send a message due to a block." });
+
+        await hub.SendRoomPrivateMessage(targetUserId, "hi");
+
+        _dmNotifierMock.Verify(n => n.DeliverAsync(It.IsAny<MessageDto>()), Times.Never);
+        _callerProxyMock.Verify(c => c.SendCoreAsync("SendMessageError", It.IsAny<object[]>(), default), Times.Once);
+    }
+
+    private async Task JoinLiveRoomAsync(RoomHub hub, Guid roomId, Guid userId)
+    {
+        _roomRepoMock.Setup(r => r.GetByIdAsync(roomId))
+            .ReturnsAsync(new Room { Id = roomId, Status = RoomStatus.Live, HostId = Guid.NewGuid() });
+        _roomRepoMock.Setup(r => r.GetParticipantAsync(roomId, userId))
+            .ReturnsAsync(new RoomParticipant
+            {
+                RoomId = roomId,
+                UserId = userId,
+                Status = ParticipantStatus.Active,
+                User = new ApplicationUser { FirstName = "Alice", LastName = "Smith" }
+            });
+        _liveKitServiceMock.Setup(l => l.GenerateToken(roomId, userId, It.IsAny<string>(), It.IsAny<bool>()))
+            .Returns("livekit-jwt-token");
+
+        await hub.JoinRoom(roomId.ToString());
     }
 }

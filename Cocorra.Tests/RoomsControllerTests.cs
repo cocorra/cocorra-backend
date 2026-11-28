@@ -400,7 +400,7 @@ public class RoomsControllerTests
             .GetMethod(nameof(Cocorra.API.Controllers.RoomsController.Create))!
             .GetCustomAttributes<AuthorizeAttribute>(false)
             .Single();
-        Assert.Equal(AuthPolicies.AdminOrCoach, createAttr.Policy);
+        Assert.Equal(AuthPolicies.AdminCoachOrModerator, createAttr.Policy);
         Assert.Null(createAttr.Roles);
 
         var historyAttr = typeof(Cocorra.API.Controllers.RoomsController)
@@ -420,12 +420,14 @@ public class RoomsControllerTests
     }
 
     [Theory]
-    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Admin, AuthPolicies.ActiveStatus, true)]
-    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Coach, AuthPolicies.ActiveStatus, true)]
-    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Moderator, AuthPolicies.ActiveStatus, false)]
-    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.RecordReviewer, AuthPolicies.ActiveStatus, false)]
-    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.User, AuthPolicies.ActiveStatus, false)]
-    [InlineData(AuthPolicies.AdminOrCoach, AppRoles.Coach, "Pending", false)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.Admin, AuthPolicies.ActiveStatus, true)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.Coach, AuthPolicies.ActiveStatus, true)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.Moderator, AuthPolicies.ActiveStatus, true)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.Moderator, "Pending", false)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.Moderator, "Banned", false)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.RecordReviewer, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.User, AuthPolicies.ActiveStatus, false)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator, AppRoles.Coach, "Pending", false)]
     [InlineData(AuthPolicies.AdminOnly, AppRoles.Admin, AuthPolicies.ActiveStatus, true)]
     [InlineData(AuthPolicies.AdminOnly, AppRoles.Moderator, AuthPolicies.ActiveStatus, false)]
     [InlineData(AuthPolicies.AdminOnly, AppRoles.RecordReviewer, AuthPolicies.ActiveStatus, false)]

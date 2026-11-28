@@ -24,5 +24,19 @@ namespace Cocorra.DAL.DTOS.ReportDto
         public bool HasScreenshot { get; set; }
         public string Status { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
+        /// <summary>Null on reports filed before severity existed.</summary>
+        public ModerationSeverity? Severity { get; set; }
+        public string? SeverityName { get; set; }
+        /// <summary>"User" or "AutoModeration".</summary>
+        public string Source { get; set; } = nameof(ReportSource.User);
+        public Guid? ReportedTextRoomId { get; set; }
+        public string? ReportedTextRoomTitle { get; set; }
+        public long? ReportedTextRoomMessageId { get; set; }
+        public string? MatchedTerm { get; set; }
+        /// <summary>True when a ±N transcript can be opened through message-context.</summary>
+        public bool HasMessageContext { get; set; }
+        public bool IsMessageContextComplete { get; set; }
+        /// <summary>Distinct users who reported the same text-room message.</summary>
+        public int SameMessageReportCount { get; set; }
     }
 }

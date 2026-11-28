@@ -11,13 +11,18 @@ using Cocorra.BLL.Services.ChatService;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.LiveKit;
 using Cocorra.BLL.Services.NotificationService;
+using Cocorra.BLL.Services.RoomFeedbackService;
+using Cocorra.BLL.Services.RoomInviteService;
 using Cocorra.BLL.Services.RoomService;
 using Cocorra.BLL.Services.Upload;
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.RoomDto;
+using Cocorra.DAL.DTOS.RoomInviteDto;
 using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Repository.AuditLogRepository;
+using Cocorra.DAL.Repository.RoomFeedbackRepository;
+using Cocorra.DAL.Repository.RoomInviteRepository;
 using Cocorra.DAL.Repository.RoomRepository;
 using MediatR;
 using Microsoft.AspNetCore.Http;
@@ -154,6 +159,7 @@ public class RoomHostAuditTests : IDisposable
             new RoomRepository(db),
             new Mock<IRoomService>().Object,
             new Mock<IChatService>().Object,
+            new Mock<Cocorra.BLL.Services.ChatService.IDirectMessageNotifier>().Object,
             _liveKitServiceMock.Object,
             Options.Create(_liveKitSettings),
             _eventTrackerMock.Object,
@@ -184,6 +190,19 @@ public class RoomHostAuditTests : IDisposable
         hub.Groups = new Mock<IGroupManager>().Object;
 
         return (scope, hub, groupProxyMock);
+    }
+
+    private void SetHttpCaller(Guid userId, string role)
+    {
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                new Claim(ClaimTypes.Role, role)
+            }, "TestAuth"))
+        };
+        _httpContextAccessorMock.Setup(a => a.HttpContext).Returns(context);
     }
 
     private async Task<Room> SeedRoomAsync(Guid hostId, string title, RoomStatus status, bool isPrivate = false)
@@ -613,5 +632,154 @@ public class RoomHostAuditTests : IDisposable
         groupProxy.Verify(p => p.SendCoreAsync("StageUpdated", It.IsAny<object?[]>(), default), Times.Exactly(2));
         groupProxy.Verify(p => p.SendCoreAsync("ExtraTimeGranted", It.IsAny<object?[]>(), default), Times.Once);
         groupProxy.Verify(p => p.SendCoreAsync("UserKicked", It.IsAny<object?[]>(), default), Times.Once);
+    }
+
+    [Fact]
+    public async Task ModeratorHost_FullRoomLifecycle_SucceedsAndAuditsEveryHostActionAsModerator()
+    {
+        var host = await CreateUserAsync(AppRoles.Moderator, "Moderator", "Rana");
+        var speaker = await CreateUserAsync(AppRoles.User, "Speaker", "Adam");
+        var kicked = await CreateUserAsync(AppRoles.User, "Kicked", "Member");
+        var dto = new CreateRoomDto
+        {
+            RoomTitle = "Moderator Session",
+            DurationHours = 2,
+            ScheduledStartDate = DateTime.UtcNow.AddHours(1),
+            Category = RoomCategory.MentalHealth
+        };
+
+        SetHttpCaller(host.Id, AppRoles.Moderator);
+        Guid roomId;
+        var (serviceScope, service) = CreateRoomService();
+        using (serviceScope)
+        {
+            var created = await service.CreateRoomAsync(dto, host.Id);
+            Assert.True(created.Succeeded);
+            roomId = created.Data;
+            Assert.True((await service.StartScheduledRoomAsync(roomId, host.Id)).Succeeded);
+        }
+
+        await SeedParticipantAsync(roomId, speaker.Id, isOnStage: false, isHandRaised: true);
+        await SeedParticipantAsync(roomId, kicked.Id, isOnStage: true);
+
+        var (hubScope, hub, _) = CreateRoomHub(host.Id, new[] { AppRoles.Moderator });
+        using (hubScope)
+        {
+            await hub.ApproveToStage(roomId.ToString(), speaker.Id.ToString());
+            await hub.GrantExtraTime(roomId.ToString(), speaker.Id.ToString(), 3);
+            await hub.MoveToAudience(roomId.ToString(), speaker.Id.ToString());
+            await hub.KickUser(roomId.ToString(), kicked.Id.ToString());
+        }
+
+        var (endScope, endService) = CreateRoomService();
+        using (endScope)
+        {
+            Assert.True((await endService.EndRoomAsync(roomId, host.Id, RoomEndReasons.HostEnded)).Succeeded);
+        }
+
+        Assert.Equal(RoomStatus.Ended, (await ReadRoomAsync(roomId)).Status);
+        Assert.Equal(ParticipantStatus.Kicked, (await ReadParticipantAsync(roomId, kicked.Id)).Status);
+        var speakerState = await ReadParticipantAsync(roomId, speaker.Id);
+        Assert.False(speakerState.IsOnStage);
+        Assert.Equal(3, speakerState.ExtraMinutesGranted);
+
+        var audits = await ReadAuditLogsAsync();
+        Assert.Equal(
+            new[]
+            {
+                AuditActions.RoomCreated,
+                AuditActions.RoomStarted,
+                AuditActions.RoomStageApproved,
+                AuditActions.RoomExtraTimeGranted,
+                AuditActions.RoomMovedToAudience,
+                AuditActions.RoomUserKicked,
+                AuditActions.RoomEnded
+            },
+            audits.Select(a => a.Action));
+        Assert.All(audits, a =>
+        {
+            Assert.Equal(host.Id, a.ActorUserId);
+            Assert.Equal(AppRoles.Moderator, a.ActorRole);
+            Assert.Equal(AuditCategories.Room, a.Category);
+            Assert.Equal(roomId.ToString(), a.EntityId);
+        });
+    }
+
+    [Fact]
+    public async Task ModeratorHost_ApprovesPendingUserInPrivateRoom_WritesRoomUserApprovedAuditAsModerator()
+    {
+        var host = await CreateUserAsync(AppRoles.Moderator, "Moderator", "Lina");
+        var guest = await CreateUserAsync(AppRoles.User, "Guest", "Pending");
+        var room = await SeedRoomAsync(host.Id, "Moderator Private", RoomStatus.Live, isPrivate: true);
+        await SeedParticipantAsync(room.Id, guest.Id, status: ParticipantStatus.PendingApproval);
+
+        SetHttpCaller(host.Id, AppRoles.Moderator);
+        var (scope, service) = CreateRoomService();
+        using (scope)
+        {
+            Assert.True((await service.ApproveUserAsync(room.Id, guest.Id, host.Id)).Succeeded);
+        }
+
+        Assert.Equal(ParticipantStatus.Active, (await ReadParticipantAsync(room.Id, guest.Id)).Status);
+        var audit = Assert.Single(await ReadAuditLogsAsync());
+        Assert.Equal(AuditActions.RoomUserApproved, audit.Action);
+        Assert.Equal(AppRoles.Moderator, audit.ActorRole);
+        Assert.Equal(guest.Id, audit.TargetUserId);
+    }
+
+    [Fact]
+    public async Task ModeratorHost_FeedbackSummaryAndInviteRevocation_AllowedForOwnRoomOnly()
+    {
+        var host = await CreateUserAsync(AppRoles.Moderator, "Moderator", "Host");
+        var otherModerator = await CreateUserAsync(AppRoles.Moderator, "Moderator", "Outsider");
+        var guest = await CreateUserAsync(AppRoles.User, "Guest", "Inviter");
+        var room = await SeedRoomAsync(host.Id, "Moderator Public", RoomStatus.Live);
+        await SeedParticipantAsync(room.Id, guest.Id);
+
+        using var scope = _services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var roomRepo = new RoomRepository(db);
+        var feedback = new RoomFeedbackService(new RoomFeedbackRepository(db), roomRepo, _eventTrackerMock.Object);
+        var invites = new RoomInviteService(
+            new RoomInviteRepository(db),
+            roomRepo,
+            new Mock<IRoomService>().Object,
+            _eventTrackerMock.Object,
+            Options.Create(new InviteSettings()));
+
+        Assert.True((await feedback.GetSummaryAsync(room.Id, host.Id, isAdmin: false)).Succeeded);
+        var outsiderSummary = await feedback.GetSummaryAsync(room.Id, otherModerator.Id, isAdmin: false);
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, outsiderSummary.StatusCode);
+
+        var invite = await invites.CreateInviteAsync(room.Id, guest.Id, new CreateRoomInviteDto());
+        Assert.True(invite.Succeeded);
+        var code = invite.Data!.InviteCode;
+
+        var outsiderRevoke = await invites.RevokeInviteAsync(code, otherModerator.Id, isAdmin: false);
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, outsiderRevoke.StatusCode);
+        Assert.True((await invites.RevokeInviteAsync(code, host.Id, isAdmin: false)).Succeeded);
+    }
+
+    [Fact]
+    public async Task RoomHub_ModeratorWhoIsNotTheHost_CannotUseHostControls()
+    {
+        var host = await CreateUserAsync(AppRoles.Coach, "Coach", "Owner");
+        var moderator = await CreateUserAsync(AppRoles.Moderator, "Moderator", "Bystander");
+        var target = await CreateUserAsync(AppRoles.User, "Target", "Speaker");
+        var room = await SeedRoomAsync(host.Id, "Coach Room", RoomStatus.Live);
+        await SeedParticipantAsync(room.Id, target.Id, isOnStage: true);
+
+        var (scope, hub, _) = CreateRoomHub(moderator.Id, new[] { AppRoles.Moderator });
+        using (scope)
+        {
+            await Assert.ThrowsAsync<HubException>(() => hub.MoveToAudience(room.Id.ToString(), target.Id.ToString()));
+            await Assert.ThrowsAsync<HubException>(() => hub.KickUser(room.Id.ToString(), target.Id.ToString()));
+            await Assert.ThrowsAsync<HubException>(() => hub.GrantExtraTime(room.Id.ToString(), target.Id.ToString(), 5));
+        }
+
+        var participant = await ReadParticipantAsync(room.Id, target.Id);
+        Assert.True(participant.IsOnStage);
+        Assert.Equal(ParticipantStatus.Active, participant.Status);
+        Assert.Empty(await ReadAuditLogsAsync());
     }
 }

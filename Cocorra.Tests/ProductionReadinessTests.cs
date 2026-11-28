@@ -546,6 +546,7 @@ public class ProductionReadinessTests
                 _roomRepo.Object,
                 new Mock<IRoomService>().Object,
                 new Mock<IChatService>().Object,
+                new Mock<Cocorra.BLL.Services.ChatService.IDirectMessageNotifier>().Object,
                 new Mock<ILiveKitService>().Object,
                 Options.Create(new LiveKitSettings
                 {

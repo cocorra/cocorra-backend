@@ -27,6 +27,7 @@ namespace Cocorra.API.Hubs
         private readonly RoomLifecycleSettings _roomLifecycle;
         private readonly ILogger<RoomHub> _logger;
         private readonly IAuditLogService? _auditLog;
+        private readonly IDirectMessageNotifier _dmNotifier;
 
         // Thread-safe mapping: ConnectionId → (UserId, RoomId)
         private static readonly ConcurrentDictionary<string, (Guid UserId, Guid RoomId)> _connections = new();
@@ -35,6 +36,7 @@ namespace Cocorra.API.Hubs
             IRoomRepository roomRepo,
             IRoomService roomService,
             IChatService chatService,
+            IDirectMessageNotifier dmNotifier,
             ILiveKitService liveKitService,
             IOptions<LiveKitSettings> liveKitSettings,
             IEventTracker eventTracker,
@@ -52,6 +54,7 @@ namespace Cocorra.API.Hubs
             _roomLifecycle = roomLifecycle.Value;
             _logger = logger;
             _auditLog = auditLog;
+            _dmNotifier = dmNotifier;
         }
 
         // ==========================================================================
@@ -1102,8 +1105,10 @@ namespace Cocorra.API.Hubs
 
         /// <summary>
         /// Sends a persistent private message to a specific user from within a room.
-        /// Saved to the database via ChatService. ENFORCES the UserBlock system — if
-        /// either party has blocked the other, the message is rejected.
+        /// Saved to the database via ChatService, tagged with the room it came from, and
+        /// delivered on both hubs so the thread continues in the chat screen after the room.
+        /// ENFORCES the UserBlock system — if either party has blocked the other, the message
+        /// is rejected.
         /// </summary>
         public async Task SendRoomPrivateMessage(Guid targetUserId, string content)
         {
@@ -1117,7 +1122,12 @@ namespace Cocorra.API.Hubs
                     return;
                 }
 
-                var result = await _chatService.SaveMessageAsync(userId, targetUserId, content);
+                Guid? originRoomId = _connections.TryGetValue(Context.ConnectionId, out var mapping)
+                    ? mapping.RoomId
+                    : null;
+
+                var result = await _chatService.SaveMessageAsync(
+                    userId, targetUserId, content, new MessageOrigin(RoomId: originRoomId));
 
                 if (!result.Succeeded)
                 {
@@ -1125,10 +1135,7 @@ namespace Cocorra.API.Hubs
                     return;
                 }
 
-                var messageDto = result.Data;
-
-                await Clients.User(targetUserId.ToString()).SendAsync("ReceivePrivateMessage", messageDto);
-                await Clients.Caller.SendAsync("PrivateMessageSent", messageDto);
+                await _dmNotifier.DeliverAsync(result.Data!);
             }
             catch (HubException)
             {

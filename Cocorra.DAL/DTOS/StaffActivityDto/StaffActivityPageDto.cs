@@ -52,6 +52,13 @@ namespace Cocorra.DAL.DTOS.StaffActivityDto
         public int RoomsStarted { get; set; }
         public int RoomsEnded { get; set; }
         public int RoomModerationActions { get; set; }
+        public int TextRoomsCreated { get; set; }
+        /// <summary>Text room edits, closes, schedule changes and settings changes.</summary>
+        public int TextRoomManagementActions { get; set; }
+        /// <summary>Text room message deletions, mutes and kicks.</summary>
+        public int TextRoomModerationActions { get; set; }
+        public int ReportContextsViewed { get; set; }
+        public int DictionaryChanges { get; set; }
     }
 
     public class StaffActivityItemDto

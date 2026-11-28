@@ -40,6 +40,13 @@ namespace Cocorra.DAL.Data
         public DbSet<SystemLog> SystemLogs { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
         public DbSet<RoleDisplayName> RoleDisplayNames { get; set; }
+        public DbSet<TextRoom> TextRooms { get; set; }
+        public DbSet<TextRoomSchedule> TextRoomSchedules { get; set; }
+        public DbSet<TextRoomGlobalSettings> TextRoomGlobalSettings { get; set; }
+        public DbSet<TextRoomParticipant> TextRoomParticipants { get; set; }
+        public DbSet<TextRoomMessage> TextRoomMessages { get; set; }
+        public DbSet<WordDictionaryEntry> WordDictionaryEntries { get; set; }
+        public DbSet<ReportMessageContextEntry> ReportMessageContextEntries { get; set; }
 
         protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
         {
@@ -480,6 +487,8 @@ namespace Cocorra.DAL.Data
                     .HasForeignKey<RoleDisplayName>(x => x.RoleId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
+
+            TextRoomModelConfiguration.Apply(builder);
         }
 
     }

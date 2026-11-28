@@ -66,7 +66,7 @@ public class AdminServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ChangeUserStatusAsync_UserNotFound_ReturnsBadRequest()
+    public async Task ChangeUserStatusAsync_UserNotFound_ReturnsNotFound()
     {
         var userId = Guid.NewGuid();
         _userManagerMock.Setup(m => m.FindByIdAsync(userId.ToString())).ReturnsAsync((ApplicationUser?)null);
@@ -75,7 +75,7 @@ public class AdminServiceTests : IDisposable
         var result = await service.ChangeUserStatusAsync(userId, UserStatus.Active, DefaultReason, Guid.NewGuid(), callerIsAdmin: true);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
         Assert.Equal("User not found", result.Message);
     }
 

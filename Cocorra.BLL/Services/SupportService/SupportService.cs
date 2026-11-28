@@ -100,9 +100,24 @@ namespace Cocorra.BLL.Services.SupportService
             return roles.Any(r => string.Equals(r, AppRoles.Admin, StringComparison.OrdinalIgnoreCase));
         }
 
-        private async Task<bool> ReportInvolvesAdminAsync(Report report) =>
-            await IsUserAdminAsync(report.ReporterId, report.Reporter)
-            || await IsUserAdminAsync(report.ReportedUserId, report.ReportedUser);
+        private async Task<bool> ReportInvolvesAdminAsync(Report report)
+        {
+            if (await IsUserAdminAsync(report.ReporterId, report.Reporter)
+                || await IsUserAdminAsync(report.ReportedUserId, report.ReportedUser))
+            {
+                return true;
+            }
+
+            if (!report.ReportedRoomId.HasValue)
+            {
+                return false;
+            }
+
+            var hostId = report.ReportedRoom?.HostId
+                ?? await _supportRepo.GetRoomHostIdAsync(report.ReportedRoomId.Value);
+
+            return await IsUserAdminAsync(hostId, report.ReportedRoom?.Host);
+        }
 
         private async Task<bool> IsActiveSupportStaffAsync(string staffUserId)
         {
@@ -201,9 +216,44 @@ namespace Cocorra.BLL.Services.SupportService
 
             var (totalCount, reports) = await _supportRepo.GetPagedReportsAsync(
                 category, status, pageNumber, pageSize, excludeAdmins: !callerIsAdmin);
-            var items = reports.Select(MapToReportDetailsDto).ToList();
+
+            return await BuildReportPageAsync(totalCount, reports, pageNumber, pageSize);
+        }
+
+        public async Task<PagedResponse<ReportDetailsDto>> GetFilteredReportsAsync(ReportListQuery query, bool callerIsAdmin)
+        {
+            var paged = query with
+            {
+                PageNumber = Math.Max(1, query.PageNumber),
+                PageSize = Math.Clamp(query.PageSize, 1, 100)
+            };
+
+            var (totalCount, reports) = await _supportRepo.GetPagedReportsAsync(paged, excludeAdmins: !callerIsAdmin);
+            return await BuildReportPageAsync(totalCount, reports, paged.PageNumber, paged.PageSize);
+        }
+
+        private async Task<PagedResponse<ReportDetailsDto>> BuildReportPageAsync(
+            int totalCount, List<Report> reports, int pageNumber, int pageSize)
+        {
+            var summary = await LoadReportContextSummaryAsync(reports);
+            var items = reports.Select(r => MapToReportDetailsDto(r, summary)).ToList();
 
             return Paginated(items, totalCount, pageNumber, pageSize);
+        }
+
+        private async Task<ReportContextSummary?> LoadReportContextSummaryAsync(IReadOnlyCollection<Report> reports)
+        {
+            if (reports.Count == 0)
+                return null;
+
+            var reportIds = reports.Select(r => r.Id).ToList();
+            var messageIds = reports
+                .Where(r => r.ReportedTextRoomMessageId.HasValue)
+                .Select(r => r.ReportedTextRoomMessageId!.Value)
+                .Distinct()
+                .ToList();
+
+            return await _supportRepo.GetReportContextSummaryAsync(reportIds, messageIds);
         }
 
         public async Task<Response<ReportDetailsDto>> GetReportByIdAsync(Guid reportId, Guid callerId, bool callerIsAdmin)
@@ -211,6 +261,8 @@ namespace Cocorra.BLL.Services.SupportService
             var report = await _supportRepo.GetReportDetailsByIdAsync(reportId);
             if (report == null || (!callerIsAdmin && await ReportInvolvesAdminAsync(report)))
                 return NotFound<ReportDetailsDto>("Report not found.");
+
+            var summary = await LoadReportContextSummaryAsync(new[] { report });
 
             await RecordAuditAsync(new AuditEntry(
                 AuditActions.ReportViewed,
@@ -224,16 +276,18 @@ namespace Cocorra.BLL.Services.SupportService
                 EntityId = report.Id.ToString()
             });
 
-            return Success(MapToReportDetailsDto(report));
+            return Success(MapToReportDetailsDto(report, summary));
         }
 
-        private ReportDetailsDto MapToReportDetailsDto(Report report) => new()
+        private ReportDetailsDto MapToReportDetailsDto(Report report, ReportContextSummary? summary = null) => new()
         {
             Id = report.Id,
             ReporterId = report.ReporterId,
-            ReporterName = report.Reporter != null
-                ? $"{report.Reporter.FirstName} {report.Reporter.LastName}"
-                : "Unknown",
+            ReporterName = report.Source == ReportSource.AutoModeration
+                ? "Auto-moderation"
+                : report.Reporter != null
+                    ? $"{report.Reporter.FirstName} {report.Reporter.LastName}"
+                    : "Unknown",
             ReportedUserId = report.ReportedUserId,
             ReportedUserName = report.ReportedUser != null
                 ? $"{report.ReportedUser.FirstName} {report.ReportedUser.LastName}"
@@ -251,7 +305,21 @@ namespace Cocorra.BLL.Services.SupportService
             ScreenshotPath = null,
             HasScreenshot = _fileUrls.HasFile(report.ScreenshotPath),
             Status = report.Status,
-            CreatedAt = report.CreatedAt
+            CreatedAt = report.CreatedAt,
+            Severity = report.Severity,
+            SeverityName = report.Severity?.ToString(),
+            Source = report.Source.ToString(),
+            ReportedTextRoomId = report.ReportedTextRoomId,
+            ReportedTextRoomTitle = report.ReportedTextRoom?.Title,
+            ReportedTextRoomMessageId = report.ReportedTextRoomMessageId,
+            MatchedTerm = report.MatchedTerm,
+            HasMessageContext = summary?.ReportIdsWithContext.Contains(report.Id) ?? (report.MessageContext?.Count > 0),
+            IsMessageContextComplete = report.ContextCompletedAt != null,
+            SameMessageReportCount = report.ReportedTextRoomMessageId.HasValue
+                && summary is not null
+                && summary.SameMessageUserReportCounts.TryGetValue(report.ReportedTextRoomMessageId.Value, out var sameMessageCount)
+                    ? sameMessageCount
+                    : 0
         };
 
         public async Task<Response<PrivateFileUrlDto>> GetReportScreenshotUrlAsync(Guid reportId, bool callerIsAdmin)
@@ -472,6 +540,11 @@ namespace Cocorra.BLL.Services.SupportService
             var roles = await _userManager.GetRolesAsync(reportedUser) ?? Array.Empty<string>();
             if (!callerIsAdmin)
             {
+                if (roles.Any(r => string.Equals(r, AppRoles.Admin, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return (null, NotFound<string>("Reported user not found."));
+                }
+
                 if (AppRoles.AnyProtectedFromModerators(roles))
                 {
                     return (reportedUser, Forbidden<string>("Moderators cannot take actions against staff accounts."));

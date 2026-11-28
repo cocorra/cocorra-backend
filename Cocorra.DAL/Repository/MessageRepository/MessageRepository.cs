@@ -1,5 +1,6 @@
 using Cocorra.DAL.Data;
 using Cocorra.DAL.DTOS.ChatDto;
+using Cocorra.DAL.Enums;
 using Cocorra.DAL.Models;
 using Cocorra.DAL.Repository.GenericRepository;
 using Microsoft.EntityFrameworkCore;
@@ -72,11 +73,27 @@ namespace Cocorra.DAL.Repository.MessageRepository
                 {
                     PartnerId = g.Key,
                     LastMessage = g.OrderByDescending(x => x.Message.CreatedAt).FirstOrDefault().Message,
-                    UnreadCount = g.Count(x => x.Message.ReceiverId == currentUserId && !x.Message.IsRead)
+                    UnreadCount = g.Count(x => x.Message.ReceiverId == currentUserId && !x.Message.IsRead),
+                    StartedInRoomId = g.Where(x => x.Message.OriginRoomId != null)
+                        .OrderBy(x => x.Message.CreatedAt)
+                        .Select(x => x.Message.OriginRoomId)
+                        .FirstOrDefault(),
+                    StartedInTextRoomId = g.Where(x => x.Message.OriginTextRoomId != null)
+                        .OrderBy(x => x.Message.CreatedAt)
+                        .Select(x => x.Message.OriginTextRoomId)
+                        .FirstOrDefault()
                 })
                 .ToListAsync();
 
             var partnerIds = conversations.Select(c => c.PartnerId).ToList();
+
+            var friendIds = (await _dbContext.FriendRequests
+                .AsNoTracking()
+                .Where(f => f.Status == FriendRequestStatus.Accepted
+                    && (f.SenderId == currentUserId || f.ReceiverId == currentUserId))
+                .Select(f => f.SenderId == currentUserId ? f.ReceiverId : f.SenderId)
+                .ToListAsync())
+                .ToHashSet();
             var partners = await _dbContext.Users
                 .AsNoTracking()
                 .Where(u => partnerIds.Contains(u.Id))
@@ -92,7 +109,10 @@ namespace Cocorra.DAL.Repository.MessageRepository
                     ProfilePicturePath = partnerInfo?.ProfilePicturePath ?? "",
                     LastMessage = c.LastMessage?.Content ?? "",
                     LastMessageDate = c.LastMessage?.CreatedAt,
-                    UnreadCount = c.UnreadCount
+                    UnreadCount = c.UnreadCount,
+                    IsFriend = friendIds.Contains(c.PartnerId),
+                    StartedInRoomId = c.StartedInRoomId,
+                    StartedInTextRoomId = c.StartedInTextRoomId
                 };
             }).OrderByDescending(d => d.LastMessageDate ?? DateTime.MinValue).ToList();
 

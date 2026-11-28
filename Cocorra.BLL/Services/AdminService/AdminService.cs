@@ -29,6 +29,7 @@ namespace Cocorra.BLL.Services.AdminService
         private const string ReRecordTitle = "إعادة تسجيل صوتي 🎙️";
         private const string ReRecordBody = "نعتذر منك، نحتاج منك إعادة تسجيل المقطع الصوتي الخاص بك بوضوح أكبر.";
         private const int MaxBulkStatusBatch = 200;
+        private const string UserNotFoundMessage = "User not found";
 
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IUploadVoice _uploadVoice;
@@ -93,7 +94,7 @@ namespace Cocorra.BLL.Services.AdminService
 
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null)
-                return StatusChangeResponse.From(BadRequest<string>("User not found"));
+                return StatusChangeResponse.From(NotFound<string>(UserNotFoundMessage));
 
             var targetRoles = (await _userManager.GetRolesAsync(user)) ?? Array.Empty<string>();
             var guardError = ValidateStatusChangePermission(user, targetRoles, newStatus, callerIsAdmin);
@@ -140,6 +141,9 @@ namespace Cocorra.BLL.Services.AdminService
         {
             if (!callerIsAdmin)
             {
+                if (targetRoles.Contains(AppRoles.Admin, StringComparer.OrdinalIgnoreCase))
+                    return StatusChangeResponse.From(NotFound<string>(UserNotFoundMessage));
+
                 if (AppRoles.AnyProtectedFromModerators(targetRoles))
                     return StatusChangeResponse.From(Forbidden<string>("Moderators cannot change the status of staff or admin accounts."));
 
@@ -538,11 +542,11 @@ namespace Cocorra.BLL.Services.AdminService
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null)
-                return NotFound<UserDto>("User not found");
+                return NotFound<UserDto>(UserNotFoundMessage);
 
             var roles = (await _userManager.GetRolesAsync(user)) ?? Array.Empty<string>();
             if (!callerIsAdmin && roles.Contains(AppRoles.Admin, StringComparer.OrdinalIgnoreCase))
-                return NotFound<UserDto>("User not found");
+                return NotFound<UserDto>(UserNotFoundMessage);
 
             var userDto = new UserDto
             {
@@ -565,7 +569,7 @@ namespace Cocorra.BLL.Services.AdminService
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null)
-                return NotFound<PrivateFileUrlDto>("User not found");
+                return NotFound<PrivateFileUrlDto>(UserNotFoundMessage);
 
             var issued = (await _fileUrls.IssueAsync(
                 PrivateFileKind.Voice,
@@ -577,9 +581,31 @@ namespace Cocorra.BLL.Services.AdminService
             return Success(new PrivateFileUrlDto { Url = issued.Url, ExpiresAtUtc = issued.ExpiresAtUtc });
         }
 
-        public async Task<Response<DashboardStatsDto>> GetDashboardStatsAsync()
+        private Task<List<Guid>> GetAdminRoleIdsAsync()
         {
-            var statusCounts = await _userManager.Users
+            var normalizedAdmin = AppRoles.Admin.ToUpperInvariant();
+            return _context.Roles
+                .AsNoTracking()
+                .Where(r => r.Name == AppRoles.Admin || r.NormalizedName == normalizedAdmin)
+                .Select(r => r.Id)
+                .ToListAsync();
+        }
+
+        public async Task<Response<DashboardStatsDto>> GetDashboardStatsAsync(bool callerIsAdmin)
+        {
+            var query = _context.Users.AsNoTracking();
+
+            if (!callerIsAdmin)
+            {
+                var adminRoleIds = await GetAdminRoleIdsAsync();
+                if (adminRoleIds.Count > 0)
+                {
+                    query = query.Where(u => !_context.UserRoles
+                        .Any(ur => ur.UserId == u.Id && adminRoleIds.Contains(ur.RoleId)));
+                }
+            }
+
+            var statusCounts = await query
                 .GroupBy(u => u.Status)
                 .Select(g => new { Status = g.Key, Count = g.Count() })
                 .ToListAsync();

@@ -17,7 +17,7 @@ namespace Cocorra.API.Authorization
         public const string AdminOnly = "AdminOnly";
         public const string AdminOrModerator = "AdminOrModerator";
         public const string AdminOrRecordReviewer = "AdminOrRecordReviewer";
-        public const string AdminOrCoach = "AdminOrCoach";
+        public const string AdminCoachOrModerator = "AdminCoachOrModerator";
 
         public static void Register(AuthorizationOptions options)
         {
@@ -30,7 +30,7 @@ namespace Cocorra.API.Authorization
             options.AddPolicy(AdminOnly, ActiveUser().RequireRole(AppRoles.Admin).Build());
             options.AddPolicy(AdminOrModerator, ActiveUser().RequireRole(AppRoles.Admin, AppRoles.Moderator).Build());
             options.AddPolicy(AdminOrRecordReviewer, ActiveUser().RequireRole(AppRoles.Admin, AppRoles.RecordReviewer).Build());
-            options.AddPolicy(AdminOrCoach, ActiveUser().RequireRole(AppRoles.Admin, AppRoles.Coach).Build());
+            options.AddPolicy(AdminCoachOrModerator, ActiveUser().RequireRole(AppRoles.Admin, AppRoles.Coach, AppRoles.Moderator).Build());
         }
 
         private static AuthorizationPolicyBuilder ActiveUser() => new AuthorizationPolicyBuilder()

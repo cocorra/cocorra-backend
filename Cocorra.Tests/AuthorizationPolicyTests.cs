@@ -113,7 +113,7 @@ public class AuthorizationPolicyTests : IDisposable
         { typeof(SupportController), nameof(SupportController.GetPendingChats), new[] { AuthPolicies.AdminOrModerator } },
         { typeof(SupportController), nameof(SupportController.GetAdminActiveChats), new[] { AuthPolicies.AdminOrModerator } },
 
-        { typeof(RoomsController), nameof(RoomsController.Create), new[] { AuthPolicies.AdminOrCoach } },
+        { typeof(RoomsController), nameof(RoomsController.Create), new[] { AuthPolicies.AdminCoachOrModerator } },
         { typeof(RoomsController), nameof(RoomsController.GetRoomHistory), new[] { AuthPolicies.AdminOnly } },
         { typeof(RoomFeedbackController), nameof(RoomFeedbackController.GetAll), new[] { AuthPolicies.AdminOnly } },
         { typeof(RoomInviteController), nameof(RoomInviteController.GetStats), new[] { AuthPolicies.AdminOnly } }
@@ -189,11 +189,11 @@ public class AuthorizationPolicyTests : IDisposable
         { AuthPolicies.AdminOrRecordReviewer, AppRoles.Coach, false },
         { AuthPolicies.AdminOrRecordReviewer, AppRoles.User, false },
 
-        { AuthPolicies.AdminOrCoach, AppRoles.Admin, true },
-        { AuthPolicies.AdminOrCoach, AppRoles.Moderator, false },
-        { AuthPolicies.AdminOrCoach, AppRoles.RecordReviewer, false },
-        { AuthPolicies.AdminOrCoach, AppRoles.Coach, true },
-        { AuthPolicies.AdminOrCoach, AppRoles.User, false }
+        { AuthPolicies.AdminCoachOrModerator, AppRoles.Admin, true },
+        { AuthPolicies.AdminCoachOrModerator, AppRoles.Moderator, true },
+        { AuthPolicies.AdminCoachOrModerator, AppRoles.RecordReviewer, false },
+        { AuthPolicies.AdminCoachOrModerator, AppRoles.Coach, true },
+        { AuthPolicies.AdminCoachOrModerator, AppRoles.User, false }
     };
 
     [Theory]
@@ -220,7 +220,7 @@ public class AuthorizationPolicyTests : IDisposable
                 AuthPolicies.AdminOnly,
                 AuthPolicies.AdminOrModerator,
                 AuthPolicies.AdminOrRecordReviewer,
-                AuthPolicies.AdminOrCoach
+                AuthPolicies.AdminCoachOrModerator
             };
             var roles = new[]
             {
@@ -301,7 +301,7 @@ public class AuthorizationPolicyTests : IDisposable
     [InlineData(AuthPolicies.AdminOnly)]
     [InlineData(AuthPolicies.AdminOrModerator)]
     [InlineData(AuthPolicies.AdminOrRecordReviewer)]
-    [InlineData(AuthPolicies.AdminOrCoach)]
+    [InlineData(AuthPolicies.AdminCoachOrModerator)]
     [InlineData(AuthPolicies.VerificationOnly)]
     public async Task AllPolicies_UnauthenticatedPrincipal_Denied(string policyName)
     {

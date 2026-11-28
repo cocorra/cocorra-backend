@@ -41,6 +41,22 @@ namespace Cocorra.DAL.Models
         public const string RoomUserMuted = "Room.UserMuted";
         public const string RoomExtraTimeGranted = "Room.ExtraTimeGranted";
 
+        public const string TextRoomCreated = "TextRoom.Created";
+        public const string TextRoomUpdated = "TextRoom.Updated";
+        public const string TextRoomClosed = "TextRoom.Closed";
+        // FromState/ToState carry Created, Updated, Deleted, Enabled or Disabled.
+        public const string TextRoomScheduleChanged = "TextRoom.ScheduleChanged";
+        public const string TextRoomSettingsChanged = "TextRoom.SettingsChanged";
+        public const string TextRoomMessageDeleted = "TextRoom.MessageDeleted";
+        public const string TextRoomUserMuted = "TextRoom.UserMuted";
+        public const string TextRoomUserKicked = "TextRoom.UserKicked";
+
+        // FromState/ToState carry Created, Updated, Deleted, Activated, Deactivated or BulkAdded.
+        public const string WordDictionaryChanged = "WordDictionary.Changed";
+
+        // A staff member opened the ±N transcript attached to a report.
+        public const string ReportContextViewed = "Report.ContextViewed";
+
         public static readonly IReadOnlySet<string> All = new HashSet<string>
         {
             UserStatusChanged,
@@ -68,7 +84,17 @@ namespace Cocorra.DAL.Models
             RoomMovedToAudience,
             RoomUserKicked,
             RoomUserMuted,
-            RoomExtraTimeGranted
+            RoomExtraTimeGranted,
+            TextRoomCreated,
+            TextRoomUpdated,
+            TextRoomClosed,
+            TextRoomScheduleChanged,
+            TextRoomSettingsChanged,
+            TextRoomMessageDeleted,
+            TextRoomUserMuted,
+            TextRoomUserKicked,
+            WordDictionaryChanged,
+            ReportContextViewed
         };
     }
 
@@ -83,10 +109,12 @@ namespace Cocorra.DAL.Models
         public const string Room = "Room";
         public const string Roles = "Roles";
         public const string Notification = "Notification";
+        public const string TextRoom = "TextRoom";
+        public const string ContentPolicy = "ContentPolicy";
 
         public static readonly IReadOnlySet<string> All = new HashSet<string>
         {
-            VoiceReview, UserModeration, Ticket, Report, SupportChat, Room, Roles, Notification
+            VoiceReview, UserModeration, Ticket, Report, SupportChat, Room, Roles, Notification, TextRoom, ContentPolicy
         };
     }
 
@@ -99,5 +127,10 @@ namespace Cocorra.DAL.Models
         public const string SupportChat = "SupportChat";
         public const string Room = "Room";
         public const string Role = "Role";
+        public const string TextRoom = "TextRoom";
+        public const string TextRoomSchedule = "TextRoomSchedule";
+        public const string TextRoomMessage = "TextRoomMessage";
+        public const string TextRoomSettings = "TextRoomSettings";
+        public const string WordDictionaryEntry = "WordDictionaryEntry";
     }
 }

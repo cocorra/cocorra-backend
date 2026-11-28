@@ -14,6 +14,7 @@ namespace Cocorra.BLL.Services.SupportService
         Task<Response<string>> SubmitTicketAsync(Guid? userId, SubmitSupportTicketDto dto);
         Task<Response<string>> SubmitReportAsync(Guid reporterId, SubmitReportDto dto);
         Task<PagedResponse<ReportDetailsDto>> GetFilteredReportsAsync(ReportCategory? category, string? status, int pageNumber = 1, int pageSize = 20, bool callerIsAdmin = false);
+        Task<PagedResponse<ReportDetailsDto>> GetFilteredReportsAsync(ReportListQuery query, bool callerIsAdmin);
         Task<Response<ReportDetailsDto>> GetReportByIdAsync(Guid reportId, Guid callerId, bool callerIsAdmin);
         Task<Response<string>> UpdateReportStatusAsync(Guid reportId, string newStatus, string? reason, Guid callerId, bool callerIsAdmin);
         Task<PagedResponse<SupportTicketDetailsDto>> GetAdminTicketsAsync(SupportTicketType? type, SupportTicketStatus? status, int pageNumber, int pageSize, bool callerIsAdmin);

@@ -105,6 +105,7 @@ namespace Cocorra.DAL.AppMetaData
             public const string AdminReportById = Prefix + "/admin/reports/{id:guid}"; // GET: records a Report.Viewed audit entry
             public const string AdminUpdateReportStatus = Prefix + "/admin/reports/{id:guid}/status"; // PUT
             public const string AdminTakeReportAction = Prefix + "/admin/reports/{id:guid}/action"; // POST
+            public const string AdminReportMessageContext = Prefix + "/admin/reports/{id:guid}/message-context"; // GET: records a Report.ContextViewed audit entry
             public const string AdminReportScreenshotUrl = Prefix + "/admin/reports/{id:guid}/screenshot-url"; // GET: 15-min presigned URL
             public const string AdminTickets = Prefix + "/admin/tickets"; // GET: paged
             public const string AdminTicketById = Prefix + "/admin/tickets/{id:guid}"; // GET: records a Ticket.Viewed audit entry
@@ -164,5 +165,42 @@ namespace Cocorra.DAL.AppMetaData
             // until the dashboard cuts over.
             public const string PlatformHealth = Prefix + "/Platform/Health"; // GET ?from=&to=&compareTo=
         }
-    }
+    
+        public static class TextRoomRouting
+        {
+            public const string Prefix = Rule + "TextRooms";
+            public const string List = Prefix;                                         // GET
+            public const string ById = Prefix + "/{roomId:guid}";                      // GET: TextRoomClientConfigDto
+            public const string Messages = Prefix + "/{roomId:guid}/Messages";         // GET ?beforeId=&limit=
+            public const string ReportMessage = Prefix + "/Messages/{messageId:long}/Report"; // POST
+        }
+
+        public static class TextRoomAdminRouting
+        {
+            public const string Prefix = Rule + "Admin/TextRooms";
+            public const string Overview = Prefix + "/Overview";                       // GET
+            public const string Presets = Prefix + "/Presets";                         // GET
+            public const string Settings = Prefix + "/Settings";                       // GET, PUT (Admin only)
+            public const string Create = Prefix;                                       // POST
+            public const string ById = Prefix + "/{roomId:guid}";                      // GET, PUT
+            public const string Close = Prefix + "/{roomId:guid}/Close";               // POST
+            public const string Schedules = Prefix + "/Schedules";                     // GET, POST
+            public const string ScheduleById = Prefix + "/Schedules/{scheduleId:guid}"; // PUT, DELETE
+            public const string ScheduleEnabled = Prefix + "/Schedules/{scheduleId:guid}/Enabled"; // PUT
+            public const string DeleteMessage = Prefix + "/Messages/{messageId:long}/Delete"; // POST {reason}
+            public const string MuteUser = Prefix + "/{roomId:guid}/Mute/{userId:guid}"; // POST {minutes, reason}
+            public const string KickUser = Prefix + "/{roomId:guid}/Kick/{userId:guid}"; // POST {reason}
+        }
+
+        public static class WordDictionaryRouting
+        {
+            public const string Prefix = Rule + "Admin/WordDictionary";
+            public const string List = Prefix;                                         // GET ?search=&category=&severity=&action=&isActive=&pageNumber=&pageSize=
+            public const string Create = Prefix;                                       // POST
+            public const string ById = Prefix + "/{id:guid}";                          // PUT, DELETE
+            public const string Active = Prefix + "/{id:guid}/Active";                 // PUT {isActive}
+            public const string Bulk = Prefix + "/Bulk";                               // POST
+            public const string Test = Prefix + "/Test";                               // POST {text}
+        }
+}
 }

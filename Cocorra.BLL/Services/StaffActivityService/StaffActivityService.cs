@@ -209,6 +209,31 @@ namespace Cocorra.BLL.Services.StaffActivityService
                 case AuditActions.RoomExtraTimeGranted:
                     summary.RoomModerationActions += count;
                     break;
+
+                case AuditActions.TextRoomCreated:
+                    summary.TextRoomsCreated += count;
+                    break;
+
+                case AuditActions.TextRoomUpdated:
+                case AuditActions.TextRoomClosed:
+                case AuditActions.TextRoomScheduleChanged:
+                case AuditActions.TextRoomSettingsChanged:
+                    summary.TextRoomManagementActions += count;
+                    break;
+
+                case AuditActions.TextRoomMessageDeleted:
+                case AuditActions.TextRoomUserMuted:
+                case AuditActions.TextRoomUserKicked:
+                    summary.TextRoomModerationActions += count;
+                    break;
+
+                case AuditActions.ReportContextViewed:
+                    summary.ReportContextsViewed += count;
+                    break;
+
+                case AuditActions.WordDictionaryChanged:
+                    summary.DictionaryChanges += count;
+                    break;
             }
         }
 
