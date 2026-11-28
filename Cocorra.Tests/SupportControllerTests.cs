@@ -234,14 +234,14 @@ public class SupportControllerTests
     {
         var controller = CreateController(Guid.NewGuid(), role);
         _supportServiceMock
-            .Setup(s => s.GetFilteredReportsAsync(ReportCategory.Harassment, "Open", 1, 100, expectedIsAdmin))
+            .Setup(s => s.GetFilteredReportsAsync(new ReportListQuery(ReportCategory.Harassment, "Open", null, false, 1, 100), expectedIsAdmin))
             .ReturnsAsync(new PagedResponse<ReportDetailsDto>(new List<ReportDetailsDto>(), 0, 1, 100));
 
         var result = await controller.GetReports(ReportCategory.Harassment, "Open", pageNumber: 0, pageSize: 250);
 
         var obj = Assert.IsType<ObjectResult>(result);
         Assert.Equal(200, obj.StatusCode);
-        _supportServiceMock.Verify(s => s.GetFilteredReportsAsync(ReportCategory.Harassment, "Open", 1, 100, expectedIsAdmin), Times.Once);
+        _supportServiceMock.Verify(s => s.GetFilteredReportsAsync(new ReportListQuery(ReportCategory.Harassment, "Open", null, false, 1, 100), expectedIsAdmin), Times.Once);
     }
 
     [Theory]

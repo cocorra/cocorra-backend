@@ -46,6 +46,8 @@ using Cocorra.API.Middleware;
 using Cocorra.DAL.Repository.AnalyticsRepository;
 using Cocorra.BLL.Services.EventTracking;
 using Cocorra.BLL.Services.Analytics;
+using Cocorra.BLL.Services.TextRooms;
+using Cocorra.BLL.Services.ContentModeration;
 using Amazon.S3;
 using Google.Apis.Auth.OAuth2;
 using Microsoft.Extensions.Options;
@@ -222,6 +224,12 @@ builder.Services.AddScoped<IFriendService, FriendService>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
 builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IDirectMessageNotifier, Cocorra.API.Services.SignalRDirectMessageNotifier>();
+builder.Services.AddTextRoomEngine();
+builder.Services.AddTextRoomBackgroundJobs();
+builder.Services.AddContentModeration();
+builder.Services.AddContentModerationBackgroundJobs();
+builder.Services.AddScoped<ITextRoomBroadcaster, Cocorra.API.Services.SignalRTextRoomBroadcaster>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IUploadImage, UploadImage>();
 builder.Services.AddScoped<IProfileService, ProfileService>();
@@ -507,7 +515,7 @@ builder.Services.AddAuthentication(options =>
             var path = context.HttpContext.Request.Path;
 
             if (!string.IsNullOrEmpty(accessToken) &&
-                (path.StartsWithSegments("/hubs/chat") || path.StartsWithSegments("/hubs/rooms") || path.StartsWithSegments("/hubs/support")))
+                (path.StartsWithSegments("/hubs/chat") || path.StartsWithSegments("/hubs/rooms") || path.StartsWithSegments("/hubs/support") || path.StartsWithSegments("/hubs/text-rooms")))
             {
                 context.Token = accessToken;
             }
@@ -758,6 +766,7 @@ if (swaggerEnabled)
 app.MapHub<RoomHub>("/hubs/rooms");
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<Cocorra.API.Hubs.SupportHub>("/hubs/support");
+app.MapHub<Cocorra.API.Hubs.TextRoomHub>("/hubs/text-rooms");
 app.MapControllers();
 // Anonymous and exempt from the global per-IP rate limit: the healthcheck polls it every few
 // seconds from one address, and a 429 would read as "unhealthy" and trigger a rollback.

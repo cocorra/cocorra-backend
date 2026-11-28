@@ -10,5 +10,7 @@ namespace Cocorra.DAL.DTOS.ChatDto
         public string Content { get; set; } = string.Empty;
         public bool IsRead { get; set; }
         public DateTime CreatedAt { get; set; }
+        public Guid? OriginRoomId { get; set; }
+        public Guid? OriginTextRoomId { get; set; }
     }
 }

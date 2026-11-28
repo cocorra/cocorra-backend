@@ -67,6 +67,7 @@ public class OperationFailureTrackingTests
             _roomRepoMock.Object,
             _roomServiceMock.Object,
             _chatServiceMock.Object,
+            new Mock<Cocorra.BLL.Services.ChatService.IDirectMessageNotifier>().Object,
             _liveKitServiceMock.Object,
             Options.Create(_settings),
             _eventTrackerMock.Object,

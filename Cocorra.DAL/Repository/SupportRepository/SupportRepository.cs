@@ -1,3 +1,4 @@
+using Cocorra.DAL.DTOS.ReportDto;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,9 +41,16 @@ namespace Cocorra.DAL.Repository.SupportRepository
                 .ToListAsync();
         }
 
+        public Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(
+            ReportCategory? category, string? status, int pageNumber, int pageSize, bool excludeAdmins = false) =>
+            GetPagedReportsAsync(
+                new ReportListQuery(category, status, Severity: null, PrioritySort: false, pageNumber, pageSize),
+                excludeAdmins);
+
         public async Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(
-            ReportCategory? category, string? status, int pageNumber, int pageSize, bool excludeAdmins = false)
+            ReportListQuery listQuery, bool excludeAdmins)
         {
+            var (category, status, severity, prioritySort, pageNumber, pageSize) = listQuery;
             var query = _dbContext.Reports.AsNoTracking().AsQueryable();
 
             if (excludeAdmins)
@@ -69,20 +77,69 @@ namespace Cocorra.DAL.Repository.SupportRepository
                 query = query.Where(r => r.Status == status);
             }
 
+            if (severity.HasValue)
+            {
+                query = query.Where(r => r.Severity == severity.Value);
+            }
+
             var totalCount = await query.CountAsync();
 
-            var items = await query
+            var included = query
                 .Include(r => r.Reporter)
                 .Include(r => r.ReportedUser)
                 .Include(r => r.ReportedRoom)
                     .ThenInclude(room => room!.Host)
-                .OrderByDescending(r => r.CreatedAt)
-                .ThenByDescending(r => r.Id)
+                .Include(r => r.ReportedTextRoom);
+
+            IOrderedQueryable<Report> ordered = prioritySort
+                ? included
+                    .OrderByDescending(r => r.Severity.HasValue)
+                    .ThenByDescending(r => r.Severity)
+                    .ThenByDescending(r => r.CreatedAt)
+                    .ThenByDescending(r => r.Id)
+                : included
+                    .OrderByDescending(r => r.CreatedAt)
+                    .ThenByDescending(r => r.Id);
+
+            var items = await ordered
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
 
             return (totalCount, items);
+        }
+
+        public async Task<ReportContextSummary> GetReportContextSummaryAsync(
+            IReadOnlyCollection<Guid> reportIds,
+            IReadOnlyCollection<long> textRoomMessageIds)
+        {
+            var reportIdsWithContext = reportIds.Count == 0
+                ? new HashSet<Guid>()
+                : (await _dbContext.ReportMessageContextEntries
+                    .AsNoTracking()
+                    .Where(e => reportIds.Contains(e.ReportId))
+                    .Select(e => e.ReportId)
+                    .Distinct()
+                    .ToListAsync())
+                    .ToHashSet();
+
+            var sameMessageCounts = textRoomMessageIds.Count == 0
+                ? new Dictionary<long, int>()
+                : (await _dbContext.Reports
+                    .AsNoTracking()
+                    .Where(r => r.ReportedTextRoomMessageId != null
+                        && textRoomMessageIds.Contains(r.ReportedTextRoomMessageId.Value)
+                        && r.Source == ReportSource.User)
+                    .GroupBy(r => r.ReportedTextRoomMessageId!.Value)
+                    .Select(g => new
+                    {
+                        MessageId = g.Key,
+                        Count = g.Select(x => x.ReporterId).Distinct().Count()
+                    })
+                    .ToListAsync())
+                    .ToDictionary(x => x.MessageId, x => x.Count);
+
+            return new ReportContextSummary(reportIdsWithContext, sameMessageCounts);
         }
 
         public async Task<Report?> GetReportByIdAsync(Guid reportId)
@@ -98,6 +155,7 @@ namespace Cocorra.DAL.Repository.SupportRepository
                 .Include(r => r.ReportedUser)
                 .Include(r => r.ReportedRoom)
                     .ThenInclude(room => room!.Host)
+                .Include(r => r.ReportedTextRoom)
                 .FirstOrDefaultAsync(r => r.Id == reportId);
         }
 

@@ -12,6 +12,7 @@ namespace Cocorra.Tests;
 public class ChatHubTests
 {
     private readonly Mock<IChatService> _chatServiceMock = new();
+    private readonly Mock<IDirectMessageNotifier> _dmNotifierMock = new();
     private readonly Mock<IHubCallerClients> _clientsMock = new();
     private readonly Mock<ISingleClientProxy> _callerMock = new();
     private readonly Mock<IClientProxy> _userProxyMock = new();
@@ -25,7 +26,7 @@ public class ChatHubTests
 
     private ChatHub CreateHub(Guid? senderId = null)
     {
-        var hub = new ChatHub(_chatServiceMock.Object);
+        var hub = new ChatHub(_chatServiceMock.Object, _dmNotifierMock.Object);
 
         var claims = new List<Claim>();
         if (senderId.HasValue)
@@ -100,10 +101,11 @@ public class ChatHubTests
         await hub.SendMessage(receiverId.ToString(), "Hello");
 
         _callerMock.Verify(c => c.SendCoreAsync("SendMessageError", It.IsAny<object[]>(), default), Times.Once);
+        _dmNotifierMock.Verify(n => n.DeliverAsync(It.IsAny<MessageDto>()), Times.Never);
     }
 
     [Fact]
-    public async Task SendMessage_Success_SendsReceiveMessageAndMessageSent()
+    public async Task SendMessage_Success_DeliversThroughTheCrossHubNotifier()
     {
         var senderId = Guid.NewGuid();
         var receiverId = Guid.NewGuid();
@@ -127,10 +129,6 @@ public class ChatHubTests
 
         await hub.SendMessage(receiverId.ToString(), "Hello friend!");
 
-        // Verify receiver gets message
-        _userProxyMock.Verify(u => u.SendCoreAsync("ReceiveMessage", It.Is<object[]>(args => args.Length > 0 && args[0] == messageDto), default), Times.Once);
-
-        // Verify caller gets MessageSent confirmation
-        _callerMock.Verify(c => c.SendCoreAsync("MessageSent", It.Is<object[]>(args => args.Length > 0 && args[0] == messageDto), default), Times.Once);
+        _dmNotifierMock.Verify(n => n.DeliverAsync(messageDto), Times.Once);
     }
 }

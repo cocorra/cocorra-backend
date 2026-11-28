@@ -612,6 +612,12 @@ namespace Cocorra.DAL.Migrations
                     b.Property<bool>("IsRead")
                         .HasColumnType("bit");
 
+                    b.Property<Guid?>("OriginRoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OriginTextRoomId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("ReceiverId")
                         .HasColumnType("uniqueidentifier");
 
@@ -728,6 +734,15 @@ namespace Cocorra.DAL.Migrations
                     b.Property<int>("Category")
                         .HasColumnType("int");
 
+                    b.Property<int?>("ContextAfterRequested")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ContextBeforeRequested")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ContextCompletedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -735,8 +750,21 @@ namespace Cocorra.DAL.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("MatchedDictionaryEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MatchedTerm")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid?>("ReportedRoomId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReportedTextRoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long?>("ReportedTextRoomMessageId")
+                        .HasColumnType("bigint");
 
                     b.Property<Guid?>("ReportedUserId")
                         .HasColumnType("uniqueidentifier");
@@ -749,6 +777,12 @@ namespace Cocorra.DAL.Migrations
 
                     b.Property<string>("ScreenshotPath")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("Severity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -769,11 +803,67 @@ namespace Cocorra.DAL.Migrations
 
                     b.HasIndex("ReportedRoomId");
 
+                    b.HasIndex("ReportedTextRoomId");
+
+                    b.HasIndex("ReportedTextRoomMessageId");
+
                     b.HasIndex("ReportedUserId");
 
                     b.HasIndex("ReporterId");
 
+                    b.HasIndex("ContextCompletedAt", "ReportedTextRoomMessageId");
+
+                    b.HasIndex("ReporterId", "ReportedTextRoomMessageId")
+                        .IsUnique()
+                        .HasFilter("[ReportedTextRoomMessageId] IS NOT NULL");
+
+                    b.HasIndex("Severity", "CreatedAt");
+
                     b.ToTable("Reports");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.ReportMessageContextEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("Offset")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ReportId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SenderDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("SenderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("TextRoomMessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("WasDeleted")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReportId", "TextRoomMessageId")
+                        .IsUnique();
+
+                    b.ToTable("ReportMessageContextEntries");
                 });
 
             modelBuilder.Entity("Cocorra.DAL.Models.RoleDisplayName", b =>
@@ -1272,6 +1362,259 @@ namespace Cocorra.DAL.Migrations
                     b.ToTable("SystemLogs");
                 });
 
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoom", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CloseReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ClosesAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ConfigVersion")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.PrimitiveCollection<string>("DiscussionPrompts")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("HistoryClearedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("NextRotationAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("OpensAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("OverflowIndex")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ParentRoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("TopicPool")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("TopicRotationIndex")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("UpdateAt");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentRoomId");
+
+                    b.HasIndex("ScheduleId");
+
+                    b.HasIndex("Status", "OpensAt");
+
+                    b.ToTable("TextRooms");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomGlobalSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("AllowModeratorsToManageRooms")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("DefaultMessageRetentionHours")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReportContextMessagesAfter")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReportContextMessagesBefore")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UpdatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TextRoomGlobalSettings");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DeletedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsMasked")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsReported")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("SenderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TextRoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SenderId");
+
+                    b.HasIndex("IsReported", "CreatedAt");
+
+                    b.HasIndex("TextRoomId", "Id");
+
+                    b.ToTable("TextRoomMessages");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomParticipant", b =>
+                {
+                    b.Property<Guid>("TextRoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("FirstJoinedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsKicked")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("KickedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("KickedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("MutedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("MutedUntil")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("TextRoomId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("TextRoomParticipants");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ClosePreviousOnSpawn")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastSpawnAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<DateTime>("NextSpawnAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("NextTopicIndex")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SpawnEveryMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TopicPool")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("UpdateAt");
+
+                    b.Property<int?>("WindowEndMinuteOfDay")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WindowStartMinuteOfDay")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsEnabled", "NextSpawnAt");
+
+                    b.ToTable("TextRoomSchedules");
+                });
+
             modelBuilder.Entity("Cocorra.DAL.Models.TopicVote", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -1386,6 +1729,64 @@ namespace Cocorra.DAL.Migrations
                     b.HasIndex("RoomId", "EventType", "OccurredAtUtc");
 
                     b.ToTable("UserEvents");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.WordDictionaryEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Action")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("MatchType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NormalizedTerm")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Term")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("UpdateAt");
+
+                    b.Property<Guid?>("UpdatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("NormalizedTerm", "MatchType")
+                        .IsUnique();
+
+                    b.ToTable("WordDictionaryEntries");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
@@ -1596,6 +1997,11 @@ namespace Cocorra.DAL.Migrations
                         .WithMany()
                         .HasForeignKey("ReportedRoomId");
 
+                    b.HasOne("Cocorra.DAL.Models.TextRoom", "ReportedTextRoom")
+                        .WithMany()
+                        .HasForeignKey("ReportedTextRoomId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("Cocorra.DAL.Models.ApplicationUser", "ReportedUser")
                         .WithMany()
                         .HasForeignKey("ReportedUserId")
@@ -1609,9 +2015,22 @@ namespace Cocorra.DAL.Migrations
 
                     b.Navigation("ReportedRoom");
 
+                    b.Navigation("ReportedTextRoom");
+
                     b.Navigation("ReportedUser");
 
                     b.Navigation("Reporter");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.ReportMessageContextEntry", b =>
+                {
+                    b.HasOne("Cocorra.DAL.Models.Report", "Report")
+                        .WithMany("MessageContext")
+                        .HasForeignKey("ReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Report");
                 });
 
             modelBuilder.Entity("Cocorra.DAL.Models.RoleDisplayName", b =>
@@ -1763,6 +2182,248 @@ namespace Cocorra.DAL.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoom", b =>
+                {
+                    b.OwnsOne("Cocorra.DAL.Models.TextRoomSettings", "Settings", b1 =>
+                        {
+                            b1.Property<Guid>("TextRoomId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<bool>("AllowPrivateChatFromRoom")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("bit")
+                                .HasDefaultValue(true);
+
+                            b1.Property<bool>("AutoOverflowEnabled")
+                                .HasColumnType("bit");
+
+                            b1.Property<bool>("ClearHistoryOnRotate")
+                                .HasColumnType("bit");
+
+                            b1.Property<int?>("DurationMinutes")
+                                .HasColumnType("int");
+
+                            b1.Property<bool>("IsAlwaysOn")
+                                .HasColumnType("bit");
+
+                            b1.Property<int>("MaxMessageLength")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("int")
+                                .HasDefaultValue(500);
+
+                            b1.Property<int?>("MaxOverflowInstances")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("MaxParticipants")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("MessageRetentionHours")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("OverflowTriggerCount")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("ReportContextMessagesAfter")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("ReportContextMessagesBefore")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("RotateTopicEveryMinutes")
+                                .HasColumnType("int");
+
+                            b1.Property<bool>("ShowOnlineCountToUsers")
+                                .HasColumnType("bit");
+
+                            b1.Property<int>("SlowModeSeconds")
+                                .HasColumnType("int");
+
+                            b1.HasKey("TextRoomId");
+
+                            b1.ToTable("TextRooms");
+
+                            b1.WithOwner()
+                                .HasForeignKey("TextRoomId");
+                        });
+
+                    b.Navigation("Settings")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomGlobalSettings", b =>
+                {
+                    b.OwnsOne("Cocorra.DAL.Models.TextRoomSettings", "Defaults", b1 =>
+                        {
+                            b1.Property<int>("TextRoomGlobalSettingsId")
+                                .HasColumnType("int");
+
+                            b1.Property<bool>("AllowPrivateChatFromRoom")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("bit")
+                                .HasDefaultValue(true);
+
+                            b1.Property<bool>("AutoOverflowEnabled")
+                                .HasColumnType("bit");
+
+                            b1.Property<bool>("ClearHistoryOnRotate")
+                                .HasColumnType("bit");
+
+                            b1.Property<int?>("DurationMinutes")
+                                .HasColumnType("int");
+
+                            b1.Property<bool>("IsAlwaysOn")
+                                .HasColumnType("bit");
+
+                            b1.Property<int>("MaxMessageLength")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("int")
+                                .HasDefaultValue(500);
+
+                            b1.Property<int?>("MaxOverflowInstances")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("MaxParticipants")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("MessageRetentionHours")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("OverflowTriggerCount")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("ReportContextMessagesAfter")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("ReportContextMessagesBefore")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("RotateTopicEveryMinutes")
+                                .HasColumnType("int");
+
+                            b1.Property<bool>("ShowOnlineCountToUsers")
+                                .HasColumnType("bit");
+
+                            b1.Property<int>("SlowModeSeconds")
+                                .HasColumnType("int");
+
+                            b1.HasKey("TextRoomGlobalSettingsId");
+
+                            b1.ToTable("TextRoomGlobalSettings");
+
+                            b1.WithOwner()
+                                .HasForeignKey("TextRoomGlobalSettingsId");
+                        });
+
+                    b.Navigation("Defaults")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomMessage", b =>
+                {
+                    b.HasOne("Cocorra.DAL.Models.ApplicationUser", "Sender")
+                        .WithMany()
+                        .HasForeignKey("SenderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cocorra.DAL.Models.TextRoom", "TextRoom")
+                        .WithMany()
+                        .HasForeignKey("TextRoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Sender");
+
+                    b.Navigation("TextRoom");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomParticipant", b =>
+                {
+                    b.HasOne("Cocorra.DAL.Models.TextRoom", "TextRoom")
+                        .WithMany()
+                        .HasForeignKey("TextRoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cocorra.DAL.Models.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("TextRoom");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.TextRoomSchedule", b =>
+                {
+                    b.OwnsOne("Cocorra.DAL.Models.TextRoomSettings", "Settings", b1 =>
+                        {
+                            b1.Property<Guid>("TextRoomScheduleId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<bool>("AllowPrivateChatFromRoom")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("bit")
+                                .HasDefaultValue(true);
+
+                            b1.Property<bool>("AutoOverflowEnabled")
+                                .HasColumnType("bit");
+
+                            b1.Property<bool>("ClearHistoryOnRotate")
+                                .HasColumnType("bit");
+
+                            b1.Property<int?>("DurationMinutes")
+                                .HasColumnType("int");
+
+                            b1.Property<bool>("IsAlwaysOn")
+                                .HasColumnType("bit");
+
+                            b1.Property<int>("MaxMessageLength")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("int")
+                                .HasDefaultValue(500);
+
+                            b1.Property<int?>("MaxOverflowInstances")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("MaxParticipants")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("MessageRetentionHours")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("OverflowTriggerCount")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("ReportContextMessagesAfter")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("ReportContextMessagesBefore")
+                                .HasColumnType("int");
+
+                            b1.Property<int?>("RotateTopicEveryMinutes")
+                                .HasColumnType("int");
+
+                            b1.Property<bool>("ShowOnlineCountToUsers")
+                                .HasColumnType("bit");
+
+                            b1.Property<int>("SlowModeSeconds")
+                                .HasColumnType("int");
+
+                            b1.HasKey("TextRoomScheduleId");
+
+                            b1.ToTable("TextRoomSchedules");
+
+                            b1.WithOwner()
+                                .HasForeignKey("TextRoomScheduleId");
+                        });
+
+                    b.Navigation("Settings")
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Cocorra.DAL.Models.TopicVote", b =>
                 {
                     b.HasOne("Cocorra.DAL.Models.RoomTopicRequest", "TopicRequest")
@@ -1881,6 +2542,11 @@ namespace Cocorra.DAL.Migrations
             modelBuilder.Entity("Cocorra.DAL.Models.BlockedDevices", b =>
                 {
                     b.Navigation("UserBlocks");
+                });
+
+            modelBuilder.Entity("Cocorra.DAL.Models.Report", b =>
+                {
+                    b.Navigation("MessageContext");
                 });
 
             modelBuilder.Entity("Cocorra.DAL.Models.Room", b =>

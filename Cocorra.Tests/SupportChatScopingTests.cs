@@ -1,3 +1,4 @@
+using Cocorra.DAL.DTOS.ReportDto;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -815,6 +816,10 @@ public class SupportChatScopingTests : IDisposable
         public Task AddReportAsync(Report report) => _inner.AddReportAsync(report);
         public Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(ReportCategory? category, string? status, int pageNumber, int pageSize, bool excludeAdmins = false) =>
             _inner.GetPagedReportsAsync(category, status, pageNumber, pageSize, excludeAdmins);
+        public Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(ReportListQuery query, bool excludeAdmins) =>
+            _inner.GetPagedReportsAsync(query, excludeAdmins);
+        public Task<ReportContextSummary> GetReportContextSummaryAsync(IReadOnlyCollection<Guid> reportIds, IReadOnlyCollection<long> textRoomMessageIds) =>
+            _inner.GetReportContextSummaryAsync(reportIds, textRoomMessageIds);
         public Task<Report?> GetReportByIdAsync(Guid reportId) => _inner.GetReportByIdAsync(reportId);
         public Task<Report?> GetReportDetailsByIdAsync(Guid reportId) => _inner.GetReportDetailsByIdAsync(reportId);
         public Task<Guid?> GetRoomHostIdAsync(Guid roomId) => _inner.GetRoomHostIdAsync(roomId);

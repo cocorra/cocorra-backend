@@ -19,5 +19,10 @@ namespace Cocorra.DAL.Models
 
         public bool IsRead { get; set; } = false;
 
+        /// <summary>The audio room the message was sent from, when it was sent from one.</summary>
+        public Guid? OriginRoomId { get; set; }
+
+        /// <summary>The text room the message was sent from, when it was sent from one.</summary>
+        public Guid? OriginTextRoomId { get; set; }
     }
 }

@@ -159,6 +159,7 @@ public class RoomHostAuditTests : IDisposable
             new RoomRepository(db),
             new Mock<IRoomService>().Object,
             new Mock<IChatService>().Object,
+            new Mock<Cocorra.BLL.Services.ChatService.IDirectMessageNotifier>().Object,
             _liveKitServiceMock.Object,
             Options.Create(_liveKitSettings),
             _eventTrackerMock.Object,

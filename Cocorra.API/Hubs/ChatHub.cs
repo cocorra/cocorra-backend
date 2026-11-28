@@ -9,10 +9,12 @@ namespace Cocorra.API.Hubs
     public class ChatHub : Hub
     {
         private readonly IChatService _chatService;
+        private readonly IDirectMessageNotifier _dmNotifier;
 
-        public ChatHub(IChatService chatService)
+        public ChatHub(IChatService chatService, IDirectMessageNotifier dmNotifier)
         {
             _chatService = chatService;
+            _dmNotifier = dmNotifier;
         }
 
         public async Task SendMessage(string receiverIdString, string content)
@@ -42,11 +44,7 @@ namespace Cocorra.API.Hubs
                     return;
                 }
 
-                var messageDto = result.Data;
-
-                await Clients.User(receiverIdString).SendAsync("ReceiveMessage", messageDto);
-
-                await Clients.Caller.SendAsync("MessageSent", messageDto);
+                await _dmNotifier.DeliverAsync(result.Data!);
             }
             catch (Exception)
             {

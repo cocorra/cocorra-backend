@@ -1,3 +1,4 @@
+using Cocorra.DAL.DTOS.ReportDto;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -6,11 +7,17 @@ using Cocorra.DAL.Models;
 
 namespace Cocorra.DAL.Repository.SupportRepository
 {
+    public sealed record ReportContextSummary(
+        HashSet<Guid> ReportIdsWithContext,
+        Dictionary<long, int> SameMessageUserReportCounts);
+
     public interface ISupportRepository
     {
         Task AddTicketAsync(SupportTicket ticket);
         Task AddReportAsync(Report report);
         Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(ReportCategory? category, string? status, int pageNumber, int pageSize, bool excludeAdmins = false);
+        Task<(int TotalCount, List<Report> Items)> GetPagedReportsAsync(ReportListQuery query, bool excludeAdmins);
+        Task<ReportContextSummary> GetReportContextSummaryAsync(IReadOnlyCollection<Guid> reportIds, IReadOnlyCollection<long> textRoomMessageIds);
         Task<Report?> GetReportByIdAsync(Guid reportId);
         Task<Report?> GetReportDetailsByIdAsync(Guid reportId);
         Task<Guid?> GetRoomHostIdAsync(Guid roomId);
